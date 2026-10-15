@@ -1,0 +1,42 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: gostream
+      MYSQL_USER: gostream
+      MYSQL_PASSWORD: gostream-local
+      MYSQL_ROOT_PASSWORD: root-local-only
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -ugostream -pgostream-local --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: .
+    environment:
+      ADDR: :8080
+      DB_DRIVER: mysql
+      DB_DSN: gostream:gostream-local@tcp(mysql:3306)/gostream?charset=utf8mb4&parseTime=True&loc=Local
+      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deploy}
+      MEDIA_DIR: /app/data/media
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - media_data:/app/data/media
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  mysql_data:
+  media_data:
