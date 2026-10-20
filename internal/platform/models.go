@@ -3,13 +3,14 @@ package platform
 import "time"
 
 type User struct {
-	ID           uint      `json:"id" gorm:"primaryKey"`
-	Username     string    `json:"username" gorm:"size:32;uniqueIndex;not null"`
-	PasswordHash string    `json:"-" gorm:"not null"`
-	Nickname     string    `json:"nickname" gorm:"size:48;not null"`
-	Bio          string    `json:"bio" gorm:"size:280"`
-	AvatarURL    string    `json:"avatar_url" gorm:"size:512"`
-	CreatedAt    time.Time `json:"created_at"`
+	ID           uint       `json:"id" gorm:"primaryKey"`
+	Username     string     `json:"username" gorm:"size:32;uniqueIndex;not null"`
+	PasswordHash string     `json:"-" gorm:"not null"`
+	Nickname     string     `json:"nickname" gorm:"size:48;not null"`
+	Bio          string     `json:"bio" gorm:"size:280"`
+	AvatarURL    string     `json:"avatar_url" gorm:"size:512"`
+	LastSeenAt   *time.Time `json:"last_seen_at,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
 }
 
 type Video struct {
@@ -26,6 +27,38 @@ type Video struct {
 	FavoriteCount int64     `json:"favorite_count"`
 	PlayCount     int64     `json:"play_count"`
 	CreatedAt     time.Time `json:"created_at" gorm:"index:idx_video_feed,priority:2,sort:desc;index:idx_video_author,priority:2,sort:desc"`
+}
+
+// MediaAsset records an uploaded file and the account allowed to publish it.
+type MediaAsset struct {
+	ID        uint   `gorm:"primaryKey"`
+	OwnerID   uint   `gorm:"index;not null"`
+	URL       string `gorm:"size:512;uniqueIndex;not null"`
+	Kind      string `gorm:"size:16;not null"`
+	Size      int64  `gorm:"not null"`
+	CreatedAt time.Time
+}
+
+type UploadSession struct {
+	ID         string     `json:"id" gorm:"primaryKey;size:32"`
+	OwnerID    uint       `json:"-" gorm:"index;not null"`
+	Ext        string     `json:"-" gorm:"size:8;not null"`
+	Size       int64      `json:"size" gorm:"not null"`
+	SHA256     string     `json:"-" gorm:"size:64"`
+	ChunkSize  int64      `json:"chunk_size" gorm:"not null"`
+	Status     string     `json:"status" gorm:"size:16;not null;default:open"`
+	LeaseUntil time.Time  `json:"-"`
+	CleanedAt  *time.Time `json:"-"`
+	ExpiresAt  time.Time  `json:"expires_at" gorm:"index"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
+type UploadChunk struct {
+	ID        uint   `gorm:"primaryKey"`
+	SessionID string `gorm:"uniqueIndex:ux_upload_chunk,priority:1;size:32;not null"`
+	Index     int    `gorm:"uniqueIndex:ux_upload_chunk,priority:2;not null"`
+	Size      int64  `gorm:"not null"`
+	SHA256    string `gorm:"size:64;not null"`
 }
 
 type Follow struct {
@@ -70,10 +103,40 @@ type ChatMessage struct {
 	ID          uint       `json:"id" gorm:"primaryKey"`
 	ClientID    string     `json:"client_id" gorm:"uniqueIndex:ux_message_client,priority:1;size:80;not null"`
 	SenderID    uint       `json:"sender_id" gorm:"uniqueIndex:ux_message_client,priority:2;index:idx_message_thread,priority:1;not null"`
-	RecipientID uint       `json:"recipient_id" gorm:"index:idx_message_thread,priority:2;not null"`
+	RecipientID uint       `json:"recipient_id" gorm:"index:idx_message_thread,priority:2;index:idx_message_unacked,priority:1;not null"`
 	Body        string     `json:"body" gorm:"size:4000;not null"`
 	CreatedAt   time.Time  `json:"created_at" gorm:"index:idx_message_thread,priority:3"`
-	AckedAt     *time.Time `json:"acked_at"`
+	AckedAt     *time.Time `json:"acked_at" gorm:"index:idx_message_unacked,priority:2"`
+}
+
+type ChatGroup struct {
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	OwnerID   uint      `json:"owner_id" gorm:"index;not null"`
+	Name      string    `json:"name" gorm:"size:80;not null"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+type GroupMember struct {
+	ID       uint      `gorm:"primaryKey"`
+	GroupID  uint      `gorm:"uniqueIndex:ux_group_member,priority:1;not null"`
+	UserID   uint      `gorm:"uniqueIndex:ux_group_member,priority:2;index;not null"`
+	JoinedAt time.Time `gorm:"not null"`
+}
+
+type GroupMessage struct {
+	ID        uint      `json:"id" gorm:"primaryKey"`
+	GroupID   uint      `json:"group_id" gorm:"index:idx_group_message,priority:1;not null"`
+	SenderID  uint      `json:"sender_id" gorm:"uniqueIndex:ux_group_client,priority:1;not null"`
+	ClientID  string    `json:"client_id" gorm:"uniqueIndex:ux_group_client,priority:2;size:80;not null"`
+	Body      string    `json:"body" gorm:"size:4000;not null"`
+	CreatedAt time.Time `json:"created_at" gorm:"index:idx_group_message,priority:2"`
+}
+
+type GroupRead struct {
+	ID        uint `gorm:"primaryKey"`
+	GroupID   uint `gorm:"uniqueIndex:ux_group_read,priority:1;not null"`
+	UserID    uint `gorm:"uniqueIndex:ux_group_read,priority:2;not null"`
+	LastAckID uint `gorm:"not null;default:0"`
 }
 
 type OutboxEvent struct {
@@ -84,5 +147,7 @@ type OutboxEvent struct {
 	Attempts    int       `gorm:"not null;default:0"`
 	AvailableAt time.Time `gorm:"index"`
 	PublishedAt *time.Time
+	DeadAt      *time.Time
+	LastError   string `gorm:"size:500"`
 	CreatedAt   time.Time
 }

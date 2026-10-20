@@ -48,10 +48,34 @@ func (s *Server) feed(c *gin.Context) {
 		limit = 50
 	}
 	scene := c.DefaultQuery("scene", "timeline")
-	cur, err := decodeCursor(c.Query("cursor"))
+	if scene != "timeline" && scene != "following" && scene != "recommend" && scene != "hot" {
+		respondError(c, 400, "scene must be timeline, following, recommend, or hot")
+		return
+	}
+	rawCursor := c.Query("cursor")
+	if len(rawCursor) > 512 {
+		respondError(c, 400, "invalid cursor")
+		return
+	}
+	cur, err := decodeCursor(rawCursor)
 	if err != nil {
 		respondError(c, 400, "invalid cursor")
 		return
+	}
+	cacheVersion := ""
+	if s.cache != nil && uid(c) == 0 && scene != "following" {
+		cached, version, err := s.cache.load(c.Request.Context(), scene, limit, rawCursor)
+		if err != nil {
+			s.metrics.feedCache.WithLabelValues("error").Inc()
+		} else {
+			cacheVersion = version
+			if cached != nil {
+				s.metrics.feedCache.WithLabelValues("hit").Inc()
+				c.Data(200, "application/json; charset=utf-8", cached)
+				return
+			}
+			s.metrics.feedCache.WithLabelValues("miss").Inc()
+		}
 	}
 	q := s.DB.Model(&Video{}).Preload("Author").Where("videos.status = ?", "published")
 	cursorTime := time.Unix(0, cur.Created).UTC()
@@ -123,5 +147,15 @@ func (s *Server) feed(c *gin.Context) {
 		last := items[len(items)-1]
 		next = encodeCursor(feedCursor{Created: last.CreatedAt.UnixNano(), ID: last.ID, Score: last.LikeCount*3 + last.CommentCount*5 + last.FavoriteCount*4})
 	}
-	c.JSON(200, gin.H{"scene": scene, "items": entries, "next_cursor": next, "has_more": more})
+	response := gin.H{"scene": scene, "items": entries, "next_cursor": next, "has_more": more}
+	if cacheVersion != "" {
+		if data, err := json.Marshal(response); err == nil {
+			if err := s.cache.store(c.Request.Context(), cacheVersion, scene, limit, rawCursor, data); err != nil {
+				s.metrics.feedCache.WithLabelValues("error").Inc()
+			}
+			c.Data(200, "application/json; charset=utf-8", data)
+			return
+		}
+	}
+	c.JSON(200, response)
 }

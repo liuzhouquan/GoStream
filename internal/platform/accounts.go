@@ -1,11 +1,15 @@
 package platform
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 )
+
+var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,32}$`)
 
 func (s *Server) register(c *gin.Context) {
 	var in struct {
@@ -19,8 +23,8 @@ func (s *Server) register(c *gin.Context) {
 	}
 	in.Username = strings.ToLower(strings.TrimSpace(in.Username))
 	in.Nickname = strings.TrimSpace(in.Nickname)
-	if len(in.Username) < 3 || len(in.Username) > 32 || len(in.Password) < 8 || len(in.Password) > 72 {
-		respondError(c, 400, "username must be 3-32 characters and password 8-72 characters")
+	if !usernamePattern.MatchString(in.Username) || len(in.Password) < 8 || len(in.Password) > 72 {
+		respondError(c, 400, "username must use 3-32 lowercase letters, digits or underscores; password must be 8-72 bytes")
 		return
 	}
 	if in.Nickname == "" {
@@ -106,9 +110,25 @@ func (s *Server) updateMe(c *gin.Context) {
 		updates["bio"] = strings.TrimSpace(*in.Bio)
 	}
 	if in.AvatarURL != nil {
+		if *in.AvatarURL != "" && !s.ownsMedia(uid(c), *in.AvatarURL, "image") {
+			respondError(c, 400, "avatar must be an image uploaded by this account")
+			return
+		}
 		updates["avatar_url"] = *in.AvatarURL
 	}
-	s.DB.Model(&User{}).Where("id = ?", uid(c)).Updates(updates)
+	if len(updates) == 0 {
+		respondError(c, 400, "no profile fields supplied")
+		return
+	}
+	if err := s.DB.Model(&User{}).Where("id = ?", uid(c)).Updates(updates).Error; err != nil {
+		respondError(c, 500, "could not update profile")
+		return
+	}
+	if _, nicknameChanged := updates["nickname"]; nicknameChanged {
+		s.invalidateFeed(c.Request.Context())
+	} else if _, avatarChanged := updates["avatar_url"]; avatarChanged {
+		s.invalidateFeed(c.Request.Context())
+	}
 	s.me(c)
 }
 
@@ -119,8 +139,25 @@ func (s *Server) getUser(c *gin.Context) {
 		return
 	}
 	var videos, followers, following int64
-	s.DB.Model(&Video{}).Where("author_id = ? AND status = ?", u.ID, "published").Count(&videos)
-	s.DB.Model(&Follow{}).Where("followee_id = ?", u.ID).Count(&followers)
-	s.DB.Model(&Follow{}).Where("follower_id = ?", u.ID).Count(&following)
+	if s.DB.Model(&Video{}).Where("author_id = ? AND status = ?", u.ID, "published").Count(&videos).Error != nil ||
+		s.DB.Model(&Follow{}).Where("followee_id = ?", u.ID).Count(&followers).Error != nil ||
+		s.DB.Model(&Follow{}).Where("follower_id = ?", u.ID).Count(&following).Error != nil {
+		respondError(c, 500, "could not load profile statistics")
+		return
+	}
 	c.JSON(200, gin.H{"user": u, "video_count": videos, "follower_count": followers, "following_count": following})
+}
+
+func (s *Server) userPresence(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil || id == 0 {
+		respondError(c, 400, "invalid user id")
+		return
+	}
+	var user User
+	if err := s.DB.Select("id", "last_seen_at").First(&user, id).Error; err != nil {
+		respondError(c, 404, "user not found")
+		return
+	}
+	c.JSON(200, gin.H{"user_id": user.ID, "online": s.Hub.online(user.ID), "last_seen_at": user.LastSeenAt})
 }

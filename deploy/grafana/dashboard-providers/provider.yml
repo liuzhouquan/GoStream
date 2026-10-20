@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: GoStream
+    orgId: 1
+    folder: GoStream
+    type: file
+    disableDeletion: true
+    editable: false
+    options:
+      path: /var/lib/grafana/dashboards

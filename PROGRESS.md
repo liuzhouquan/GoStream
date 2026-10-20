@@ -1,6 +1,6 @@
 # GoStream development progress
 
-Last updated: 2026-10-15
+Last updated: 2026-10-20
 
 ## Stage 0 — project foundation
 
@@ -11,21 +11,28 @@ Last updated: 2026-10-15
 - [x] Add API and schema docs, MIT licensing for new GoStream code, and tests for social and WebSocket flows.
 - [x] Verify startup with persistent SQLite and HTTP requests.
 - [x] Split handlers into feature source files and correct the equal-timestamp cursor edge case found by integration testing.
+- [x] Bind uploads to their owner, validate media content, and enforce author ownership for video editing/deletion.
+- [x] Add resumable 4 MiB chunk uploads, SHA256 integrity checks, session leases, and expired chunk cleanup; connect the web publisher.
+- [x] Add notification outbox processing with leasing, retry, and dead-letter state; add realtime notification events.
+- [x] Add offline message replay, unread paging, idempotent recipient ACK, and conflict checking for duplicate client IDs.
+- [x] Add group membership and owner permissions, group WebSocket messages, history paging, unread/read cursors, local presence and last-seen tracking; verify creation and persisted history in Chrome.
+- [x] Add database readiness, Prometheus metrics, an optional pprof listener, and Compose monitoring configuration.
+- [x] Add optional Redis caching for anonymous Feed pages, mutation-based version invalidation, fallback on Redis failure, and a regression test using a Redis-compatible test server.
 
 ## Stages
 
 1. Local runnable application: account/auth, media upload, videos, timeline/recommendation feeds, follows, interactions, comments, search, notifications, basic web client. **Implemented and locally verified.**
-2. Reliability: cursor and idempotency review, transactional outbox, retry/dead-letter handling, test hardening and API documentation. **In progress:** cursor and state idempotency are covered; API docs and integration tests exist; the outbox model is only reserved and has no delivery worker. The initial handlers still call GORM directly; splitting Domain/Application/Infrastructure layers remains.
-3. Feed scale: Redis page/card/stat caching, hybrid fanout and cache consistency.
-4. IM: WebSocket connection hub, message persistence, offline history and ACK are implemented for a single process. Group chat, online status, reconnect delivery protocol, and multi-instance broker adapter remain.
-5. Media pipeline: resumable multipart uploads, FFmpeg processing, MinIO adapter.
-6. Operations: a MySQL + API Compose profile and k6 starter script are present but not run here; Redis/RabbitMQ integration, metrics, dashboards, and a measured report remain.
+2. Reliability: cursor and idempotency review, transactional outbox, retry/dead-letter handling, test hardening and API documentation. **Partly implemented:** a database-backed outbox worker dispatches notifications and records dead letters. The initial handlers still call GORM directly; splitting Domain/Application/Infrastructure layers remains.
+3. Feed scale: short-lived Redis page caching and version invalidation are implemented. Per-video cards/stat caching, hybrid fanout, and MySQL/Redis load measurements remain.
+4. IM: Direct and group WebSocket messages, persistence, direct-message offline replay/ACK, group unread cursors, and local online presence are implemented for one process. Cross-device cursors, group replay push, and multi-instance routing remain.
+5. Media pipeline: local resumable upload and integrity checks are implemented. FFmpeg processing, thumbnail generation, and MinIO adapter remain.
+6. Operations: MySQL/API and optional Prometheus/Grafana Compose configuration, HTTP metrics, readiness, pprof, and a measured in-process benchmark are present. Docker and k6 are unavailable in this WSL environment, so container behavior and load-test results remain unverified.
 
 ## Verification ledger
 
-Commands run on 2026-10-15 using Go 1.27.2:
+Commands run through 2026-10-20 using Go 1.27.2:
 
-- `go test ./...` — passed, including account/video/feed/interaction/follow/notification integration and WebSocket persistence, delivery, and ACK coverage.
+- `go test ./...` — passed, including account/video/feed/interaction/follow/notification, upload resume, outbox, direct/group messaging and presence coverage, plus Redis cache hit/invalidation/fallback checks using an in-process Redis-compatible test server.
 - `go vet ./...` — passed.
 - `go test -race ./...` — passed.
 - `node --check web/app.js` — passed.
@@ -33,7 +40,7 @@ Commands run on 2026-10-15 using Go 1.27.2:
 - Isolated end-to-end smoke run on `127.0.0.1:18080` — health 200, registration 201, publish 201, Feed 200 with the video, and login 200.
 - Browser automation opened the UI and confirmed its navigation and Feed structure render. Chinese glyphs are missing in this browser image due to current system font setup.
 - Mobile browser check at 390×844 confirmed both navigation groups render and the header avatar opens the login dialog. Chinese glyphs are missing in this browser image due to current system font setup.
-- Compose YAML parsed successfully; Docker Compose and FFmpeg were not run because Docker integration and FFmpeg are unavailable in this WSL environment.
+- Docker CLI reports Docker Desktop WSL integration is not enabled, so Compose and FFmpeg have not run here.
 - A same-timestamp keyset test caught and verified the UTC cursor comparison fix; a multipart test checks that upload names are generated server-side.
 
-No performance run has been made, so no QPS/P95 figures are claimed.
+`BenchmarkTimelineFeed1000` was run three times against a 1,000-video SQLite memory database: 358,682, 362,115, and 373,384 ns/op, with about 93 KB and 881 allocations per operation. These are in-process benchmark results, not QPS or P95 measurements. Details are in `docs/PERFORMANCE.md`.

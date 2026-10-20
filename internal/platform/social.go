@@ -1,12 +1,13 @@
 package platform
 
 import (
-	"errors"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	"gorm.io/gorm"
 	"strconv"
 	"strings"
+
+	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func (s *Server) follow(c *gin.Context) {
@@ -23,10 +24,10 @@ func (s *Server) follow(c *gin.Context) {
 	f := Follow{FollowerID: uid(c), FolloweeID: uint(target)}
 	key := fmt.Sprintf("follow:%d:%d", f.FollowerID, f.FolloweeID)
 	if err := s.DB.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where(Follow{FollowerID: f.FollowerID, FolloweeID: f.FolloweeID}).FirstOrCreate(&f).Error; err != nil {
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&f).Error; err != nil {
 			return err
 		}
-		return tx.Where("user_id = ? AND event_key = ?", f.FolloweeID, key).FirstOrCreate(&Notification{UserID: f.FolloweeID, EventKey: key, Kind: "follow", ActorID: f.FollowerID, Text: "started following you"}).Error
+		return enqueueNotification(tx, Notification{UserID: f.FolloweeID, EventKey: key, Kind: "follow", ActorID: f.FollowerID, Text: "started following you"})
 	}); err != nil {
 		respondError(c, 500, "could not follow user")
 		return
@@ -35,7 +36,10 @@ func (s *Server) follow(c *gin.Context) {
 }
 
 func (s *Server) unfollow(c *gin.Context) {
-	s.DB.Where("follower_id = ? AND followee_id = ?", uid(c), c.Param("id")).Delete(&Follow{})
+	if err := s.DB.Where("follower_id = ? AND followee_id = ?", uid(c), c.Param("id")).Delete(&Follow{}).Error; err != nil {
+		respondError(c, 500, "could not unfollow user")
+		return
+	}
 	c.JSON(200, gin.H{"following": false})
 }
 
@@ -68,45 +72,53 @@ func (s *Server) action(kind string, active bool) gin.HandlerFunc {
 			respondError(c, 404, "video not found")
 			return
 		}
-		var result bool
+		var changed bool
 		err := s.DB.Transaction(func(tx *gorm.DB) error {
-			var a VideoAction
-			e := tx.Where("user_id = ? AND video_id = ? AND kind = ?", uid(c), v.ID, kind).First(&a).Error
 			if active {
-				if errors.Is(e, gorm.ErrRecordNotFound) {
-					if e = tx.Create(&VideoAction{UserID: uid(c), VideoID: v.ID, Kind: kind}).Error; e != nil {
-						return e
-					}
-					result = true
-				} else if e == nil {
-					result = true
-				} else {
-					return e
+				res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&VideoAction{UserID: uid(c), VideoID: v.ID, Kind: kind})
+				if res.Error != nil {
+					return res.Error
 				}
+				changed = res.RowsAffected == 1
 			} else {
-				if e == nil {
-					if e = tx.Delete(&a).Error; e != nil {
-						return e
-					}
-				} else if !errors.Is(e, gorm.ErrRecordNotFound) {
-					return e
+				res := tx.Where("user_id = ? AND video_id = ? AND kind = ?", uid(c), v.ID, kind).Delete(&VideoAction{})
+				if res.Error != nil {
+					return res.Error
 				}
+				changed = res.RowsAffected == 1
+			}
+			if !changed {
+				return nil
 			}
 			column := "like_count"
 			if kind == "favorite" {
 				column = "favorite_count"
 			}
-			return tx.Model(&Video{}).Where("id = ?", v.ID).Update(column, gorm.Expr("(SELECT COUNT(*) FROM video_actions WHERE video_id = ? AND kind = ?) ", v.ID, kind)).Error
+			expression := gorm.Expr(column + " + 1")
+			if !active {
+				expression = gorm.Expr("CASE WHEN " + column + " > 0 THEN " + column + " - 1 ELSE 0 END")
+			}
+			updated := tx.Model(&Video{}).Where("id = ? AND status = ?", v.ID, "published").UpdateColumn(column, expression)
+			if updated.Error != nil {
+				return updated.Error
+			}
+			if updated.RowsAffected != 1 {
+				return gorm.ErrRecordNotFound
+			}
+			if active && v.AuthorID != uid(c) {
+				key := fmt.Sprintf("%s:%d:%d", kind, v.ID, uid(c))
+				return enqueueNotification(tx, Notification{UserID: v.AuthorID, EventKey: key, Kind: kind, ActorID: uid(c), VideoID: v.ID, Text: "interacted with your video"})
+			}
+			return nil
 		})
 		if err != nil {
 			respondError(c, 500, "could not update interaction")
 			return
 		}
-		if result && active && v.AuthorID != uid(c) {
-			key := fmt.Sprintf("%s:%d:%d", kind, v.ID, uid(c))
-			s.DB.Where("user_id = ? AND event_key = ?", v.AuthorID, key).FirstOrCreate(&Notification{UserID: v.AuthorID, EventKey: key, Kind: kind, ActorID: uid(c), VideoID: v.ID, Text: "interacted with your video"})
+		if changed {
+			s.invalidateFeed(c.Request.Context())
 		}
-		c.JSON(200, gin.H{"active": result})
+		c.JSON(200, gin.H{"active": active})
 	}
 }
 
@@ -146,7 +158,7 @@ func (s *Server) createComment(c *gin.Context) {
 		}
 		if v.AuthorID != uid(c) {
 			key := fmt.Sprintf("comment:%d", cm.ID)
-			if err := tx.Where("user_id = ? AND event_key = ?", v.AuthorID, key).FirstOrCreate(&Notification{UserID: v.AuthorID, EventKey: key, Kind: "comment", ActorID: uid(c), VideoID: v.ID, Text: in.Body}).Error; err != nil {
+			if err := enqueueNotification(tx, Notification{UserID: v.AuthorID, EventKey: key, Kind: "comment", ActorID: uid(c), VideoID: v.ID, Text: in.Body}); err != nil {
 				return err
 			}
 		}
@@ -155,6 +167,7 @@ func (s *Server) createComment(c *gin.Context) {
 		respondError(c, 500, "could not create comment")
 		return
 	}
+	s.invalidateFeed(c.Request.Context())
 	s.DB.Preload("User").First(&cm, cm.ID)
 	c.JSON(201, cm)
 }
@@ -171,7 +184,10 @@ func (s *Server) recordView(c *gin.Context) {
 		respondError(c, 404, "video not found")
 		return
 	}
-	s.DB.Model(&v).UpdateColumn("play_count", gorm.Expr("play_count + 1"))
+	if err := s.DB.Model(&v).UpdateColumn("play_count", gorm.Expr("play_count + 1")).Error; err != nil {
+		respondError(c, 500, "could not record view")
+		return
+	}
 	c.Status(204)
 }
 
@@ -184,7 +200,13 @@ func (s *Server) search(c *gin.Context) {
 	like := "%" + strings.ReplaceAll(strings.ReplaceAll(q, "%", "\\%"), "_", "\\_") + "%"
 	var users []User
 	var videos []Video
-	s.DB.Where("username LIKE ? OR nickname LIKE ?", like, like).Limit(20).Find(&users)
-	s.DB.Preload("Author").Where("status = ? AND (title LIKE ? OR description LIKE ?)", "published", like, like).Limit(30).Find(&videos)
+	if err := s.DB.Where("username LIKE ? OR nickname LIKE ?", like, like).Limit(20).Find(&users).Error; err != nil {
+		respondError(c, 500, "could not search users")
+		return
+	}
+	if err := s.DB.Preload("Author").Where("status = ? AND (title LIKE ? OR description LIKE ?)", "published", like, like).Limit(30).Find(&videos).Error; err != nil {
+		respondError(c, 500, "could not search videos")
+		return
+	}
 	c.JSON(200, gin.H{"users": users, "videos": videos})
 }

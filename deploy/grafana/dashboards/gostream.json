@@ -1,0 +1,40 @@
+{
+  "uid": "gostream-api",
+  "title": "GoStream API",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {
+      "id": 1, "title": "HTTP requests / second", "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "gostream-prometheus"},
+      "targets": [{"expr": "sum(rate(gostream_http_requests_total[5m]))", "legendFormat": "all routes", "refId": "A"}]
+    },
+    {
+      "id": 2, "title": "HTTP P95 by route", "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "gostream-prometheus"},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le, route) (rate(gostream_http_request_duration_seconds_bucket[5m])))", "legendFormat": "{{route}}", "refId": "A"}]
+    },
+    {
+      "id": 3, "title": "Outbox events / second", "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "gostream-prometheus"},
+      "targets": [{"expr": "sum by (result) (rate(gostream_outbox_events_total[5m]))", "legendFormat": "{{result}}", "refId": "A"}]
+    },
+    {
+      "id": 4, "title": "WebSocket connections", "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "gostream-prometheus"},
+      "targets": [{"expr": "gostream_websocket_connections", "legendFormat": "local connections", "refId": "A"}]
+    },
+    {
+      "id": 5, "title": "Anonymous Feed cache / second", "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+      "datasource": {"type": "prometheus", "uid": "gostream-prometheus"},
+      "targets": [{"expr": "sum by (result) (rate(gostream_feed_cache_total[5m]))", "legendFormat": "{{result}}", "refId": "A"}]
+    }
+  ]
+}

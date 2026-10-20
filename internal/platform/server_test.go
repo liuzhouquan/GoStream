@@ -2,9 +2,13 @@ package platform
 
 import (
 	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
+	"image"
+	"image/png"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -27,7 +31,7 @@ func testServer(t *testing.T) (*Server, *gin.Engine, *gorm.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = db.AutoMigrate(&User{}, &Video{}, &Follow{}, &VideoAction{}, &Comment{}, &Notification{}, &ChatMessage{}, &OutboxEvent{}); err != nil {
+	if err = db.AutoMigrate(&User{}, &MediaAsset{}, &UploadSession{}, &UploadChunk{}, &Video{}, &Follow{}, &VideoAction{}, &Comment{}, &Notification{}, &ChatMessage{}, &ChatGroup{}, &GroupMember{}, &GroupMessage{}, &GroupRead{}, &OutboxEvent{}); err != nil {
 		t.Fatal(err)
 	}
 	s := NewServer(db, "test-signing-secret-at-least-32-bytes", t.TempDir())
@@ -70,14 +74,57 @@ func registerTestUser(t *testing.T, h http.Handler, username string) (uint, stri
 	return out.User.ID, out.Token
 }
 
+func uploadTestMedia(t *testing.T, h http.Handler, token, filename string, payload []byte) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	part, err := form.CreateFormFile("file", filename)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = part.Write(payload); err != nil {
+		t.Fatal(err)
+	}
+	if err = form.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/uploads", &body)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	return res
+}
+
+func putTestChunk(h http.Handler, token, sessionID string, index int, payload []byte) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/uploads/sessions/%s/chunks/%d", sessionID, index), bytes.NewReader(payload))
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/octet-stream")
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	return res
+}
+
+var sampleMP4 = []byte{0, 0, 0, 24, 'f', 't', 'y', 'p', 'i', 's', 'o', 'm', 0, 0, 0, 0, 'i', 's', 'o', 'm', 'm', 'p', '4', '2'}
+
 func TestAccountVideoFeedInteractionFlow(t *testing.T) {
 	_, h, db := testServer(t)
 	authorID, authorToken := registerTestUser(t, h, "creator")
 	viewerID, viewerToken := registerTestUser(t, h, "viewer")
+	upload := uploadTestMedia(t, h, authorToken, "clip.mp4", sampleMP4)
+	if upload.Code != http.StatusCreated {
+		t.Fatalf("upload status %d: %s", upload.Code, upload.Body.String())
+	}
+	var uploaded struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(upload.Body.Bytes(), &uploaded); err != nil {
+		t.Fatal(err)
+	}
 	if r := request(t, h, http.MethodPost, "/api/videos", "", map[string]string{"title": "blocked", "media_url": "/media/blocked.mp4"}); r.Code != http.StatusUnauthorized {
 		t.Fatalf("anonymous publish status %d", r.Code)
 	}
-	created := request(t, h, http.MethodPost, "/api/videos", authorToken, map[string]string{"title": "A real clip", "description": "intro", "media_url": "/media/clip.mp4"})
+	created := request(t, h, http.MethodPost, "/api/videos", authorToken, map[string]string{"title": "A real clip", "description": "intro", "media_url": uploaded.URL})
 	if created.Code != http.StatusCreated {
 		t.Fatalf("publish status %d: %s", created.Code, created.Body.String())
 	}
@@ -198,23 +245,7 @@ func TestTimelineCursorUsesIDForEqualTimestamps(t *testing.T) {
 func TestUploadWritesGeneratedMediaFile(t *testing.T) {
 	s, h, _ := testServer(t)
 	_, token := registerTestUser(t, h, "uploader")
-	var body bytes.Buffer
-	form := multipart.NewWriter(&body)
-	part, err := form.CreateFormFile("file", "../../unsafe.mp4")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = io.WriteString(part, "media payload"); err != nil {
-		t.Fatal(err)
-	}
-	if err = form.Close(); err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/api/uploads", &body)
-	req.Header.Set("Content-Type", form.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+token)
-	res := httptest.NewRecorder()
-	h.ServeHTTP(res, req)
+	res := uploadTestMedia(t, h, token, "../../unsafe.mp4", sampleMP4)
 	if res.Code != http.StatusCreated {
 		t.Fatalf("upload status %d: %s", res.Code, res.Body.String())
 	}
@@ -222,14 +253,291 @@ func TestUploadWritesGeneratedMediaFile(t *testing.T) {
 		URL      string `json:"url"`
 		Filename string `json:"filename"`
 	}
-	if err = json.Unmarshal(res.Body.Bytes(), &out); err != nil {
+	if err := json.Unmarshal(res.Body.Bytes(), &out); err != nil {
 		t.Fatal(err)
 	}
 	if filepath.Base(out.Filename) != out.Filename || out.Filename == "unsafe.mp4" {
 		t.Fatalf("server did not generate a safe name: %q", out.Filename)
 	}
-	if _, err = os.Stat(filepath.Join(s.MediaDir, out.Filename)); err != nil {
+	if _, err := os.Stat(filepath.Join(s.MediaDir, out.Filename)); err != nil {
 		t.Fatalf("uploaded file was not written to media storage: %v", err)
+	}
+}
+
+func TestVideoPublicationRequiresOwnedUploadedVideo(t *testing.T) {
+	_, h, _ := testServer(t)
+	_, ownerToken := registerTestUser(t, h, "assetowner")
+	_, otherToken := registerTestUser(t, h, "assetother")
+	for _, payload := range [][]byte{[]byte("plain text"), []byte("<script>alert(1)</script>")} {
+		if res := uploadTestMedia(t, h, ownerToken, "fake.mp4", payload); res.Code != http.StatusBadRequest {
+			t.Fatalf("spoofed upload status %d: %s", res.Code, res.Body.String())
+		}
+	}
+	upload := uploadTestMedia(t, h, ownerToken, "clip.mp4", sampleMP4)
+	if upload.Code != http.StatusCreated {
+		t.Fatalf("upload: %s", upload.Body.String())
+	}
+	var asset struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(upload.Body.Bytes(), &asset); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ token, url string }{
+		{ownerToken, "https://example.com/video.mp4"},
+		{ownerToken, "/media/other.mp4"},
+		{otherToken, asset.URL},
+	} {
+		res := request(t, h, http.MethodPost, "/api/videos", tc.token, map[string]string{"title": "unowned", "media_url": tc.url})
+		if res.Code != http.StatusBadRequest {
+			t.Fatalf("unowned URL %q: %d %s", tc.url, res.Code, res.Body.String())
+		}
+	}
+}
+
+func TestVideoEditAndAvatarRequireOwnedMedia(t *testing.T) {
+	_, h, _ := testServer(t)
+	_, authorToken := registerTestUser(t, h, "editorauthor")
+	_, otherToken := registerTestUser(t, h, "editorother")
+	videoUpload := uploadTestMedia(t, h, authorToken, "clip.mp4", sampleMP4)
+	if videoUpload.Code != http.StatusCreated {
+		t.Fatalf("video upload: %d %s", videoUpload.Code, videoUpload.Body.String())
+	}
+	var media struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(videoUpload.Body.Bytes(), &media); err != nil {
+		t.Fatal(err)
+	}
+	var pngBytes bytes.Buffer
+	if err := png.Encode(&pngBytes, image.NewRGBA(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	imageUpload := uploadTestMedia(t, h, authorToken, "cover.png", pngBytes.Bytes())
+	if imageUpload.Code != http.StatusCreated {
+		t.Fatalf("image upload: %d %s", imageUpload.Code, imageUpload.Body.String())
+	}
+	var cover struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(imageUpload.Body.Bytes(), &cover); err != nil {
+		t.Fatal(err)
+	}
+	created := request(t, h, http.MethodPost, "/api/videos", authorToken, map[string]string{"title": "original", "media_url": media.URL})
+	if created.Code != http.StatusCreated {
+		t.Fatalf("publish: %d %s", created.Code, created.Body.String())
+	}
+	var video Video
+	if err := json.Unmarshal(created.Body.Bytes(), &video); err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/api/videos/%d", video.ID)
+	if r := request(t, h, http.MethodPatch, path, otherToken, map[string]string{"title": "taken"}); r.Code != http.StatusForbidden {
+		t.Fatalf("foreign edit: %d", r.Code)
+	}
+	if r := request(t, h, http.MethodPatch, path, authorToken, map[string]string{"cover_url": media.URL}); r.Code != http.StatusBadRequest {
+		t.Fatalf("video as cover: %d", r.Code)
+	}
+	if r := request(t, h, http.MethodPatch, path, authorToken, map[string]string{"title": "updated", "cover_url": cover.URL}); r.Code != http.StatusOK || !bytes.Contains(r.Body.Bytes(), []byte(`"title":"updated"`)) {
+		t.Fatalf("valid edit: %d %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodPatch, "/api/users/me", otherToken, map[string]string{"avatar_url": cover.URL}); r.Code != http.StatusBadRequest {
+		t.Fatalf("foreign avatar: %d", r.Code)
+	}
+	if r := request(t, h, http.MethodPatch, "/api/users/me", authorToken, map[string]string{"avatar_url": cover.URL}); r.Code != http.StatusOK {
+		t.Fatalf("owned avatar: %d %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodDelete, path, authorToken, nil); r.Code != http.StatusNoContent {
+		t.Fatalf("delete: %d", r.Code)
+	}
+	if r := request(t, h, http.MethodPatch, path, authorToken, map[string]string{"title": "revived"}); r.Code != http.StatusNotFound {
+		t.Fatalf("edit deleted video: %d", r.Code)
+	}
+}
+
+func TestResumableUploadOutOfOrderAndOwnership(t *testing.T) {
+	s, h, db := testServer(t)
+	_, token := registerTestUser(t, h, "resumer")
+	_, otherToken := registerTestUser(t, h, "resumerother")
+	payload := make([]byte, int(uploadChunkSize)+len(sampleMP4))
+	copy(payload, sampleMP4)
+	for i := len(sampleMP4); i < len(payload); i++ {
+		payload[i] = byte(i % 251)
+	}
+	sum := sha256.Sum256(payload)
+	create := request(t, h, http.MethodPost, "/api/uploads/sessions", token, map[string]any{
+		"filename": "clip.mp4", "size": len(payload), "sha256": hex.EncodeToString(sum[:]),
+	})
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create session: %d %s", create.Code, create.Body.String())
+	}
+	var session struct {
+		ID        string `json:"id"`
+		ChunkSize int64  `json:"chunk_size"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &session); err != nil {
+		t.Fatal(err)
+	}
+	if session.ChunkSize != uploadChunkSize {
+		t.Fatalf("chunk size %d", session.ChunkSize)
+	}
+	if r := putTestChunk(h, otherToken, session.ID, 1, payload[uploadChunkSize:]); r.Code != http.StatusNotFound {
+		t.Fatalf("foreign upload: %d", r.Code)
+	}
+	if r := putTestChunk(h, token, session.ID, 1, payload[uploadChunkSize:]); r.Code != http.StatusOK {
+		t.Fatalf("second chunk first: %d %s", r.Code, r.Body.String())
+	}
+	completePath := "/api/uploads/sessions/" + session.ID + "/complete"
+	if r := request(t, h, http.MethodPost, completePath, token, nil); r.Code != http.StatusConflict {
+		t.Fatalf("incomplete session: %d %s", r.Code, r.Body.String())
+	}
+	if r := putTestChunk(h, token, session.ID, 0, payload[:uploadChunkSize]); r.Code != http.StatusOK {
+		t.Fatalf("first chunk: %d %s", r.Code, r.Body.String())
+	}
+	if r := putTestChunk(h, token, session.ID, 0, payload[:uploadChunkSize]); r.Code != http.StatusOK {
+		t.Fatalf("idempotent retry: %d %s", r.Code, r.Body.String())
+	}
+	badChunk := append([]byte(nil), payload[:uploadChunkSize]...)
+	badChunk[100] ^= 0xff
+	if r := putTestChunk(h, token, session.ID, 0, badChunk); r.Code != http.StatusConflict {
+		t.Fatalf("conflicting retry: %d %s", r.Code, r.Body.String())
+	}
+	status := request(t, h, http.MethodGet, "/api/uploads/sessions/"+session.ID, token, nil)
+	if status.Code != http.StatusOK || !bytes.Contains(status.Body.Bytes(), []byte(`"uploaded_chunks":[0,1]`)) {
+		t.Fatalf("resume status: %d %s", status.Code, status.Body.String())
+	}
+	completed := request(t, h, http.MethodPost, completePath, token, nil)
+	if completed.Code != http.StatusOK {
+		t.Fatalf("complete: %d %s", completed.Code, completed.Body.String())
+	}
+	var asset struct {
+		URL    string `json:"url"`
+		SHA256 string `json:"sha256"`
+	}
+	if err := json.Unmarshal(completed.Body.Bytes(), &asset); err != nil {
+		t.Fatal(err)
+	}
+	if asset.SHA256 != hex.EncodeToString(sum[:]) {
+		t.Fatalf("assembled hash %s", asset.SHA256)
+	}
+	data, err := os.ReadFile(filepath.Join(s.MediaDir, filepath.Base(asset.URL)))
+	if err != nil || !bytes.Equal(data, payload) {
+		t.Fatalf("assembled file differs: %v", err)
+	}
+	if r := request(t, h, http.MethodPost, completePath, token, nil); r.Code != http.StatusOK {
+		t.Fatalf("repeat complete: %d %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodPost, "/api/videos", token, map[string]string{"title": "resumed clip", "media_url": asset.URL}); r.Code != http.StatusCreated {
+		t.Fatalf("publish resumed file: %d %s", r.Code, r.Body.String())
+	}
+	var count int64
+	if err := db.Model(&MediaAsset{}).Where("url = ?", asset.URL).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("asset count %d err=%v", count, err)
+	}
+}
+
+func TestExpiredUploadCleanupRemovesPartialFiles(t *testing.T) {
+	s, h, db := testServer(t)
+	_, token := registerTestUser(t, h, "expiredresumer")
+	create := request(t, h, http.MethodPost, "/api/uploads/sessions", token, map[string]any{"filename": "clip.mp4", "size": len(sampleMP4)})
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create session: %d %s", create.Code, create.Body.String())
+	}
+	var session struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(create.Body.Bytes(), &session); err != nil {
+		t.Fatal(err)
+	}
+	if r := putTestChunk(h, token, session.ID, 0, sampleMP4); r.Code != http.StatusOK {
+		t.Fatalf("chunk: %d %s", r.Code, r.Body.String())
+	}
+	if err := db.Model(&UploadSession{}).Where("id = ?", session.ID).Update("expires_at", time.Now().UTC().Add(-time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if r := putTestChunk(h, token, session.ID, 0, sampleMP4); r.Code != http.StatusConflict {
+		t.Fatalf("expired session accepted chunk: %d", r.Code)
+	}
+	cleaned, err := s.CleanupExpiredUploads(context.Background())
+	if err != nil || cleaned != 1 {
+		t.Fatalf("cleaned=%d err=%v", cleaned, err)
+	}
+	if _, err := os.Stat(s.uploadDir(session.ID)); !os.IsNotExist(err) {
+		t.Fatalf("partial upload dir remains: %v", err)
+	}
+	if r := request(t, h, http.MethodGet, "/api/uploads/sessions/"+session.ID, token, nil); r.Code != http.StatusNotFound {
+		t.Fatalf("expired session still visible: %d", r.Code)
+	}
+}
+
+func TestInteractionTransitionsKeepCountAndNotificationConsistent(t *testing.T) {
+	_, h, db := testServer(t)
+	authorID, _ := registerTestUser(t, h, "countauthor")
+	_, viewerToken := registerTestUser(t, h, "countviewer")
+	v := Video{AuthorID: authorID, Title: "clip", MediaURL: "/media/clip.mp4", Status: "published"}
+	if err := db.Create(&v).Error; err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/api/videos/%d/like", v.ID)
+	for _, method := range []string{http.MethodPut, http.MethodPut, http.MethodDelete, http.MethodDelete, http.MethodPut} {
+		res := request(t, h, method, path, viewerToken, nil)
+		if res.Code != http.StatusOK {
+			t.Fatalf("%s interaction: %d %s", method, res.Code, res.Body.String())
+		}
+	}
+	if err := db.First(&v, v.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if v.LikeCount != 1 {
+		t.Fatalf("like count = %d, want 1", v.LikeCount)
+	}
+	var actions, notices int64
+	if err := db.Model(&VideoAction{}).Where("video_id = ? AND kind = ?", v.ID, "like").Count(&actions).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&Notification{}).Where("user_id = ? AND kind = ?", authorID, "like").Count(&notices).Error; err != nil {
+		t.Fatal(err)
+	}
+	if actions != 1 || notices != 1 {
+		t.Fatalf("actions=%d notices=%d, want one each", actions, notices)
+	}
+}
+
+func TestLongCommentKeepsFullBodyAndBoundsNotification(t *testing.T) {
+	_, h, db := testServer(t)
+	authorID, _ := registerTestUser(t, h, "longauthor")
+	_, commenterToken := registerTestUser(t, h, "longcommenter")
+	v := Video{AuthorID: authorID, Title: "clip", MediaURL: "/media/clip.mp4", Status: "published"}
+	if err := db.Create(&v).Error; err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Repeat("好", 300)
+	res := request(t, h, http.MethodPost, fmt.Sprintf("/api/videos/%d/comments", v.ID), commenterToken, map[string]string{"body": body})
+	if res.Code != http.StatusCreated {
+		t.Fatalf("long comment: %d %s", res.Code, res.Body.String())
+	}
+	var comment Comment
+	if err := db.Where("video_id = ?", v.ID).First(&comment).Error; err != nil {
+		t.Fatal(err)
+	}
+	var notice Notification
+	if err := db.Where("user_id = ? AND kind = ?", authorID, "comment").First(&notice).Error; err != nil {
+		t.Fatal(err)
+	}
+	if comment.Body != body || len([]rune(notice.Text)) != 280 {
+		t.Fatalf("comment length=%d notification length=%d", len([]rune(comment.Body)), len([]rune(notice.Text)))
+	}
+}
+
+func TestAuthorizationRequiresBearerScheme(t *testing.T) {
+	_, h, _ := testServer(t)
+	_, token := registerTestUser(t, h, "beareruser")
+	req := httptest.NewRequest(http.MethodGet, "/api/users/me", nil)
+	req.Header.Set("Authorization", token)
+	res := httptest.NewRecorder()
+	h.ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("raw token accepted: %d", res.Code)
 	}
 }
 
@@ -240,8 +548,9 @@ func TestWebSocketMessagePersistenceDeliveryAndAck(t *testing.T) {
 	ts := httptest.NewServer(h)
 	defer ts.Close()
 	connect := func(token string) *websocket.Conn {
-		u := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws?token=" + token
-		conn, _, err := websocket.DefaultDialer.Dial(u, nil)
+		u := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
+		dialer := websocket.Dialer{Subprotocols: []string{"gostream", "gostream.jwt." + token}}
+		conn, _, err := dialer.Dial(u, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -289,5 +598,296 @@ func TestWebSocketMessagePersistenceDeliveryAndAck(t *testing.T) {
 	acked := request(t, h, http.MethodPost, fmt.Sprintf("/api/messages/%d/ack", delivered.Message.ID), recipientToken, nil)
 	if acked.Code != http.StatusOK {
 		t.Fatalf("message ACK status %d: %s", acked.Code, acked.Body.String())
+	}
+	if second := request(t, h, http.MethodPost, fmt.Sprintf("/api/messages/%d/ack", delivered.Message.ID), recipientToken, nil); second.Code != http.StatusOK {
+		t.Fatalf("repeated message ACK status %d: %s", second.Code, second.Body.String())
+	}
+}
+
+func TestWebSocketOfflineReplayAndClientIDConflict(t *testing.T) {
+	_, h, db := testServer(t)
+	recipientID, recipientToken := registerTestUser(t, h, "offlinepeer")
+	_, senderToken := registerTestUser(t, h, "offlinesender")
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+	u := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
+	if _, response, err := websocket.DefaultDialer.Dial(u+"?token="+senderToken, nil); err == nil || response == nil || response.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("query token must not authenticate: response=%v err=%v", response, err)
+	}
+	connect := func(token string) *websocket.Conn {
+		dialer := websocket.Dialer{Subprotocols: []string{"gostream", "gostream.jwt." + token}}
+		conn, _, err := dialer.Dial(u, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+		_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+		var ready map[string]any
+		if err := conn.ReadJSON(&ready); err != nil || ready["type"] != "ready" {
+			t.Fatalf("ready: %v %v", ready, err)
+		}
+		return conn
+	}
+	sender := connect(senderToken)
+	event := socketEvent{Type: "message", ClientID: "offline-1", RecipientID: recipientID, Body: "saved while offline"}
+	var firstID uint
+	for i := 0; i < 2; i++ {
+		if err := sender.WriteJSON(event); err != nil {
+			t.Fatal(err)
+		}
+		var ack struct {
+			Type      string `json:"type"`
+			MessageID uint   `json:"message_id"`
+		}
+		if err := sender.ReadJSON(&ack); err != nil {
+			t.Fatal(err)
+		}
+		if ack.Type != "ack" || ack.MessageID == 0 {
+			t.Fatalf("sender ACK: %+v", ack)
+		}
+		if i == 0 {
+			firstID = ack.MessageID
+		} else if ack.MessageID != firstID {
+			t.Fatalf("duplicate got new ID %d", ack.MessageID)
+		}
+	}
+	conflict := event
+	conflict.Body = "different content"
+	if err := sender.WriteJSON(conflict); err != nil {
+		t.Fatal(err)
+	}
+	var rejection map[string]any
+	if err := sender.ReadJSON(&rejection); err != nil || rejection["type"] != "error" {
+		t.Fatalf("client ID conflict: %v %v", rejection, err)
+	}
+	var messages, notices int64
+	if err := db.Model(&ChatMessage{}).Count(&messages).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&Notification{}).Where("kind = ?", "message").Count(&notices).Error; err != nil {
+		t.Fatal(err)
+	}
+	if messages != 1 || notices != 1 {
+		t.Fatalf("messages=%d notices=%d", messages, notices)
+	}
+	recipient := connect(recipientToken)
+	var replay struct {
+		Type    string      `json:"type"`
+		Message ChatMessage `json:"message"`
+	}
+	if err := recipient.ReadJSON(&replay); err != nil {
+		t.Fatal(err)
+	}
+	if replay.Type != "message" || replay.Message.ID != firstID {
+		t.Fatalf("offline replay: %+v", replay)
+	}
+	if r := request(t, h, http.MethodPost, fmt.Sprintf("/api/messages/%d/ack", firstID), recipientToken, nil); r.Code != http.StatusOK {
+		t.Fatalf("ack: %d %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodGet, "/api/messages/unread", recipientToken, nil); r.Code != http.StatusOK || !bytes.Contains(r.Body.Bytes(), []byte(`"items":[]`)) {
+		t.Fatalf("unread after ACK: %d %s", r.Code, r.Body.String())
+	}
+}
+
+func TestGroupChatMembershipDeliveryUnreadAndAck(t *testing.T) {
+	_, h, db := testServer(t)
+	ownerID, ownerToken := registerTestUser(t, h, "groupowner")
+	memberID, memberToken := registerTestUser(t, h, "groupmember")
+	_, outsiderToken := registerTestUser(t, h, "groupoutsider")
+	created := request(t, h, http.MethodPost, "/api/groups", ownerToken, map[string]string{"name": "Study group"})
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create group: %d %s", created.Code, created.Body.String())
+	}
+	var group ChatGroup
+	if err := json.Unmarshal(created.Body.Bytes(), &group); err != nil {
+		t.Fatal(err)
+	}
+	base := fmt.Sprintf("/api/groups/%d", group.ID)
+	if r := request(t, h, http.MethodGet, base+"/messages", outsiderToken, nil); r.Code != http.StatusNotFound {
+		t.Fatalf("outsider history: %d", r.Code)
+	}
+	if r := request(t, h, http.MethodPost, base+"/members", ownerToken, map[string]any{"user_id": memberID}); r.Code != http.StatusOK {
+		t.Fatalf("add member: %d %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodPost, base+"/members", memberToken, map[string]any{"user_id": ownerID}); r.Code != http.StatusForbidden {
+		t.Fatalf("member tried to invite: %d", r.Code)
+	}
+	if r := request(t, h, http.MethodGet, "/api/groups", memberToken, nil); r.Code != http.StatusOK || !bytes.Contains(r.Body.Bytes(), []byte("Study group")) {
+		t.Fatalf("member group list: %d %s", r.Code, r.Body.String())
+	}
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+	connect := func(token string) *websocket.Conn {
+		u := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
+		dialer := websocket.Dialer{Subprotocols: []string{"gostream", "gostream.jwt." + token}}
+		conn, _, err := dialer.Dial(u, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = conn.Close() })
+		_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+		var ready map[string]any
+		if err := conn.ReadJSON(&ready); err != nil || ready["type"] != "ready" {
+			t.Fatalf("socket ready: %v %v", ready, err)
+		}
+		return conn
+	}
+	owner := connect(ownerToken)
+	member := connect(memberToken)
+	event := socketEvent{Type: "group_message", GroupID: group.ID, ClientID: "group-msg-1", Body: "hello group"}
+	if err := owner.WriteJSON(event); err != nil {
+		t.Fatal(err)
+	}
+	var ack struct {
+		Type      string `json:"type"`
+		MessageID uint   `json:"message_id"`
+	}
+	if err := owner.ReadJSON(&ack); err != nil || ack.Type != "ack" || ack.MessageID == 0 {
+		t.Fatalf("group sender ack: %+v %v", ack, err)
+	}
+	var delivery struct {
+		Type    string       `json:"type"`
+		Message GroupMessage `json:"message"`
+	}
+	if err := member.ReadJSON(&delivery); err != nil || delivery.Type != "group_message" || delivery.Message.ID != ack.MessageID {
+		t.Fatalf("group delivery: %+v %v", delivery, err)
+	}
+	if r := request(t, h, http.MethodGet, base+"/unread", memberToken, nil); r.Code != http.StatusOK || !bytes.Contains(r.Body.Bytes(), []byte(`"unread_count":1`)) {
+		t.Fatalf("unread count: %d %s", r.Code, r.Body.String())
+	}
+	ackPath := fmt.Sprintf("%s/messages/%d/ack", base, ack.MessageID)
+	if r := request(t, h, http.MethodPost, ackPath, memberToken, nil); r.Code != http.StatusOK {
+		t.Fatalf("group ack: %d %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodPost, ackPath, memberToken, nil); r.Code != http.StatusOK {
+		t.Fatalf("repeated group ack: %d %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodGet, base+"/unread", memberToken, nil); r.Code != http.StatusOK || !bytes.Contains(r.Body.Bytes(), []byte(`"unread_count":0`)) {
+		t.Fatalf("unread after ack: %d %s", r.Code, r.Body.String())
+	}
+	if err := owner.WriteJSON(event); err != nil {
+		t.Fatal(err)
+	}
+	var duplicateAck struct {
+		Type      string `json:"type"`
+		MessageID uint   `json:"message_id"`
+	}
+	if err := owner.ReadJSON(&duplicateAck); err != nil || duplicateAck.MessageID != ack.MessageID {
+		t.Fatalf("duplicate group ACK: %+v %v", duplicateAck, err)
+	}
+	var count int64
+	if err := db.Model(&GroupMessage{}).Where("group_id = ?", group.ID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("group message count=%d err=%v", count, err)
+	}
+	later := GroupMessage{GroupID: group.ID, SenderID: ownerID, ClientID: "group-msg-2", Body: "later"}
+	if err := db.Create(&later).Error; err != nil {
+		t.Fatal(err)
+	}
+	if r := request(t, h, http.MethodPost, fmt.Sprintf("%s/messages/%d/ack", base, later.ID), memberToken, nil); r.Code != http.StatusOK {
+		t.Fatalf("later group ack: %d %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodPost, ackPath, memberToken, nil); r.Code != http.StatusOK || !bytes.Contains(r.Body.Bytes(), []byte(fmt.Sprintf(`"last_ack_id":%d`, later.ID))) {
+		t.Fatalf("older group ack moved cursor: %d %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodDelete, fmt.Sprintf("%s/members/%d", base, memberID), ownerToken, nil); r.Code != http.StatusOK {
+		t.Fatalf("remove member: %d %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodGet, base+"/messages", memberToken, nil); r.Code != http.StatusNotFound {
+		t.Fatalf("removed member read history: %d", r.Code)
+	}
+}
+
+func TestPresenceTracksConnectionAndLastSeen(t *testing.T) {
+	_, h, _ := testServer(t)
+	userID, token := registerTestUser(t, h, "presenceuser")
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+	u := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
+	dialer := websocket.Dialer{Subprotocols: []string{"gostream", "gostream.jwt." + token}}
+	conn, _, err := dialer.Dial(u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ready map[string]any
+	if err := conn.ReadJSON(&ready); err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/api/users/%d/presence", userID)
+	if r := request(t, h, http.MethodGet, path, "", nil); r.Code != http.StatusOK || !bytes.Contains(r.Body.Bytes(), []byte(`"online":true`)) {
+		t.Fatalf("online presence: %d %s", r.Code, r.Body.String())
+	}
+	_ = conn.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		r := request(t, h, http.MethodGet, path, "", nil)
+		if r.Code == http.StatusOK && bytes.Contains(r.Body.Bytes(), []byte(`"online":false`)) && !bytes.Contains(r.Body.Bytes(), []byte(`"last_seen_at":null`)) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("presence did not transition offline with a last_seen_at timestamp")
+}
+
+func TestOutboxDispatchAndDeadLetter(t *testing.T) {
+	s, h, db := testServer(t)
+	targetID, _ := registerTestUser(t, h, "outboxtarget")
+	_, actorToken := registerTestUser(t, h, "outboxactor")
+	if r := request(t, h, http.MethodPut, fmt.Sprintf("/api/users/me/following/%d", targetID), actorToken, nil); r.Code != http.StatusOK {
+		t.Fatalf("follow: %d %s", r.Code, r.Body.String())
+	}
+	processed, err := s.ProcessOutboxOnce(context.Background())
+	if err != nil || processed != 1 {
+		t.Fatalf("outbox processed=%d err=%v", processed, err)
+	}
+	var noticeEvent OutboxEvent
+	if err := db.Where("topic = ?", "notification.created").First(&noticeEvent).Error; err != nil {
+		t.Fatal(err)
+	}
+	if noticeEvent.PublishedAt == nil || noticeEvent.Attempts != 1 {
+		t.Fatalf("notification event not acknowledged: %+v", noticeEvent)
+	}
+	bad := OutboxEvent{EventKey: "bad-topic", Topic: "missing.topic", Payload: "{}", AvailableAt: time.Now().UTC().Add(-time.Second)}
+	if err := db.Create(&bad).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= outboxMaxAttempts; i++ {
+		if err := db.Model(&bad).Update("available_at", time.Now().UTC().Add(-time.Second)).Error; err != nil {
+			t.Fatal(err)
+		}
+		processed, err = s.ProcessOutboxOnce(context.Background())
+		if err != nil || processed != 1 {
+			var stored OutboxEvent
+			_ = db.First(&stored, bad.ID).Error
+			t.Fatalf("retry %d processed=%d err=%v row=%+v now=%s", i, processed, err, stored, time.Now().UTC().Format(time.RFC3339Nano))
+		}
+	}
+	if err := db.First(&bad, bad.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if bad.DeadAt == nil || bad.PublishedAt != nil || bad.Attempts != outboxMaxAttempts || bad.LastError == "" {
+		t.Fatalf("dead letter state: %+v", bad)
+	}
+}
+
+func TestReadinessAndPrometheusMetrics(t *testing.T) {
+	_, h, _ := testServer(t)
+	if r := request(t, h, http.MethodGet, "/health", "", nil); r.Code != http.StatusOK {
+		t.Fatalf("health: %d", r.Code)
+	}
+	if r := request(t, h, http.MethodGet, "/ready", "", nil); r.Code != http.StatusOK {
+		t.Fatalf("readiness: %d %s", r.Code, r.Body.String())
+	}
+	metrics := request(t, h, http.MethodGet, "/metrics", "", nil)
+	if metrics.Code != http.StatusOK {
+		t.Fatalf("metrics: %d %s", metrics.Code, metrics.Body.String())
+	}
+	for _, marker := range []string{
+		`gostream_http_requests_total{method="GET",route="/health",status="200"} 1`,
+		`gostream_http_request_duration_seconds_bucket`,
+		`gostream_websocket_connections`,
+	} {
+		if !strings.Contains(metrics.Body.String(), marker) {
+			t.Fatalf("metrics missing %q", marker)
+		}
 	}
 }

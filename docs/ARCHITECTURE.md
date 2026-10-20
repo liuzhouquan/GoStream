@@ -2,32 +2,37 @@
 
 ## Current implementation
 
-GoStream is a single-process modular monolith. A single Go API handles accounts, social graph, videos, feeds, interactions, notifications, search and messaging. The first vertical slice is organized by feature under `internal/platform`; handlers currently call GORM directly. Separate Domain, Application, and Infrastructure packages are a planned refactor, not a current property of the code.
+GoStream is a single-process modular monolith. One Go API handles accounts, social graph, videos, feeds, interactions, notifications, search, media, and messaging. Feature code lives under `internal/platform`; handlers currently call GORM directly. Separate Domain, Application, and Infrastructure packages remain a planned refactor.
 
 ```mermaid
 flowchart LR
   Web[Web client] --> API[Go API / Gin]
   API --> Handlers[Feature handlers<br/>internal/platform]
   Handlers --> GORM[GORM models and queries]
+  Handlers --> Redis[(Optional Redis Feed page cache)]
   GORM --> DB[(SQLite local / MySQL deploy)]
-  Handlers -. planned .-> Redis[(Redis cache)]
-  Handlers -. planned .-> MQ[(RabbitMQ events)]
-  API --> Media[(Local media / planned MinIO)]
+  Handlers --> Outbox[(DB outbox)]
+  Outbox --> Worker[Notification worker]
+  Worker --> WS[Local WebSocket hub]
+  API --> Media[(Local media and private chunk staging)]
+  Prometheus --> API
   API <-->|WebSocket| Web
 ```
 
-`cmd/gostream` loads environment configuration, opens SQLite or MySQL, migrates GORM models, and starts the HTTP server with bounded headers and graceful shutdown. `internal/platform/server.go` owns routing, JWT middleware, CORS and shared server state. Feature handlers and models live beside it in `internal/platform/{accounts,videos,feed,social,notifications,messages,models}.go`; `hub.go` owns the process-local WebSocket registry. The web client is static HTML/CSS/JavaScript under `web/`.
+`cmd/gostream` loads configuration, opens SQLite or MySQL, migrates GORM models, and starts the HTTP server, outbox worker, upload cleanup, and optional pprof listener. `internal/platform/server.go` owns routing, JWT middleware, CORS, readiness and shared server state. `uploads.go` handles resumable sessions, `outbox.go` handles notification dispatch, `metrics.go` registers bounded route labels, and `hub.go` owns the local WebSocket registry. The web client is static HTML/CSS/JavaScript under `web/`.
 
-The default local SQLite profile is a deliberate onboarding choice, not a claim that SQLite is the production scaling target. The MySQL adapter keeps the schema path portable. Redis, RabbitMQ, object storage and video processing are not wired into this version.
+The default local SQLite profile reduces setup for learning. The MySQL adapter is configured but has not been container tested here. Compose includes Redis for a short-lived anonymous Feed cache. RabbitMQ, object storage, and video processing are not wired into this version.
 
 ## Feed choices
 
 Timeline and following Feed use deterministic keyset pagination (`created_at`, then `id`) and apply the same ordering to every page. Recommendation and hot currently use the explainable but unbounded score `3*likes + 5*comments + 4*favorites`; there is no freshness decay, personalization, or author diversity yet. Following Feed joins the follow relation to published videos. A later hybrid fanout stage can push recent videos into follower inboxes for ordinary creators and pull from author outboxes for high-follower creators. Its threshold and batch size should be configurable and benchmarked before claiming an optimization.
 
+Anonymous timeline/recommend/hot pages can be cached in Redis for five seconds. The key includes scene, page size, cursor hash, and a shared version. Publishing, editing, deletion, interactions, comments, and author display changes advance the version after a successful database write. Authenticated and following pages query the database. Redis errors use the database path; a failed invalidation may leave an old page visible until its TTL expires.
+
 ## Reliability boundaries
 
-Likes/favorites and follows currently use database transactions; comments and their denormalized count are also committed together. Unique constraints make follow, action, notification and client-message writes idempotent. `outbox_events` is only a schema placeholder: there is no asynchronous publisher/consumer yet. The single-process WebSocket handler persists a message before acknowledging the sender, then attempts immediate delivery to an online recipient. Recipient ACK is separately persisted.
+Likes/favorites and follows use database transactions; comments and their denormalized count are committed together. Notification rows and their outbox events are inserted in the same transaction. A worker atomically leases ready events, attempts local WebSocket delivery, and records completion or a retry/dead-letter state. Offline notifications remain in the database inbox. The direct-message handler commits each message and notification before acknowledging the sender. Recipient ACK is persisted, and reconnect replays up to 100 unacknowledged direct messages. Groups use membership checks, durable messages, and per-member read cursors. Group socket fanout and online presence are local to the current process; disconnects persist last-seen time.
 
 ## Security and operations
 
-Passwords use bcrypt; JWT uses `JWT_SECRET`, and video deletion checks ownership. Uploads use generated names and a 250 MiB request cap. MIME probing and media transcoding are not implemented. Health currently checks only the HTTP process; database readiness and metrics remain future work. Load-test results are added with actual runs, not estimated values.
+Passwords use bcrypt; JWT uses `JWT_SECRET`, and video publication/edit/deletion checks ownership. Upload sessions use random IDs, fixed-size chunks, hashes, and a completion lease. Pending chunks are outside the public media directory. Basic media signature checks are present; FFmpeg transcoding remains. `/health` checks the process, `/ready` pings the database, and `/metrics` exposes Prometheus counters/histograms. A local benchmark is measured; no k6 latency or QPS is claimed.
