@@ -120,6 +120,7 @@ func (s *Server) websocket(c *gin.Context) {
 	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(70 * time.Second)) })
 	_ = s.Hub.send(userID, gin.H{"type": "ready"})
 	s.replayPending(userID)
+	s.replayPendingGroups(userID)
 	for {
 		var e socketEvent
 		if err = conn.ReadJSON(&e); err != nil {
@@ -199,5 +200,30 @@ func (s *Server) replayPending(userID uint) {
 	}
 	if more {
 		_ = s.Hub.send(userID, gin.H{"type": "sync_required"})
+	}
+}
+
+func (s *Server) replayPendingGroups(userID uint) {
+	var rows []GroupMessage
+	err := s.DB.Model(&GroupMessage{}).
+		Joins("JOIN group_members ON group_members.group_id = group_messages.group_id AND group_members.user_id = ?", userID).
+		Joins("JOIN group_reads ON group_reads.group_id = group_messages.group_id AND group_reads.user_id = ?", userID).
+		Where("group_messages.id > group_reads.last_ack_id AND group_messages.sender_id <> ?", userID).
+		Order("group_messages.id ASC").Limit(101).Find(&rows).Error
+	if err != nil {
+		_ = s.Hub.send(userID, gin.H{"type": "error", "message": "pending group messages could not be loaded"})
+		return
+	}
+	more := len(rows) > 100
+	if more {
+		rows = rows[:100]
+	}
+	for _, msg := range rows {
+		if s.Hub.send(userID, gin.H{"type": "group_message", "message": msg}) != nil {
+			return
+		}
+	}
+	if more {
+		_ = s.Hub.send(userID, gin.H{"type": "group_sync_required"})
 	}
 }

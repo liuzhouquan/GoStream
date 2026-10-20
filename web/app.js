@@ -102,7 +102,7 @@ function ensureSocket(){
       }else toast('收到一条新群消息');
     }else if(data.type==='notification'){
       toast('收到一条新通知');if(state.view==='notifications')renderNotifications();
-    }else if(data.type==='sync_required')toast('离线消息较多，请打开聊天历史查看');
+    }else if(data.type==='sync_required'||data.type==='group_sync_required')toast('离线消息较多，请打开聊天历史查看');
     else if(data.type==='error')toast(data.message);
   };
   ws.onclose=()=>{

@@ -800,6 +800,55 @@ func TestGroupChatMembershipDeliveryUnreadAndAck(t *testing.T) {
 	}
 }
 
+func TestGroupMessagesReplayOnReconnect(t *testing.T) {
+	_, h, db := testServer(t)
+	ownerID, ownerToken := registerTestUser(t, h, "replayowner")
+	memberID, memberToken := registerTestUser(t, h, "replaymember")
+	created := request(t, h, http.MethodPost, "/api/groups", ownerToken, map[string]string{"name": "replay group"})
+	var group ChatGroup
+	if created.Code != http.StatusCreated || json.Unmarshal(created.Body.Bytes(), &group) != nil {
+		t.Fatalf("create group: %d %s", created.Code, created.Body.String())
+	}
+	base := fmt.Sprintf("/api/groups/%d", group.ID)
+	if r := request(t, h, http.MethodPost, base+"/members", ownerToken, map[string]uint{"user_id": memberID}); r.Code != http.StatusOK {
+		t.Fatalf("invite: %d %s", r.Code, r.Body.String())
+	}
+	for i := 0; i < 2; i++ {
+		if err := db.Create(&GroupMessage{GroupID: group.ID, SenderID: ownerID, ClientID: fmt.Sprintf("offline-%d", i), Body: fmt.Sprintf("message %d", i)}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+	u := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
+	conn, _, err := (&websocket.Dialer{Subprotocols: []string{"gostream", "gostream.jwt." + memberToken}}).Dial(u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
+	var event struct {
+		Type    string       `json:"type"`
+		Message GroupMessage `json:"message"`
+	}
+	if err := conn.ReadJSON(&event); err != nil || event.Type != "ready" {
+		t.Fatalf("socket ready: %+v %v", event, err)
+	}
+	var lastID uint
+	for i := 0; i < 2; i++ {
+		if err := conn.ReadJSON(&event); err != nil || event.Type != "group_message" || event.Message.GroupID != group.ID || event.Message.ID <= lastID {
+			t.Fatalf("group replay %d: %+v %v", i, event, err)
+		}
+		lastID = event.Message.ID
+	}
+	if r := request(t, h, http.MethodPost, fmt.Sprintf("%s/messages/%d/ack", base, lastID), memberToken, nil); r.Code != http.StatusOK {
+		t.Fatalf("group replay ACK: %d %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodGet, base+"/unread", memberToken, nil); r.Code != http.StatusOK || !bytes.Contains(r.Body.Bytes(), []byte(`"unread_count":0`)) {
+		t.Fatalf("unread after replay ACK: %d %s", r.Code, r.Body.String())
+	}
+}
+
 func TestPresenceTracksConnectionAndLastSeen(t *testing.T) {
 	_, h, _ := testServer(t)
 	userID, token := registerTestUser(t, h, "presenceuser")

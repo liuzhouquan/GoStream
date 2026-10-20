@@ -11,14 +11,14 @@
 7. **How does resumable upload avoid corrupt or foreign files?** Session ownership, fixed chunk size, per-chunk hashes, full-file hash, a completion lease and an owned media record. See `uploads.go` and `videos.go`.
 8. **How are passwords and access tokens handled?** bcrypt hashes and HS256 JWTs; the browser offers a public WebSocket protocol and an authentication protocol, while the server negotiates only the public one. See `accounts.go`, `server.go` and `hub.go`.
 9. **What happens when Redis fails or a write races with cache population?** Anonymous pages fall back to SQL on Redis errors. A page is stored under the version read before its SQL query; an intervening write increments the version, so later readers use a different key. A failed invalidation can expose stale data until the five-second TTL expires. See `feed_cache.go`, `feed.go`, and `feed_cache_test.go`.
-10. **How are sockets reached on another API instance?** Redis Pub/Sub broadcasts only committed IDs; subscribers query SQL and verify recipients or group membership before sending to local sockets. Direct unread replay and group history cover missed events. Pub/Sub itself is best effort. Expiring Redis entries make cross-instance presence visible. See `realtime.go` and `realtime_test.go`.
+10. **How are sockets reached on another API instance?** Redis Pub/Sub broadcasts only committed IDs; subscribers query SQL and verify recipients or group membership before sending to local sockets. Direct and group reconnect replay plus history APIs cover missed events. Pub/Sub itself is best effort. Expiring Redis entries make cross-instance presence visible. See `realtime.go`, `realtime_test.go`, and `hub.go`.
 
 ## Planned questions after later stages
 
 - How would the database outbox publish to RabbitMQ and coordinate consumers across API nodes?
 - How could per-video card and count caches stay consistent without invalidating every page?
 - What is the cost model for push fanout versus pull merge for high-follower creators?
-- How can automatic group replay be added without treating Redis Pub/Sub as a durable queue?
+- How can per-device group read cursors be added without treating Redis Pub/Sub as a durable queue?
 - How should FFmpeg jobs and object storage replace local file finalization while preserving upload idempotency?
 - Where does `context.Context` cancellation propagate during bounded worker concurrency?
 
