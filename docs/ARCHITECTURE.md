@@ -10,6 +10,7 @@ flowchart LR
   API --> Handlers[Feature handlers<br/>internal/platform]
   Handlers --> GORM[GORM models and queries]
   Handlers --> Redis[(Optional Redis Feed page cache)]
+  API <-->|Pub/Sub relay| Redis
   GORM --> DB[(SQLite local / MySQL deploy)]
   Handlers --> Outbox[(DB outbox)]
   Outbox --> Worker[Notification worker]
@@ -19,7 +20,7 @@ flowchart LR
   API <-->|WebSocket| Web
 ```
 
-`cmd/gostream` loads configuration, opens SQLite or MySQL, migrates GORM models, and starts the HTTP server, outbox worker, upload cleanup, and optional pprof listener. `internal/platform/server.go` owns routing, JWT middleware, CORS, readiness and shared server state. `uploads.go` handles resumable sessions, `outbox.go` handles notification dispatch, `metrics.go` registers bounded route labels, and `hub.go` owns the local WebSocket registry. The web client is static HTML/CSS/JavaScript under `web/`.
+`cmd/gostream` loads configuration, opens SQLite or MySQL, migrates GORM models, and starts the HTTP server, outbox worker, upload cleanup, optional Redis subscriber, and optional pprof listener. `internal/platform/server.go` owns routing, JWT middleware, CORS, readiness and shared server state. `uploads.go` handles resumable sessions, `outbox.go` handles notification dispatch, `metrics.go` registers bounded route labels, `hub.go` owns the local WebSocket registry, and `realtime.go` relays events across instances. The web client is static HTML/CSS/JavaScript under `web/`.
 
 The default local SQLite profile reduces setup for learning. The MySQL adapter is configured but has not been container tested here. Compose includes Redis for a short-lived anonymous Feed cache. RabbitMQ, object storage, and video processing are not wired into this version.
 
@@ -31,7 +32,7 @@ Anonymous timeline/recommend/hot pages can be cached in Redis for five seconds. 
 
 ## Reliability boundaries
 
-Likes/favorites and follows use database transactions; comments and their denormalized count are committed together. Notification rows and their outbox events are inserted in the same transaction. A worker atomically leases ready events, attempts local WebSocket delivery, and records completion or a retry/dead-letter state. Offline notifications remain in the database inbox. The direct-message handler commits each message and notification before acknowledging the sender. Recipient ACK is persisted, and reconnect replays up to 100 unacknowledged direct messages. Groups use membership checks, durable messages, and per-member read cursors. Group socket fanout and online presence are local to the current process; disconnects persist last-seen time.
+Likes/favorites and follows use database transactions; comments and their denormalized count are committed together. Notification rows and their outbox events are inserted in the same transaction. A worker atomically leases ready events, attempts local WebSocket delivery, and records completion or a retry/dead-letter state. Offline notifications remain in the database inbox. The direct-message handler commits each message and notification before acknowledging the sender. Recipient ACK is persisted, and reconnect replays up to 100 unacknowledged direct messages. Groups use membership checks, durable messages, and per-member read cursors. With `REDIS_ADDR`, committed direct/group messages and outbox notifications are published to a Redis channel; each API instance delivers only to its own sockets after checking SQL records and group membership. Pub/Sub is best effort. Group history and direct unread APIs recover missed events. Redis sorted sets hold expiring per-node online entries; without Redis, presence is process-local. Disconnects persist last-seen time.
 
 ## Security and operations
 

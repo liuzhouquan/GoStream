@@ -353,6 +353,9 @@ func TestVideoEditAndAvatarRequireOwnedMedia(t *testing.T) {
 	if r := request(t, h, http.MethodPatch, path, authorToken, map[string]string{"title": "revived"}); r.Code != http.StatusNotFound {
 		t.Fatalf("edit deleted video: %d", r.Code)
 	}
+	if r := request(t, h, http.MethodGet, path+"/comments", "", nil); r.Code != http.StatusNotFound {
+		t.Fatalf("comments for deleted video: %d", r.Code)
+	}
 }
 
 func TestResumableUploadOutOfOrderAndOwnership(t *testing.T) {

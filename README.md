@@ -1,6 +1,6 @@
 # GoStream
 
-GoStream is a runnable Go short-video social platform with a static web client, persistent database, resumable media uploads, direct and group messaging, and a database-backed notification worker. It currently runs as one API process.
+GoStream is a runnable Go short-video social platform with a static web client, persistent database, resumable media uploads, direct and group messaging, and a database-backed notification worker. It runs as one API process by default; Redis can relay realtime events between API instances.
 
 ## Status
 
@@ -28,10 +28,10 @@ Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECR
 - JWT access tokens and bcrypt password hashing
 - Local media storage, single-file and 4 MiB resumable chunk uploads, media ownership checks, and file integrity checks
 - Database outbox with transactional notification writes, leased dispatch, retry, and dead-letter state
-- Single-process direct/group WebSocket messaging, persisted ACKs, offline direct-message replay, group unread cursors, and local presence
+- Direct/group WebSocket messaging, persisted ACKs, offline direct-message replay, group unread cursors, and optional Redis cross-instance event relay and presence
 - `/health`, database-backed `/ready`, `/metrics`, and optional `PPROF_ADDR`
 - SQLite is persistent and real; it is not a mock database
-- RabbitMQ, MinIO, FFmpeg, and multi-instance messaging are later stages
+- RabbitMQ, MinIO, FFmpeg, and durable cross-instance group push are later stages
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/API.md](docs/API.md), [docs/DATABASE.md](docs/DATABASE.md), [docs/TECHNICAL_DESIGN.md](docs/TECHNICAL_DESIGN.md), [docs/LEARNING_GUIDE.md](docs/LEARNING_GUIDE.md), and [docs/INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md).
 

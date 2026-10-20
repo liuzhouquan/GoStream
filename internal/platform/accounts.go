@@ -159,5 +159,5 @@ func (s *Server) userPresence(c *gin.Context) {
 		respondError(c, 404, "user not found")
 		return
 	}
-	c.JSON(200, gin.H{"user_id": user.ID, "online": s.Hub.online(user.ID), "last_seen_at": user.LastSeenAt})
+	c.JSON(200, gin.H{"user_id": user.ID, "online": s.onlineAcrossInstances(c.Request.Context(), user.ID), "last_seen_at": user.LastSeenAt})
 }

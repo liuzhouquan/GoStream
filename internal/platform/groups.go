@@ -1,7 +1,9 @@
 package platform
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -281,5 +283,8 @@ func (s *Server) sendGroupMessage(userID uint, e socketEvent) {
 	}
 	for _, member := range members {
 		_ = s.Hub.send(member.UserID, gin.H{"type": "group_message", "message": msg})
+	}
+	if err := s.publishRealtime(context.Background(), realtimeEvent{Kind: "group", GroupID: msg.GroupID, MessageID: msg.ID, SenderID: msg.SenderID}); err != nil {
+		log.Printf("realtime group publish failed for message %d: %v", msg.ID, err)
 	}
 }

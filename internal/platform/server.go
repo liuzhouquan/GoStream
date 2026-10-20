@@ -22,6 +22,7 @@ type Server struct {
 	Hub      *Hub
 	metrics  *serverMetrics
 	cache    *redisFeedCache
+	realtime *realtimeBridge
 	upgrader websocket.Upgrader
 }
 

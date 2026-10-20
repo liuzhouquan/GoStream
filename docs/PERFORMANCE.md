@@ -11,7 +11,7 @@ go vet ./...
 node --check web/app.js
 ```
 
-API integration tests use temporary SQLite databases. The suite covers registration/auth, media ownership, video editing, equal-timestamp Feed cursors, interaction transitions, resumable upload recovery and expiry, direct/group WebSocket delivery, offline replay, presence, outbox retries/dead letters, and Prometheus output. `feed_cache_test.go` uses an in-process Redis-compatible server to check cache hits, mutation invalidation, and database fallback; it does not measure real Redis performance. A Chrome check also verified group creation, a live WebSocket connection and persisted group history after reopening the conversation.
+API integration tests use temporary SQLite databases. The suite covers registration/auth, media ownership, video editing, equal-timestamp Feed cursors, interaction transitions, resumable upload recovery and expiry, direct/group WebSocket delivery, offline replay, presence, outbox retries/dead letters, and Prometheus output. `feed_cache_test.go` uses an in-process Redis-compatible server to check cache hits, mutation invalidation, and database fallback; `realtime_test.go` uses two server instances sharing SQL and a Redis-compatible Pub/Sub server to check cross-instance direct, group, and notification delivery plus remote presence/disconnect. These tests do not measure real Redis performance. A Chrome check also verified group creation, a live WebSocket connection and persisted group history after reopening the conversation.
 
 ## Measured in-process Feed baseline
 

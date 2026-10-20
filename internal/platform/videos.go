@@ -273,6 +273,9 @@ func (s *Server) updateVideo(c *gin.Context) {
 
 func (s *Server) userVideos(c *gin.Context) {
 	var items []Video
-	s.DB.Preload("Author").Where("author_id = ? AND status = ?", c.Param("id"), "published").Order("created_at DESC").Limit(50).Find(&items)
+	if err := s.DB.Preload("Author").Where("author_id = ? AND status = ?", c.Param("id"), "published").Order("created_at DESC").Limit(50).Find(&items).Error; err != nil {
+		respondError(c, 500, "could not load user videos")
+		return
+	}
 	c.JSON(200, gin.H{"items": items})
 }

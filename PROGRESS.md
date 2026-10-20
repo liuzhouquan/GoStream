@@ -18,13 +18,14 @@ Last updated: 2026-10-20
 - [x] Add group membership and owner permissions, group WebSocket messages, history paging, unread/read cursors, local presence and last-seen tracking; verify creation and persisted history in Chrome.
 - [x] Add database readiness, Prometheus metrics, an optional pprof listener, and Compose monitoring configuration.
 - [x] Add optional Redis caching for anonymous Feed pages, mutation-based version invalidation, fallback on Redis failure, and a regression test using a Redis-compatible test server.
+- [x] Relay direct, group, and notification socket events between API instances through optional Redis Pub/Sub and track cross-instance online state with expiring Redis entries; verify two server instances with shared SQL and a Redis-compatible test server.
 
 ## Stages
 
 1. Local runnable application: account/auth, media upload, videos, timeline/recommendation feeds, follows, interactions, comments, search, notifications, basic web client. **Implemented and locally verified.**
 2. Reliability: cursor and idempotency review, transactional outbox, retry/dead-letter handling, test hardening and API documentation. **Partly implemented:** a database-backed outbox worker dispatches notifications and records dead letters. The initial handlers still call GORM directly; splitting Domain/Application/Infrastructure layers remains.
 3. Feed scale: short-lived Redis page caching and version invalidation are implemented. Per-video cards/stat caching, hybrid fanout, and MySQL/Redis load measurements remain.
-4. IM: Direct and group WebSocket messages, persistence, direct-message offline replay/ACK, group unread cursors, and local online presence are implemented for one process. Cross-device cursors, group replay push, and multi-instance routing remain.
+4. IM: Direct and group WebSocket messages, persistence, direct-message offline replay/ACK, group unread cursors, and local online presence are implemented. Optional Redis Pub/Sub relays committed direct, group, and notification events between API instances. Expiring Redis presence entries provide a cross-instance online check when enabled. Pub/Sub delivery is best effort; direct-message unread replay and group history provide recovery. Cross-device cursors and automatic group replay remain.
 5. Media pipeline: local resumable upload and integrity checks are implemented. FFmpeg processing, thumbnail generation, and MinIO adapter remain.
 6. Operations: MySQL/API and optional Prometheus/Grafana Compose configuration, HTTP metrics, readiness, pprof, and a measured in-process benchmark are present. Docker and k6 are unavailable in this WSL environment, so container behavior and load-test results remain unverified.
 
@@ -32,7 +33,7 @@ Last updated: 2026-10-20
 
 Commands run through 2026-10-20 using Go 1.27.2:
 
-- `go test ./...` — passed, including account/video/feed/interaction/follow/notification, upload resume, outbox, direct/group messaging and presence coverage, plus Redis cache hit/invalidation/fallback checks using an in-process Redis-compatible test server.
+- `go test ./...` — passed, including account/video/feed/interaction/follow/notification, upload resume, outbox, direct/group messaging and presence coverage, plus Redis cache hit/invalidation/fallback and two-instance socket routing checks using an in-process Redis-compatible test server.
 - `go vet ./...` — passed.
 - `go test -race ./...` — passed.
 - `node --check web/app.js` — passed.

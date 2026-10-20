@@ -121,7 +121,10 @@ func (s *Server) dispatchOutbox(ctx context.Context, item OutboxEvent) error {
 		return err
 	}
 	// The database inbox is durable. Socket delivery is an immediate convenience for online users.
-	return s.Hub.send(notice.UserID, gin.H{"type": "notification", "notification": notice})
+	if err := s.Hub.send(notice.UserID, gin.H{"type": "notification", "notification": notice}); err != nil {
+		log.Printf("local notification delivery failed for %d: %v", notice.ID, err)
+	}
+	return s.publishRealtime(ctx, realtimeEvent{Kind: "notification", UserID: notice.UserID, MessageID: notice.ID})
 }
 
 func (s *Server) RunOutbox(ctx context.Context) {

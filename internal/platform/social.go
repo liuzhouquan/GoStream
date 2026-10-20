@@ -49,7 +49,10 @@ func (s *Server) followers(c *gin.Context) { s.listRelations(c, "followee_id") }
 
 func (s *Server) listRelations(c *gin.Context, field string) {
 	var rows []Follow
-	s.DB.Where(field+" = ?", uid(c)).Order("created_at DESC").Limit(100).Find(&rows)
+	if err := s.DB.Where(field+" = ?", uid(c)).Order("created_at DESC").Limit(100).Find(&rows).Error; err != nil {
+		respondError(c, 500, "could not load relationships")
+		return
+	}
 	ids := make([]uint, 0, len(rows))
 	for _, r := range rows {
 		if field == "follower_id" {
@@ -60,7 +63,10 @@ func (s *Server) listRelations(c *gin.Context, field string) {
 	}
 	var users []User
 	if len(ids) > 0 {
-		s.DB.Where("id IN ?", ids).Find(&users)
+		if err := s.DB.Where("id IN ?", ids).Find(&users).Error; err != nil {
+			respondError(c, 500, "could not load related users")
+			return
+		}
 	}
 	c.JSON(200, gin.H{"items": users})
 }
@@ -173,8 +179,16 @@ func (s *Server) createComment(c *gin.Context) {
 }
 
 func (s *Server) comments(c *gin.Context) {
+	var video Video
+	if s.DB.Select("id").Where("id = ? AND status = ?", c.Param("id"), "published").First(&video).Error != nil {
+		respondError(c, 404, "video not found")
+		return
+	}
 	var rows []Comment
-	s.DB.Preload("User").Where("video_id = ?", c.Param("id")).Order("created_at DESC").Limit(100).Find(&rows)
+	if err := s.DB.Preload("User").Where("video_id = ?", video.ID).Order("created_at DESC").Limit(100).Find(&rows).Error; err != nil {
+		respondError(c, 500, "could not load comments")
+		return
+	}
 	c.JSON(200, gin.H{"items": rows})
 }
 

@@ -1,7 +1,9 @@
 package platform
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -49,6 +51,15 @@ func (h *Hub) count() int {
 	defer h.mu.RUnlock()
 	return len(h.clients)
 }
+func (h *Hub) onlineIDs() []uint {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	ids := make([]uint, 0, len(h.clients))
+	for id := range h.clients {
+		ids = append(ids, id)
+	}
+	return ids
+}
 func (h *Hub) send(id uint, v any) error {
 	h.mu.RLock()
 	c, mu := h.clients[id], h.writeMu[id]
@@ -89,9 +100,16 @@ func (s *Server) websocket(c *gin.Context) {
 		return
 	}
 	s.Hub.add(userID, conn)
+	s.refreshPresence(context.Background(), userID)
+	presenceCtx, stopPresence := context.WithCancel(context.Background())
+	if s.realtime != nil {
+		go s.renewPresence(presenceCtx, userID)
+	}
 	s.metrics.wsConnections.Set(float64(s.Hub.count()))
 	defer func() {
+		stopPresence()
 		if s.Hub.remove(userID, conn) {
+			s.clearPresence(userID)
 			_ = s.DB.Model(&User{}).Where("id = ?", userID).Update("last_seen_at", time.Now().UTC()).Error
 		}
 		s.metrics.wsConnections.Set(float64(s.Hub.count()))
@@ -152,6 +170,9 @@ func (s *Server) websocket(c *gin.Context) {
 			_ = s.Hub.send(userID, gin.H{"type": "ack", "client_id": msg.ClientID, "message_id": msg.ID})
 			if created {
 				_ = s.Hub.send(msg.RecipientID, gin.H{"type": "message", "message": msg})
+				if err := s.publishRealtime(c.Request.Context(), realtimeEvent{Kind: "direct", UserID: msg.RecipientID, MessageID: msg.ID}); err != nil {
+					log.Printf("realtime direct publish failed for message %d: %v", msg.ID, err)
+				}
 			}
 		case "group_message":
 			s.sendGroupMessage(userID, e)

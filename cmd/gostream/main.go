@@ -66,6 +66,9 @@ func main() {
 		client := redis.NewClient(&redis.Options{Addr: redisAddr, DialTimeout: 500 * time.Millisecond, ReadTimeout: 100 * time.Millisecond, WriteTimeout: 100 * time.Millisecond, MaxRetries: 0})
 		defer client.Close()
 		server.UseRedisFeedCache(client)
+		if err := server.UseRedisRealtime(client); err != nil {
+			log.Fatalf("initialize realtime bridge: %v", err)
+		}
 		pingCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 		if err := client.Ping(pingCtx).Err(); err != nil {
 			log.Printf("Redis unavailable at startup; Feed will use database reads: %v", err)
@@ -92,6 +95,7 @@ func main() {
 	defer stop()
 	go server.RunOutbox(ctx)
 	go server.RunUploadCleanup(ctx)
+	go server.RunRealtimeBridge(ctx)
 	select {
 	case err = <-serveErr:
 		log.Fatal(err)
