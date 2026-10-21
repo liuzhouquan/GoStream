@@ -52,11 +52,13 @@ services:
       retries: 10
 
   prometheus:
-    image: prom/prometheus:v3.14.0
+    build:
+      context: .
+      dockerfile: deploy/prometheus.Dockerfile
+    image: gostream-prometheus:local
     profiles: ["observability"]
     command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus"]
     volumes:
-      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     ports:
       - "9090:9090"
@@ -65,16 +67,16 @@ services:
         condition: service_healthy
 
   grafana:
-    image: grafana/grafana:13.2.1
+    build:
+      context: .
+      dockerfile: deploy/grafana.Dockerfile
+    image: gostream-grafana:local
     profiles: ["observability"]
     environment:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-gostream-local-only}
     volumes:
       - grafana_data:/var/lib/grafana
-      - ./deploy/grafana/datasources:/etc/grafana/provisioning/datasources:ro
-      - ./deploy/grafana/dashboard-providers:/etc/grafana/provisioning/dashboards:ro
-      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports:
       - "3000:3000"
     depends_on:

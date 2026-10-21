@@ -12,6 +12,7 @@
 8. **How are passwords and access tokens handled?** bcrypt hashes and HS256 JWTs; the browser offers a public WebSocket protocol and an authentication protocol, while the server negotiates only the public one. See `accounts.go`, `server.go` and `hub.go`.
 9. **What happens when Redis fails or a write races with cache population?** Anonymous pages fall back to SQL on Redis errors. A page is stored under the version read before its SQL query; an intervening write increments the version, so later readers use a different key. A failed invalidation can expose stale data until the five-second TTL expires. See `feed_cache.go`, `feed.go`, and `feed_cache_test.go`.
 10. **How are sockets reached on another API instance?** Redis Pub/Sub broadcasts only committed IDs; subscribers query SQL and verify recipients or group membership before sending to local sockets. Direct and group reconnect replay plus history APIs cover missed events. Pub/Sub itself is best effort. Expiring Redis entries make cross-instance presence visible. See `realtime.go`, `realtime_test.go`, and `hub.go`.
+11. **How does recommendation differ from hot ranking?** Hot uses interaction counts. Recommendation adds fixed time buckets and author affinity from follows and the viewer's last 200 likes/favorites. Its cursor fixes the time anchor, while interaction and preference changes can still move items between pages. See `recommend.go`, `feed.go`, and `recommend_test.go`.
 
 ## Planned questions after later stages
 

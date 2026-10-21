@@ -1,6 +1,6 @@
 # GoStream development progress
 
-Last updated: 2026-10-20
+Last updated: 2026-10-21
 
 ## Stage 0 — project foundation
 
@@ -21,19 +21,20 @@ Last updated: 2026-10-20
 - [x] Relay direct, group, and notification socket events between API instances through optional Redis Pub/Sub and track cross-instance online state with expiring Redis entries; verify two server instances with shared SQL and a Redis-compatible test server.
 - [x] Replay up to 100 unacknowledged group messages on WebSocket reconnect and signal when history must be fetched for larger backlogs.
 - [x] Add a reproducible SQLite Feed seeder and standard-library HTTP load driver; measure 3,000 local loopback requests for timeline and hot scenes against 1,000 video rows.
+- [x] Give recommendation Feed explainable freshness, followed-author and recent interacted-author weights; bind scene and time anchor into its cursor and test ranking/pagination.
 
 ## Stages
 
 1. Local runnable application: account/auth, media upload, videos, timeline/recommendation feeds, follows, interactions, comments, search, notifications, basic web client. **Implemented and locally verified.**
 2. Reliability: cursor and idempotency review, transactional outbox, retry/dead-letter handling, test hardening and API documentation. **Partly implemented:** a database-backed outbox worker dispatches notifications and records dead letters. The initial handlers still call GORM directly; splitting Domain/Application/Infrastructure layers remains.
-3. Feed scale: short-lived Redis page caching and version invalidation are implemented. Per-video cards/stat caching, hybrid fanout, and MySQL/Redis load measurements remain.
+3. Feed scale: short-lived Redis page caching, version invalidation, a preference/recency-aware recommendation baseline, and initial MySQL/Redis load measurements are implemented. Per-video cards/stat caching, hybrid fanout, and authenticated recommendation measurements remain.
 4. IM: Direct and group WebSocket messages, persistence, offline replay/ACK, group unread cursors, and local online presence are implemented. Both direct and group reconnects replay up to 100 pending messages; larger backlogs require history/unread paging. Optional Redis Pub/Sub relays committed direct, group, and notification events between API instances. Expiring Redis presence entries provide a cross-instance online check when enabled. Pub/Sub delivery is best effort. Cross-device read cursors remain.
 5. Media pipeline: local resumable upload and integrity checks are implemented. FFmpeg processing, thumbnail generation, and MinIO adapter remain.
-6. Operations: MySQL/API and optional Prometheus/Grafana Compose configuration, HTTP metrics, readiness, pprof, a measured in-process benchmark, and measured local SQLite HTTP load results are present. Docker and k6 are unavailable in this WSL environment, so container/MySQL behavior and k6 results remain unverified.
+6. Operations: MySQL/API/Redis Compose was built with Go 1.27.2 and verified through real registration, upload, publish, Feed, interaction, follow, and notification requests. The optional Prometheus/Grafana profile was started and its scrape target and provisioned dashboard verified. HTTP metrics, readiness, pprof, an in-process benchmark, local SQLite results, and three-run MySQL/Redis cached-versus-uncached results are present. k6 and a multi-host load test remain.
 
 ## Verification ledger
 
-Commands run through 2026-10-20 using Go 1.27.2:
+Commands run through 2026-10-21 using Go 1.27.2:
 
 - `go test ./...` — passed, including account/video/feed/interaction/follow/notification, upload resume, outbox, direct/group messaging and presence, group reconnect replay, plus Redis cache hit/invalidation/fallback and two-instance socket routing checks using an in-process Redis-compatible test server.
 - `go vet ./...` — passed.
@@ -43,9 +44,15 @@ Commands run through 2026-10-20 using Go 1.27.2:
 - Isolated end-to-end smoke run on `127.0.0.1:18080` — health 200, registration 201, publish 201, Feed 200 with the video, and login 200.
 - Browser automation opened the UI and confirmed its navigation and Feed structure render. Chinese glyphs are missing in this browser image due to current system font setup.
 - Mobile browser check at 390×844 confirmed both navigation groups render and the header avatar opens the login dialog. Chinese glyphs are missing in this browser image due to current system font setup.
-- Docker CLI reports Docker Desktop WSL integration is not enabled, so Compose and FFmpeg have not run here.
+- On 2026-10-21, Docker Desktop WSL integration was available. `docker compose up -d --build` produced healthy MySQL 8.4, Redis 8.2.9, and API services. Real HTTP requests verified registration, media upload, video publishing, timeline/recommend/following Feeds, like count, follows and notifications; Prometheus reported Redis cache hits. Temporary test data was removed, and Compose restarted with an empty database. FFmpeg remains untested.
+- `docker compose --profile observability up -d --build` started Prometheus and Grafana. Prometheus's `up` query returned `1` for `api:8080`; Grafana's health endpoint returned `database: ok` and its search API listed the provisioned GoStream API dashboard. The stack remains running for local inspection.
+- `GOSTREAM_TEST_MYSQL_DSN=... go test ./internal/platform -run '^TestMySQLRecommendationIntegration$' -count=1` — passed against the real Compose MySQL; preference-aware ranking and three cursor pages matched expected order. The fixture transaction rolled back, and the database remained empty.
 - A same-timestamp keyset test caught and verified the UTC cursor comparison fix; a multipart test checks that upload names are generated server-side.
 
 `BenchmarkTimelineFeed1000` was run three times against a 1,000-video SQLite memory database: 358,682, 362,115, and 373,384 ns/op, with about 93 KB and 881 allocations per operation. These are in-process benchmark results, not QPS or P95 measurements. Details are in `docs/PERFORMANCE.md`.
 
 A built API process was also measured over loopback HTTP against an isolated 1,000-video SQLite file: 3,000 requests at concurrency 10 gave 1,912.3 requests/s and P95 9.949 ms for timeline, and 1,556.9 requests/s and P95 10.885 ms for hot, with zero failures in either single run. The dataset and local limitations are in `docs/PERFORMANCE.md`.
+
+After the recommendation change, a fresh 1,000-video SQLite file yielded 1,634.6 requests/s and P95 10.098 ms for anonymous recommendation, versus 1,891.4 requests/s and P95 8.752 ms for hot on the same process and dataset. Both single runs had 3,000 successful requests at concurrency 10. Authenticated recommendation remains unmeasured.
+
+On the same 1,001-video Compose MySQL dataset, the anonymous recommendation page was measured three times per variant at concurrency 10 and 3,000 requests/run. The cached API container yielded 3,211.4, 3,784.4, and 4,054.1 requests/s; an identical temporary API container with Redis disabled yielded 1,165.3, 1,155.8, and 1,078.8 requests/s. All 18,000 measured requests succeeded. Redis metrics showed 9,058 hits and 7 misses after the tests. These are warm first-page, one-host results, not general platform capacity; see `docs/PERFORMANCE.md`.

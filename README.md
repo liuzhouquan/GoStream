@@ -23,8 +23,9 @@ Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECR
 ## Current design
 
 - Go 1.27.2, Gin, GORM, SQLite for zero-service local development
-- MySQL driver available for the container profile
+- MySQL and Redis Compose profile, verified with real end-to-end requests
 - Optional Redis cache for anonymous timeline/recommend/hot Feed pages; database fallback and bounded staleness
+- Explainable recommendation ranking using interactions, freshness, followed authors, and recently interacted authors
 - JWT access tokens and bcrypt password hashing
 - Local media storage, single-file and 4 MiB resumable chunk uploads, media ownership checks, and file integrity checks
 - Database outbox with transactional notification writes, leased dispatch, retry, and dead-letter state
@@ -35,7 +36,7 @@ Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECR
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/API.md](docs/API.md), [docs/DATABASE.md](docs/DATABASE.md), [docs/TECHNICAL_DESIGN.md](docs/TECHNICAL_DESIGN.md), [docs/LEARNING_GUIDE.md](docs/LEARNING_GUIDE.md), and [docs/INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md).
 
-Performance and verification status is recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md). A measured in-process Feed benchmark and reproducible local HTTP load driver are included; Docker integration and k6/MySQL load testing remain pending.
+Performance and verification status is recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md). An in-process benchmark, a local HTTP driver, and a three-run MySQL/Redis Compose comparison are included. k6 and multi-host load testing remain pending.
 
 ## License
 

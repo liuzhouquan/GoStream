@@ -7,18 +7,29 @@ import (
 	"time"
 
 	"github.com/liuzhouquan/GoStream/internal/platform"
+	"gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
 func main() {
-	dsn := flag.String("dsn", "data/gostream.db", "SQLite database path used by the API")
+	driver := flag.String("driver", "sqlite", "database driver: sqlite or mysql")
+	dsn := flag.String("dsn", "data/gostream.db", "database DSN used by the API")
 	videos := flag.Int("videos", 1000, "published videos to insert")
 	flag.Parse()
 	if *videos < 1 || *videos > 100000 {
 		log.Fatal("videos must be 1-100000")
 	}
-	db, err := gorm.Open(sqlite.Open(*dsn), &gorm.Config{})
+	var dialector gorm.Dialector
+	switch *driver {
+	case "sqlite":
+		dialector = sqlite.Open(*dsn)
+	case "mysql":
+		dialector = mysql.Open(*dsn)
+	default:
+		log.Fatal("driver must be sqlite or mysql")
+	}
+	db, err := gorm.Open(dialector, &gorm.Config{})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -40,5 +51,5 @@ func main() {
 			batch = batch[:0]
 		}
 	}
-	fmt.Printf("inserted %d synthetic published video rows for author %d into %s\n", *videos, author.ID, *dsn)
+	fmt.Printf("inserted %d synthetic published video rows for author %d using %s\n", *videos, author.ID, *driver)
 }

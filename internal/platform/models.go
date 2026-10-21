@@ -69,8 +69,8 @@ type Follow struct {
 }
 
 type VideoAction struct {
-	ID        uint   `gorm:"primaryKey"`
-	UserID    uint   `gorm:"uniqueIndex:ux_action,priority:1;not null"`
+	ID        uint   `gorm:"primaryKey;index:idx_action_recent,priority:2,sort:desc"`
+	UserID    uint   `gorm:"uniqueIndex:ux_action,priority:1;index:idx_action_recent,priority:1;not null"`
 	VideoID   uint   `gorm:"uniqueIndex:ux_action,priority:2;index;not null"`
 	Kind      string `gorm:"uniqueIndex:ux_action,priority:3;size:16;not null"`
 	CreatedAt time.Time
