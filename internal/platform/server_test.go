@@ -31,7 +31,7 @@ func testServer(t *testing.T) (*Server, *gin.Engine, *gorm.DB) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = db.AutoMigrate(&User{}, &MediaAsset{}, &UploadSession{}, &UploadChunk{}, &Video{}, &Follow{}, &VideoAction{}, &Comment{}, &Notification{}, &ChatMessage{}, &ChatGroup{}, &GroupMember{}, &GroupMessage{}, &GroupRead{}, &OutboxEvent{}); err != nil {
+	if err = db.AutoMigrate(&User{}, &MediaAsset{}, &UploadSession{}, &UploadChunk{}, &Video{}, &VideoProcessJob{}, &Follow{}, &VideoAction{}, &Comment{}, &Notification{}, &ChatMessage{}, &ChatGroup{}, &GroupMember{}, &GroupMessage{}, &GroupRead{}, &OutboxEvent{}); err != nil {
 		t.Fatal(err)
 	}
 	s := NewServer(db, "test-signing-secret-at-least-32-bytes", t.TempDir())

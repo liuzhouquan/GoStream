@@ -18,7 +18,7 @@ The default local profile stores data in `./data/gostream.db` using SQLite. It n
 go run ./cmd/gostream
 ```
 
-Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECRET`, `MEDIA_DIR`, and optionally `REDIS_ADDR` with environment variables. Set a unique `JWT_SECRET` outside local development. Pending chunks live beside the media directory at `<MEDIA_DIR>.chunks`. The MySQL/Redis Compose profile starts with `docker compose up --build`; use `docker compose --profile observability up --build` for Prometheus on port 9090 and Grafana on port 3000. Set `GRAFANA_ADMIN_PASSWORD` for the latter.
+Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECRET`, `MEDIA_DIR`, and optionally `REDIS_ADDR` with environment variables. Set a unique `JWT_SECRET` outside local development. Pending chunks live beside the media directory at `<MEDIA_DIR>.chunks`. Set `FFMPEG_BIN` to an installed FFmpeg executable to enable asynchronous MP4 transcoding and JPEG cover generation; when unset, uploaded videos publish without transcoding. Compose installs FFmpeg and enables the worker. The MySQL/Redis Compose profile starts with `docker compose up --build`; use `docker compose --profile observability up --build` for Prometheus on port 9090 and Grafana on port 3000. Set `GRAFANA_ADMIN_PASSWORD` for the latter.
 
 ## Current design
 
@@ -28,11 +28,12 @@ Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECR
 - Explainable recommendation ranking using interactions, freshness, followed authors, and recently interacted authors
 - JWT access tokens and bcrypt password hashing
 - Local media storage, single-file and 4 MiB resumable chunk uploads, media ownership checks, and file integrity checks
+- Durable FFmpeg processing jobs in Compose: leased retries, H.264 MP4 output with AAC for audio inputs, generated JPEG cover, and publication after successful processing
 - Database outbox with transactional notification writes, leased dispatch, retry, and dead-letter state
 - Direct/group WebSocket messaging, persisted ACKs, offline direct-message replay, group unread cursors, and optional Redis cross-instance event relay and presence
 - `/health`, database-backed `/ready`, `/metrics`, and optional `PPROF_ADDR`
 - SQLite is persistent and real; it is not a mock database
-- RabbitMQ, MinIO, FFmpeg, and durable cross-instance group push are later stages
+- RabbitMQ, MinIO, and durable cross-instance group push are later stages
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/API.md](docs/API.md), [docs/DATABASE.md](docs/DATABASE.md), [docs/TECHNICAL_DESIGN.md](docs/TECHNICAL_DESIGN.md), [docs/LEARNING_GUIDE.md](docs/LEARNING_GUIDE.md), and [docs/INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md).
 

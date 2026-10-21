@@ -12,9 +12,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func mediaKind(ext string, header []byte) string {
@@ -163,12 +167,26 @@ func (s *Server) createVideo(c *gin.Context) {
 			return
 		}
 	}
-	v := Video{AuthorID: uid(c), Title: in.Title, Description: in.Description, MediaURL: in.MediaURL, CoverURL: in.CoverURL, Status: "published"}
-	if s.DB.Create(&v).Error != nil {
+	status := "published"
+	if s.ffmpegBin != "" {
+		status = "processing"
+	}
+	v := Video{AuthorID: uid(c), Title: in.Title, Description: in.Description, MediaURL: in.MediaURL, CoverURL: in.CoverURL, Status: status}
+	if err := s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&v).Error; err != nil {
+			return err
+		}
+		if status == "processing" {
+			return tx.Create(&VideoProcessJob{VideoID: v.ID, SourceURL: v.MediaURL, AvailableAt: time.Now().UTC()}).Error
+		}
+		return nil
+	}); err != nil {
 		respondError(c, 500, "could not publish video")
 		return
 	}
-	s.invalidateFeed(c.Request.Context())
+	if status == "published" {
+		s.invalidateFeed(c.Request.Context())
+	}
 	s.DB.Preload("Author").First(&v, v.ID)
 	c.JSON(201, v)
 }
@@ -180,7 +198,7 @@ func (s *Server) ownsMedia(ownerID uint, url, kind string) bool {
 
 func (s *Server) getVideo(c *gin.Context) {
 	var v Video
-	if s.DB.Preload("Author").First(&v, c.Param("id")).Error != nil || v.Status != "published" {
+	if s.DB.Preload("Author").First(&v, c.Param("id")).Error != nil || (v.Status != "published" && v.AuthorID != uid(c)) || v.Status == "deleted" {
 		respondError(c, 404, "video not found")
 		return
 	}
@@ -189,7 +207,7 @@ func (s *Server) getVideo(c *gin.Context) {
 
 func (s *Server) deleteVideo(c *gin.Context) {
 	var v Video
-	if s.DB.Where("id = ? AND status = ?", c.Param("id"), "published").First(&v).Error != nil {
+	if s.DB.Where("id = ? AND status <> ?", c.Param("id"), "deleted").First(&v).Error != nil {
 		respondError(c, 404, "video not found")
 		return
 	}
@@ -197,8 +215,13 @@ func (s *Server) deleteVideo(c *gin.Context) {
 		respondError(c, 403, "only the author can delete this video")
 		return
 	}
-	if err := s.DB.Model(&v).Update("status", "deleted").Error; err != nil {
+	res := s.DB.Model(&Video{}).Where("id = ? AND author_id = ? AND status <> ?", v.ID, uid(c), "deleted").Update("status", "deleted")
+	if res.Error != nil {
 		respondError(c, 500, "could not delete video")
+		return
+	}
+	if res.RowsAffected == 0 {
+		respondError(c, 404, "video not found")
 		return
 	}
 	s.invalidateFeed(c.Request.Context())
@@ -207,7 +230,7 @@ func (s *Server) deleteVideo(c *gin.Context) {
 
 func (s *Server) updateVideo(c *gin.Context) {
 	var v Video
-	if s.DB.Where("id = ? AND status = ?", c.Param("id"), "published").First(&v).Error != nil {
+	if s.DB.Where("id = ? AND status <> ?", c.Param("id"), "deleted").First(&v).Error != nil {
 		respondError(c, 404, "video not found")
 		return
 	}
@@ -259,7 +282,26 @@ func (s *Server) updateVideo(c *gin.Context) {
 		respondError(c, 400, "no video fields supplied")
 		return
 	}
-	if err := s.DB.Model(&v).Updates(updates).Error; err != nil {
+	if err := s.DB.Transaction(func(tx *gorm.DB) error {
+		var current Video
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND author_id = ? AND status <> ?", v.ID, uid(c), "deleted").First(&current).Error; err != nil {
+			return err
+		}
+		needProcessing := s.ffmpegBin != "" && in.MediaURL != nil && (*in.MediaURL != current.MediaURL || current.Status == "failed")
+		if needProcessing {
+			updates["status"] = "processing"
+			if in.CoverURL == nil {
+				updates["cover_url"] = ""
+			}
+		}
+		if err := tx.Model(&current).Updates(updates).Error; err != nil {
+			return err
+		}
+		if needProcessing {
+			return tx.Create(&VideoProcessJob{VideoID: v.ID, SourceURL: *in.MediaURL, AvailableAt: time.Now().UTC()}).Error
+		}
+		return nil
+	}); err != nil {
 		respondError(c, 500, "could not edit video")
 		return
 	}
@@ -273,7 +315,14 @@ func (s *Server) updateVideo(c *gin.Context) {
 
 func (s *Server) userVideos(c *gin.Context) {
 	var items []Video
-	if err := s.DB.Preload("Author").Where("author_id = ? AND status = ?", c.Param("id"), "published").Order("created_at DESC").Limit(50).Find(&items).Error; err != nil {
+	authorID, _ := strconv.ParseUint(c.Param("id"), 10, 32)
+	q := s.DB.Preload("Author").Where("author_id = ?", authorID)
+	if uid(c) == uint(authorID) && authorID > 0 {
+		q = q.Where("status <> ?", "deleted")
+	} else {
+		q = q.Where("status = ?", "published")
+	}
+	if err := q.Order("created_at DESC").Limit(50).Find(&items).Error; err != nil {
 		respondError(c, 500, "could not load user videos")
 		return
 	}

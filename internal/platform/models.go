@@ -29,6 +29,20 @@ type Video struct {
 	CreatedAt     time.Time `json:"created_at" gorm:"index:idx_video_feed,priority:2,sort:desc;index:idx_video_author,priority:2,sort:desc"`
 }
 
+// VideoProcessJob survives restarts and lets another instance reclaim an expired lease.
+type VideoProcessJob struct {
+	ID          uint       `gorm:"primaryKey"`
+	VideoID     uint       `gorm:"index;not null"`
+	SourceURL   string     `gorm:"size:512;not null"`
+	Attempts    int        `gorm:"not null;default:0"`
+	AvailableAt time.Time  `gorm:"index;not null"`
+	LeaseUntil  *time.Time `gorm:"index"`
+	DoneAt      *time.Time `gorm:"index"`
+	DeadAt      *time.Time `gorm:"index"`
+	LastError   string     `gorm:"size:500"`
+	CreatedAt   time.Time
+}
+
 // MediaAsset records an uploaded file and the account allowed to publish it.
 type MediaAsset struct {
 	ID        uint   `gorm:"primaryKey"`

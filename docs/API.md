@@ -17,7 +17,7 @@ JSON errors use `{ "error": "..." }`; authenticated routes require `Authorizatio
 | POST | `/api/videos` | Publish a video from an uploaded media URL | Implemented |
 | GET/PATCH/DELETE | `/api/videos/:id` | Read, author-edit or author-delete a video | Implemented |
 | GET | `/api/feed?scene=...&limit=...&cursor=...` | Timeline, following, score-ranked recommendation/hot feed | Implemented |
-| GET | `/api/users/:id/videos` | Public creator videos | Implemented |
+| GET | `/api/users/:id/videos` | Public creator videos; owner also sees processing/failed | Implemented |
 | GET | `/api/users/:id/presence` | Local online state and last-seen timestamp | Implemented |
 | PUT/DELETE | `/api/users/me/following/:id` | Follow/unfollow | Implemented |
 | GET | `/api/users/me/following`, `/api/users/me/followers` | Relationship lists | Implemented |
@@ -43,6 +43,8 @@ JSON errors use `{ "error": "..." }`; authenticated routes require `Authorizatio
 Registration accepts `username`, `password` (8–72 characters), and optional `nickname`; login accepts `username` and `password`. Both return a user and 24-hour access token. Passwords use bcrypt and tokens use HS256 with `JWT_SECRET`.
 
 Single-file upload uses multipart field `file`; allowed extensions are MP4, WebM, MOV, JPEG, PNG, and WebP. The server enforces a 250 MiB limit and records the uploader. Video publication accepts `title`, optional `description`, `media_url`, and optional `cover_url`; the video and cover must be files uploaded by the same account. `PATCH /api/videos/:id` accepts those same editable fields and checks author ownership. Avatar updates through `PATCH /api/users/me` also require an image uploaded by that account.
+
+When `FFMPEG_BIN` is enabled (the Compose default), `POST /api/videos` returns a video with `status: "processing"`. Only its author can read it via `GET /api/videos/:id` or see it in `GET /api/users/:id/videos`; public Feed/search/profile queries include only `published` videos. The worker transcodes to H.264 MP4 with AAC if the input has audio, generates a JPEG cover unless a user cover was supplied, then sets `status: "published"`. Three failed attempts set `status: "failed"`, visible to the author. The author can retry by PATCHing `media_url` to an owned upload, including the same source URL; deleting a processing or failed video is allowed. Without `FFMPEG_BIN`, publication remains immediate and uses the uploaded file.
 
 For resumable upload, create a session with `{"filename":"clip.mp4","size":123456,"sha256":"<optional 64-character hex digest>"}`. The response returns a random `id`, `chunk_size` (4 MiB), and `expires_at`. Send bytes to `PUT /api/uploads/sessions/:id/chunks/0`, then higher indices. The final chunk may be shorter. `GET /api/uploads/sessions/:id` returns `uploaded_chunks` for retry after interruption. `POST /api/uploads/sessions/:id/complete` returns a media URL and actual SHA256; repeated completion is safe. Sessions expire after 24 hours. Chunk bodies must match their exact expected size; a repeated index with different bytes returns 409.
 

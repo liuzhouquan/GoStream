@@ -16,14 +16,15 @@ import (
 )
 
 type Server struct {
-	DB       *gorm.DB
-	Secret   []byte
-	MediaDir string
-	Hub      *Hub
-	metrics  *serverMetrics
-	cache    *redisFeedCache
-	realtime *realtimeBridge
-	upgrader websocket.Upgrader
+	DB        *gorm.DB
+	Secret    []byte
+	MediaDir  string
+	Hub       *Hub
+	metrics   *serverMetrics
+	cache     *redisFeedCache
+	realtime  *realtimeBridge
+	ffmpegBin string
+	upgrader  websocket.Upgrader
 }
 
 func NewServer(db *gorm.DB, secret, mediaDir string) *Server {
@@ -76,7 +77,7 @@ func (s *Server) Router() *gin.Engine {
 	api.GET("/search", s.search)
 	api.GET("/users/:id", s.getUser)
 	api.GET("/users/:id/presence", s.userPresence)
-	api.GET("/users/:id/videos", s.userVideos)
+	api.GET("/users/:id/videos", s.optionalAuth(), s.userVideos)
 	api.GET("/users/me", s.auth(), s.me)
 	api.PATCH("/users/me", s.auth(), s.updateMe)
 	api.PUT("/users/me/following/:id", s.auth(), s.follow)
@@ -84,7 +85,7 @@ func (s *Server) Router() *gin.Engine {
 	api.GET("/users/me/following", s.auth(), s.following)
 	api.GET("/users/me/followers", s.auth(), s.followers)
 	api.POST("/videos", s.auth(), s.createVideo)
-	api.GET("/videos/:id", s.getVideo)
+	api.GET("/videos/:id", s.optionalAuth(), s.getVideo)
 	api.PATCH("/videos/:id", s.auth(), s.updateVideo)
 	api.DELETE("/videos/:id", s.auth(), s.deleteVideo)
 	api.PUT("/videos/:id/like", s.auth(), s.action("like", true))

@@ -25,6 +25,13 @@ func TestMySQLRecommendationIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var existing int64
+	if err := db.Model(&Video{}).Where("status = ?", "published").Count(&existing).Error; err != nil {
+		t.Fatal(err)
+	}
+	if existing != 0 {
+		t.Fatalf("recommendation integration test needs an isolated database without published videos; found %d", existing)
+	}
 	tx := db.Begin()
 	if tx.Error != nil {
 		t.Fatal(tx.Error)

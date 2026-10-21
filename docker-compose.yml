@@ -36,6 +36,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deploy}
       MEDIA_DIR: /app/data/media
       REDIS_ADDR: redis:6379
+      FFMPEG_BIN: /usr/bin/ffmpeg
     depends_on:
       mysql:
         condition: service_healthy

@@ -15,14 +15,17 @@ flowchart LR
   Handlers --> Outbox[(DB outbox)]
   Outbox --> Worker[Notification worker]
   Worker --> WS[Local WebSocket hub]
+  Handlers --> ProcessQueue[(DB video_process_jobs)]
+  ProcessQueue --> MediaWorker[FFmpeg worker]
+  MediaWorker --> Media
   API --> Media[(Local media and private chunk staging)]
   Prometheus --> API
   API <-->|WebSocket| Web
 ```
 
-`cmd/gostream` loads configuration, opens SQLite or MySQL, migrates GORM models, and starts the HTTP server, outbox worker, upload cleanup, optional Redis subscriber, and optional pprof listener. `internal/platform/server.go` owns routing, JWT middleware, CORS, readiness and shared server state. `uploads.go` handles resumable sessions, `outbox.go` handles notification dispatch, `metrics.go` registers bounded route labels, `hub.go` owns the local WebSocket registry, and `realtime.go` relays events across instances. The web client is static HTML/CSS/JavaScript under `web/`.
+`cmd/gostream` loads configuration, opens SQLite or MySQL, migrates GORM models, and starts the HTTP server, outbox worker, upload cleanup, optional FFmpeg worker, optional Redis subscriber, and optional pprof listener. `internal/platform/server.go` owns routing, JWT middleware, CORS, readiness and shared server state. `uploads.go` handles resumable sessions, `video_processing.go` handles durable transcode jobs, `outbox.go` handles notification dispatch, `metrics.go` registers bounded route labels, `hub.go` owns the local WebSocket registry, and `realtime.go` relays events across instances. The web client is static HTML/CSS/JavaScript under `web/`.
 
-The default local SQLite profile reduces setup for learning. The MySQL/Redis Compose profile has been started and exercised with real API requests. Redis provides a short-lived anonymous Feed cache. RabbitMQ, object storage, and video processing are not wired into this version.
+The default local SQLite profile reduces setup for learning and publishes uploaded files immediately unless `FFMPEG_BIN` is set. The MySQL/Redis Compose profile has been started and exercised with real API requests, including FFmpeg processing. Redis provides a short-lived anonymous Feed cache. RabbitMQ and object storage are not wired into this version.
 
 ## Feed choices
 
@@ -36,4 +39,4 @@ Likes/favorites and follows use database transactions; comments and their denorm
 
 ## Security and operations
 
-Passwords use bcrypt; JWT uses `JWT_SECRET`, and video publication/edit/deletion checks ownership. Upload sessions use random IDs, fixed-size chunks, hashes, and a completion lease. Pending chunks are outside the public media directory. Basic media signature checks are present; FFmpeg transcoding remains. `/health` checks the process, `/ready` pings the database, and `/metrics` exposes Prometheus counters/histograms. In-process, loopback SQLite, and one-host Compose MySQL/Redis Feed measurements are documented. k6 and multi-host load tests remain pending.
+Passwords use bcrypt; JWT uses `JWT_SECRET`, and video publication/edit/deletion checks ownership. Upload sessions use random IDs, fixed-size chunks, hashes, and a completion lease. Pending chunks are outside the public media directory. Basic media signature checks are present; the optional FFmpeg worker performs actual media decoding, transcoding and thumbnail generation before a video enters public Feed. `/health` checks the process, `/ready` pings the database, and `/metrics` exposes Prometheus counters/histograms. In-process, loopback SQLite, and one-host Compose MySQL/Redis Feed measurements are documented. k6 and multi-host load tests remain pending.

@@ -7,6 +7,7 @@ RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /out/gostream ./cmd/gos
 
 FROM golang:1.27.2-bookworm
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 COPY --from=build /out/gostream /usr/local/bin/gostream
 COPY web ./web
 RUN mkdir -p /app/data/media
