@@ -54,6 +54,10 @@ func (s *Server) feed(c *gin.Context) {
 		respondError(c, 400, "scene must be timeline, following, recommend, or hot")
 		return
 	}
+	if scene == "following" && uid(c) == 0 {
+		respondError(c, 401, "sign in to view following feed")
+		return
+	}
 	rawCursor := c.Query("cursor")
 	if len(rawCursor) > 512 {
 		respondError(c, 400, "invalid cursor")
@@ -76,8 +80,13 @@ func (s *Server) feed(c *gin.Context) {
 		}
 	}
 	cacheVersion := ""
-	if s.cache != nil && uid(c) == 0 && scene != "following" {
-		cached, version, err := s.cache.load(c.Request.Context(), scene, limit, rawCursor)
+	cacheViewerID := uint(0)
+	cacheEligible := s.cache != nil && ((uid(c) == 0 && scene != "following") || (scene == "following" && rawCursor == ""))
+	if cacheEligible {
+		if scene == "following" {
+			cacheViewerID = uid(c)
+		}
+		cached, version, err := s.cache.load(c.Request.Context(), scene, limit, rawCursor, cacheViewerID)
 		if err != nil {
 			s.metrics.feedCache.WithLabelValues("error").Inc()
 		} else {
@@ -100,12 +109,6 @@ func (s *Server) feed(c *gin.Context) {
 		}
 		q = q.Order("videos.created_at DESC").Order("videos.id DESC")
 	case "following":
-		raw, ok := c.Get("userID")
-		_ = raw
-		if !ok {
-			respondError(c, 401, "sign in to view following feed")
-			return
-		}
 		q = q.Joins("JOIN follows ON follows.followee_id = videos.author_id AND follows.follower_id = ?", uid(c))
 		if cur.ID > 0 {
 			q = q.Where("videos.created_at < ? OR (videos.created_at = ? AND videos.id < ?)", cursorTime, cursorTime, cur.ID)
@@ -185,7 +188,7 @@ func (s *Server) feed(c *gin.Context) {
 	response := gin.H{"scene": scene, "items": entries, "next_cursor": next, "has_more": more}
 	if cacheVersion != "" {
 		if data, err := json.Marshal(response); err == nil {
-			if err := s.cache.store(c.Request.Context(), cacheVersion, scene, limit, rawCursor, data); err != nil {
+			if err := s.cache.store(c.Request.Context(), cacheVersion, scene, limit, rawCursor, cacheViewerID, data); err != nil {
 				s.metrics.feedCache.WithLabelValues("error").Inc()
 			}
 			c.Data(200, "application/json; charset=utf-8", data)

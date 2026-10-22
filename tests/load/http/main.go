@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,17 +15,29 @@ import (
 
 func main() {
 	url := flag.String("url", "http://127.0.0.1:8080/api/feed?scene=timeline&limit=20", "full Feed URL")
+	tokenFile := flag.String("token-file", "", "optional path to a JWT access token file for authenticated Feed requests")
 	requests := flag.Int("requests", 3000, "measured HTTP requests")
 	concurrency := flag.Int("concurrency", 10, "concurrent workers")
 	flag.Parse()
 	if *requests < 1 || *concurrency < 1 || *concurrency > 1000 {
 		panic("requests and concurrency must be positive; concurrency must be <= 1000")
 	}
+	token := ""
+	if *tokenFile != "" {
+		data, err := os.ReadFile(*tokenFile)
+		if err != nil {
+			panic(err)
+		}
+		token = strings.TrimSpace(string(data))
+		if token == "" {
+			panic("token file is empty")
+		}
+	}
 	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{MaxIdleConns: *concurrency, MaxIdleConnsPerHost: *concurrency}}
 	defer client.CloseIdleConnections()
 	// Warm the handler and optional cache without including startup in the result.
 	for i := 0; i < 20; i++ {
-		res, err := client.Get(*url)
+		res, err := getFeed(client, *url, token)
 		if err != nil {
 			panic(err)
 		}
@@ -45,7 +59,7 @@ func main() {
 			defer wg.Done()
 			for range jobs {
 				began := time.Now()
-				res, err := client.Get(*url)
+				res, err := getFeed(client, *url, token)
 				if err != nil {
 					failures.Add(1)
 					continue
@@ -82,4 +96,15 @@ func main() {
 	}
 	fmt.Printf("URL=%s requests=%d concurrency=%d success=%d failures=%d elapsed=%s bytes=%d\n", *url, *requests, *concurrency, len(values), failures.Load(), elapsed.Round(time.Millisecond), bytesRead.Load())
 	fmt.Printf("throughput=%.1f requests/s p50=%s p95=%s p99=%s\n", float64(len(values))/elapsed.Seconds(), percentile(.50).Round(time.Microsecond), percentile(.95).Round(time.Microsecond), percentile(.99).Round(time.Microsecond))
+}
+
+func getFeed(client *http.Client, url, token string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return client.Do(req)
 }

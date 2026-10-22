@@ -11,7 +11,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const feedCacheTTL = 5 * time.Second
+const (
+	feedCacheTTL        = 5 * time.Second
+	followingVersionTTL = 24 * time.Hour
+)
 
 type redisFeedCache struct {
 	client        *redis.Client
@@ -33,26 +36,47 @@ func (r *redisFeedCache) trip() {
 	r.mu.Unlock()
 }
 
-func (r *redisFeedCache) key(version, scene string, limit int, cursor string) string {
+func (r *redisFeedCache) key(version, scene string, limit int, cursor string, viewerID uint) string {
 	digest := sha256.Sum256([]byte(cursor))
-	return fmt.Sprintf("gostream:feed:%s:%s:%d:%x", version, scene, limit, digest)
+	return fmt.Sprintf("gostream:feed:%s:%s:%d:%d:%x", version, scene, viewerID, limit, digest)
 }
 
-func (r *redisFeedCache) load(ctx context.Context, scene string, limit int, cursor string) ([]byte, string, error) {
+func followingVersionKey(viewerID uint) string {
+	return fmt.Sprintf("gostream:feed:following:%d:version", viewerID)
+}
+
+func cacheVersionValue(value any) string {
+	if value == nil {
+		return "0"
+	}
+	return fmt.Sprint(value)
+}
+
+func (r *redisFeedCache) load(ctx context.Context, scene string, limit int, cursor string, viewerID uint) ([]byte, string, error) {
 	if !r.allowed() {
 		return nil, "", errors.New("Redis cache circuit open")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
-	version, err := r.client.Get(ctx, "gostream:feed:version").Result()
-	if errors.Is(err, redis.Nil) {
-		version, err = "0", nil
+	version := ""
+	var err error
+	if scene == "following" {
+		values, readErr := r.client.MGet(ctx, "gostream:feed:version", followingVersionKey(viewerID)).Result()
+		err = readErr
+		if err == nil {
+			version = cacheVersionValue(values[0]) + ":" + cacheVersionValue(values[1])
+		}
+	} else {
+		version, err = r.client.Get(ctx, "gostream:feed:version").Result()
+		if errors.Is(err, redis.Nil) {
+			version, err = "0", nil
+		}
 	}
 	if err != nil {
 		r.trip()
 		return nil, "", err
 	}
-	value, err := r.client.Get(ctx, r.key(version, scene, limit, cursor)).Bytes()
+	value, err := r.client.Get(ctx, r.key(version, scene, limit, cursor, viewerID)).Bytes()
 	if errors.Is(err, redis.Nil) {
 		return nil, version, nil
 	}
@@ -63,13 +87,13 @@ func (r *redisFeedCache) load(ctx context.Context, scene string, limit int, curs
 	return value, version, nil
 }
 
-func (r *redisFeedCache) store(ctx context.Context, version, scene string, limit int, cursor string, value []byte) error {
+func (r *redisFeedCache) store(ctx context.Context, version, scene string, limit int, cursor string, viewerID uint, value []byte) error {
 	if !r.allowed() {
 		return errors.New("Redis cache circuit open")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
 	defer cancel()
-	if err := r.client.Set(ctx, r.key(version, scene, limit, cursor), value, feedCacheTTL).Err(); err != nil {
+	if err := r.client.Set(ctx, r.key(version, scene, limit, cursor, viewerID), value, feedCacheTTL).Err(); err != nil {
 		r.trip()
 		return err
 	}
@@ -89,11 +113,39 @@ func (r *redisFeedCache) bump(ctx context.Context) error {
 	return nil
 }
 
+func (r *redisFeedCache) bumpFollowing(ctx context.Context, viewerID uint) error {
+	if !r.allowed() {
+		return errors.New("Redis cache circuit open")
+	}
+	ctx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	key := followingVersionKey(viewerID)
+	_, err := r.client.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.Incr(ctx, key)
+		pipe.Expire(ctx, key, followingVersionTTL)
+		return nil
+	})
+	if err != nil {
+		r.trip()
+		return err
+	}
+	return nil
+}
+
 func (s *Server) invalidateFeed(ctx context.Context) {
 	if s.cache == nil {
 		return
 	}
 	if err := s.cache.bump(ctx); err != nil {
+		s.metrics.feedCache.WithLabelValues("invalidate_error").Inc()
+	}
+}
+
+func (s *Server) invalidateFollowing(ctx context.Context, viewerID uint) {
+	if s.cache == nil {
+		return
+	}
+	if err := s.cache.bumpFollowing(ctx, viewerID); err != nil {
 		s.metrics.feedCache.WithLabelValues("invalidate_error").Inc()
 	}
 }

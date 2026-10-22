@@ -32,6 +32,7 @@ func (s *Server) follow(c *gin.Context) {
 		respondError(c, 500, "could not follow user")
 		return
 	}
+	s.invalidateFollowing(c.Request.Context(), uid(c))
 	c.JSON(200, gin.H{"following": true})
 }
 
@@ -40,6 +41,7 @@ func (s *Server) unfollow(c *gin.Context) {
 		respondError(c, 500, "could not unfollow user")
 		return
 	}
+	s.invalidateFollowing(c.Request.Context(), uid(c))
 	c.JSON(200, gin.H{"following": false})
 }
 

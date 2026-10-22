@@ -11,7 +11,7 @@ go vet ./...
 node --check web/app.js
 ```
 
-API integration tests use temporary SQLite databases. The suite covers registration/auth, media ownership, video editing, video processing privacy/retry/atomic completion and delete races, equal-timestamp Feed cursors, preference/recency ranking, recommendation cursor paging, interaction transitions, resumable upload recovery and expiry, direct/group WebSocket delivery, direct and group reconnect replay, presence, outbox retries/dead letters, and Prometheus output. `feed_cache_test.go` uses an in-process Redis-compatible server to check cache hits, mutation invalidation, and database fallback; `realtime_test.go` uses two server instances sharing SQL and a Redis-compatible Pub/Sub server to check cross-instance direct, group, and notification delivery plus remote presence/disconnect. These tests do not measure real Redis performance. A Chrome check also verified group creation, a live WebSocket connection and persisted group history after reopening the conversation.
+API integration tests use temporary SQLite databases. The suite covers registration/auth, media ownership, video editing, video processing privacy/retry/atomic completion and delete races, equal-timestamp Feed cursors, preference/recency ranking, recommendation cursor paging, interaction transitions, resumable upload recovery and expiry, direct/group WebSocket delivery, direct and group reconnect replay, presence, outbox retries/dead letters, and Prometheus output. `feed_cache_test.go` uses an in-process Redis-compatible server to check anonymous cache hits, mutation invalidation, and database fallback. `following_cache_test.go` checks viewer isolation, follow/unfollow and like invalidation, cursor bypass, version TTL, and Redis failure fallback. `realtime_test.go` uses two server instances sharing SQL and a Redis-compatible Pub/Sub server to check cross-instance direct, group, and notification delivery plus remote presence/disconnect. These tests do not measure real Redis performance. A Chrome check also verified group creation, a live WebSocket connection and persisted group history after reopening the conversation.
 
 `mysql_integration_test.go` is opt-in because it needs a migrated MySQL database with no existing published videos. Set `GOSTREAM_TEST_MYSQL_DSN` to that isolated database's DSN, then run `go test ./internal/platform -run '^TestMySQLRecommendationIntegration$' -count=1`. It inserts authors, a viewer, follows, interactions and videos inside one transaction, checks three recommendation cursor pages, and rolls back. This test passed against the Compose MySQL 8.4 instance on 2026-10-21 before demo media rows were added; the `users` and `videos` tables were empty afterward. The test now fails early with a clear message if published rows already exist.
 
@@ -47,9 +47,13 @@ In another terminal:
 go run ./tests/load/http -url 'http://127.0.0.1:18080/api/feed?scene=timeline&limit=20' -requests 3000 -concurrency 10
 ```
 
-The seed inserts synthetic published rows with placeholder media URLs, solely for Feed measurement. The driver warms the endpoint with 20 requests, then measures complete HTTP GETs, counts non-200/error responses, and reports completed requests per elapsed wall time and client-side latency percentiles. This is a small local diagnostic, not a distributed load generator. A k6 script is also available for a later container/MySQL run:
+For authenticated scenes, save a test account's `access_token` in a private file and pass `-token-file /path/to/token.txt`. The token is read from the file and is not printed by the load driver. The k6 script accepts `TOKEN` for authenticated requests.
+
+The seed inserts synthetic published rows with placeholder media URLs, solely for Feed measurement. The driver warms the endpoint with 20 requests, then measures complete HTTP GETs, counts non-200/error responses, and reports completed requests per elapsed wall time and client-side latency percentiles. This is a small local diagnostic, not a distributed load generator.
 
 To seed the Compose MySQL after `docker compose up -d --build`, use `go run ./tests/load/seed -driver mysql -dsn 'gostream:gostream-local@tcp(127.0.0.1:3307)/gostream?charset=utf8mb4&parseTime=True&loc=Local' -videos 1000`. This creates synthetic rows in the active database; use an isolated Compose project or database for repeatable tests.
+
+A k6 script is also available for a later container/MySQL run:
 
 ```sh
 BASE_URL=http://127.0.0.1:8080 SCENE=timeline VUS=10 DURATION=30s k6 run tests/load/feed.js
@@ -92,9 +96,24 @@ On 2026-10-21, Docker Desktop WSL integration became available. `docker compose 
 
 The median observed throughput was 3,784.4 versus 1,155.8 requests/s, about 3.3× for this warm first-page, read-only scenario. The API's cumulative `gostream_feed_cache_total` counter read 9,058 hits and 7 misses after the runs and earlier smoke requests. This comparison does not cover authenticated recommendations, cursor pages, writes, mixed traffic, many authors, or larger datasets. It is a local measurement, not a production capacity claim. The temporary container and all test-only data were removed; Compose was restarted on empty volumes and `/ready` passed.
 
+## Authenticated following first-page comparison
+
+On 2026-10-22, the rebuilt Go 1.27.2 API used Compose MySQL 8.4 and Redis 8.2.9 on the same WSL2 host. A temporary author had 1,000 synthetic published videos; one temporary viewer followed that author. Three existing demo videos belonged to other authors and were excluded by the following query. A second container used the same API image, MySQL, and JWT settings with `REDIS_ADDR` empty. Both containers returned identical first-page video IDs for `scene=following&limit=20`. The standard-library HTTP driver sent a JWT from a private token file, warmed each endpoint with 20 requests, then measured 3,000 requests at concurrency 10. Runs alternated cached and uncached variants; all 18,000 requests succeeded.
+
+| Variant | Run | Requests/s | P50 | P95 | P99 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Redis page cache | 1 | 3199.6 | 2.909 ms | 4.911 ms | 7.421 ms |
+| Redis page cache | 2 | 3424.0 | 2.788 ms | 4.288 ms | 5.287 ms |
+| Redis page cache | 3 | 3487.6 | 2.728 ms | 4.179 ms | 5.326 ms |
+| MySQL read, no page cache | 1 | 869.7 | 10.935 ms | 16.185 ms | 24.067 ms |
+| MySQL read, no page cache | 2 | 882.4 | 10.937 ms | 15.892 ms | 19.146 ms |
+| MySQL read, no page cache | 3 | 902.0 | 10.802 ms | 15.351 ms | 17.743 ms |
+
+Median observed throughput was 3,424.0 versus 882.4 requests/s, about 3.9× for this warm first page. The rebuilt API's cumulative cache counter showed 9,058 hits and 9 misses after the runs and functional smoke requests. This measures repeated reads for one viewer and one author. It does not establish performance for cache misses, cursor pages, many active viewers, concurrent follow/video writes, or multiple hosts. The temporary viewer, author, 1,000 videos, token file, Redis version key, and uncached container were removed; `/ready` still passed.
+
 ## Remaining measurements
 
-k6 and multi-host load tests have not been run. MySQL/Redis results above are local, anonymous first-page measurements only; authenticated recommendation and cross-node performance remain unmeasured. FFmpeg processing throughput, queue wait time, and CPU use have not been benchmarked.
+k6 and multi-host load tests have not been run. MySQL/Redis results above cover anonymous recommendation and authenticated following first pages on one host; authenticated recommendation and cross-node performance remain unmeasured. FFmpeg processing throughput, queue wait time, and CPU use have not been benchmarked.
 
 ## Media processing verification
 

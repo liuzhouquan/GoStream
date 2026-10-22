@@ -24,7 +24,7 @@ Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECR
 
 - Go 1.27.2, Gin, GORM, SQLite for zero-service local development
 - MySQL and Redis Compose profile, verified with real end-to-end requests
-- Optional Redis cache for anonymous timeline/recommend/hot Feed pages; database fallback and bounded staleness
+- Optional Redis cache for anonymous timeline/recommend/hot pages and each viewer's following first page; database fallback and bounded staleness
 - Explainable recommendation ranking using interactions, freshness, followed authors, and recently interacted authors
 - JWT access tokens and bcrypt password hashing
 - Local media storage, single-file and 4 MiB resumable chunk uploads, media ownership checks, and file integrity checks
@@ -37,7 +37,7 @@ Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECR
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/API.md](docs/API.md), [docs/DATABASE.md](docs/DATABASE.md), [docs/TECHNICAL_DESIGN.md](docs/TECHNICAL_DESIGN.md), [docs/LEARNING_GUIDE.md](docs/LEARNING_GUIDE.md), and [docs/INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md).
 
-Performance and verification status is recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md). An in-process benchmark, a local HTTP driver, and a three-run MySQL/Redis Compose comparison are included. k6 and multi-host load testing remain pending.
+Performance and verification status is recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md). An in-process benchmark, a local HTTP driver with authenticated request support, and three-run MySQL/Redis Compose comparisons for anonymous recommendation and authenticated following pages are included. k6 and multi-host load testing remain pending.
 
 ## License
 

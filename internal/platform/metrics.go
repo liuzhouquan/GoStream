@@ -32,7 +32,7 @@ func newServerMetrics() *serverMetrics {
 			Name: "gostream_outbox_events_total", Help: "Outbox event dispatch attempts by result.",
 		}, []string{"result"}),
 		feedCache: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "gostream_feed_cache_total", Help: "Anonymous Feed cache outcomes.",
+			Name: "gostream_feed_cache_total", Help: "Feed page cache outcomes.",
 		}, []string{"result"}),
 		wsConnections: prometheus.NewGauge(prometheus.GaugeOpts{
 			Name: "gostream_websocket_connections", Help: "Current local WebSocket connections.",

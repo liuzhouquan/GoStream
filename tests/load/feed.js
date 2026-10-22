@@ -3,6 +3,7 @@ import { check, sleep } from 'k6';
 
 const base = (__ENV.BASE_URL || 'http://127.0.0.1:8080').replace(/\/$/, '');
 const scene = __ENV.SCENE || 'timeline';
+const token = __ENV.TOKEN || '';
 
 export const options = {
   vus: Number(__ENV.VUS || 10),
@@ -14,7 +15,8 @@ export const options = {
 };
 
 export default function () {
-  const res = http.get(`${base}/api/feed?scene=${encodeURIComponent(scene)}&limit=10`);
+  const params = token ? { headers: { Authorization: `Bearer ${token}` } } : {};
+  const res = http.get(`${base}/api/feed?scene=${encodeURIComponent(scene)}&limit=10`, params);
   check(res, {
     'feed responds 200': (r) => r.status === 200,
     'response contains items': (r) => Array.isArray(r.json('items')),
