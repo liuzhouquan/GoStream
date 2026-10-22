@@ -84,3 +84,48 @@ func TestMySQLRecommendationIntegration(t *testing.T) {
 		cursor = page.NextCursor
 	}
 }
+
+// This catches MySQL strict-mode rejection of a zero DATETIME lease. The
+// database schema must already be migrated by the application.
+func TestMySQLResumableUploadLeaseIntegration(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to run the MySQL integration test")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	defer tx.Rollback()
+	s := NewServer(tx, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	h := s.Router()
+	_, token := registerTestUser(t, h, fmt.Sprintf("mysqlupload%d", time.Now().UnixNano()))
+	created := request(t, h, http.MethodPost, "/api/uploads/sessions", token, map[string]any{"filename": "clip.mp4", "size": len(sampleMP4)})
+	var session UploadSession
+	if created.Code != http.StatusCreated || json.Unmarshal(created.Body.Bytes(), &session) != nil || session.ID == "" {
+		t.Fatalf("create upload session: %d %s", created.Code, created.Body.String())
+	}
+	if err := tx.First(&session, "id = ?", session.ID).Error; err != nil || session.LeaseUntil != nil {
+		t.Fatalf("new session lease: %+v %v", session.LeaseUntil, err)
+	}
+	path := "/api/uploads/sessions/" + session.ID
+	if res := request(t, h, http.MethodPost, path+"/complete", token, nil); res.Code != http.StatusConflict {
+		t.Fatalf("incomplete session: %d %s", res.Code, res.Body.String())
+	}
+	if err := tx.First(&session, "id = ?", session.ID).Error; err != nil || session.Status != "open" || session.LeaseUntil != nil {
+		t.Fatalf("failed completion did not clear lease: %+v %v", session, err)
+	}
+	if res := putTestChunk(h, token, session.ID, 0, sampleMP4); res.Code != http.StatusOK {
+		t.Fatalf("upload chunk: %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, h, http.MethodPost, path+"/complete", token, nil); res.Code != http.StatusOK {
+		t.Fatalf("complete upload: %d %s", res.Code, res.Body.String())
+	}
+	if err := tx.First(&session, "id = ?", session.ID).Error; err != nil || session.Status != "completed" || session.LeaseUntil != nil {
+		t.Fatalf("completed session lease: %+v %v", session, err)
+	}
+}

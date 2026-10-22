@@ -66,7 +66,7 @@ type UploadSession struct {
 	SHA256     string     `json:"-" gorm:"size:64"`
 	ChunkSize  int64      `json:"chunk_size" gorm:"not null"`
 	Status     string     `json:"status" gorm:"size:16;not null;default:open"`
-	LeaseUntil time.Time  `json:"-"`
+	LeaseUntil *time.Time `json:"-"`
 	CleanedAt  *time.Time `json:"-"`
 	ExpiresAt  time.Time  `json:"expires_at" gorm:"index"`
 	CreatedAt  time.Time  `json:"created_at"`

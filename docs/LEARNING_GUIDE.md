@@ -9,7 +9,7 @@ Read the current implementation in this order:
 5. `internal/platform/outbox.go`: follow a committed notification through lease, retry and dead-letter states.
 6. `internal/platform/hub.go`, `messages.go`, `groups.go`, and `realtime.go`: trace direct/group WebSocket persistence, membership, local delivery, Redis relay, replay and ACK.
 7. `internal/platform/feed_cache.go`, `feed_cache_test.go`, `recommend_test.go`, `mysql_integration_test.go`, `metrics.go`, `server_test.go`, and `feed_bench_test.go`: trace ranking, cache invalidation, SQLite/MySQL verification and measured behavior.
-8. `web`: API-driven demonstration flows.
+8. `web/app.js`: follow API-driven demonstration flows, especially failed-video retry through resumable upload, video PATCH, and status refresh; compare with `TestMySQLResumableUploadLeaseIntegration` to see why real database checks matter.
 9. `docs/ARCHITECTURE.md`, `TECHNICAL_DESIGN.md`, then the remaining guides.
 
 The current package keeps handlers, business rules, and GORM queries together. A useful next exercise is to move transaction rules into application services and queries behind repository interfaces while preserving the tests. Compare the current Redis page cache and later fanout changes against the recorded benchmark and a future k6 run.

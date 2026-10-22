@@ -210,7 +210,7 @@ func (s *Server) completeUploadSession(c *gin.Context) {
 	}
 	now := time.Now().UTC()
 	claim := s.DB.Model(&UploadSession{}).
-		Where("id = ? AND owner_id = ? AND expires_at > ? AND (status = ? OR (status = ? AND lease_until < ?))", session.ID, uid(c), now, "open", "completing", now).
+		Where("id = ? AND owner_id = ? AND expires_at > ? AND (status = ? OR (status = ? AND (lease_until IS NULL OR lease_until < ?)))", session.ID, uid(c), now, "open", "completing", now).
 		Updates(map[string]any{"status": "completing", "lease_until": now.Add(5 * time.Minute)})
 	if claim.Error != nil {
 		respondError(c, 500, "could not claim upload session")
@@ -223,7 +223,7 @@ func (s *Server) completeUploadSession(c *gin.Context) {
 	succeeded := false
 	defer func() {
 		if !succeeded {
-			_ = s.DB.Model(&UploadSession{}).Where("id = ? AND status = ?", session.ID, "completing").Updates(map[string]any{"status": "open", "lease_until": time.Time{}}).Error
+			_ = s.DB.Model(&UploadSession{}).Where("id = ? AND status = ?", session.ID, "completing").Updates(map[string]any{"status": "open", "lease_until": nil}).Error
 		}
 	}()
 	var chunks []UploadChunk
@@ -337,7 +337,7 @@ func (s *Server) completeUploadSession(c *gin.Context) {
 				return errors.New("existing asset conflicts with upload")
 			}
 		}
-		updated := tx.Model(&UploadSession{}).Where("id = ? AND status = ?", session.ID, "completing").Update("status", "completed")
+		updated := tx.Model(&UploadSession{}).Where("id = ? AND status = ?", session.ID, "completing").Updates(map[string]any{"status": "completed", "lease_until": nil})
 		if updated.Error != nil {
 			return updated.Error
 		}
