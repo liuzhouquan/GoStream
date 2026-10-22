@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -148,6 +149,9 @@ func (s *Server) removeGroupMember(c *gin.Context) {
 		if err := tx.Where("group_id = ? AND user_id = ?", group.ID, target).Delete(&GroupMember{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("group_id = ? AND user_id = ?", group.ID, target).Delete(&GroupDeviceRead{}).Error; err != nil {
+			return err
+		}
 		return tx.Where("group_id = ? AND user_id = ?", group.ID, target).Delete(&GroupRead{}).Error
 	}); err != nil {
 		respondError(c, 500, "could not remove group member")
@@ -192,6 +196,10 @@ func (s *Server) groupHistory(c *gin.Context) {
 }
 
 func (s *Server) groupUnread(c *gin.Context) {
+	deviceID, valid := requestDeviceID(c)
+	if !valid {
+		return
+	}
 	group, member, ok := s.memberGroup(c)
 	if !ok {
 		return
@@ -201,15 +209,30 @@ func (s *Server) groupUnread(c *gin.Context) {
 		respondError(c, 500, "could not load read cursor")
 		return
 	}
+	lastAckID := read.LastAckID
+	if deviceID != "" {
+		var deviceRead GroupDeviceRead
+		err := s.DB.Where("group_id = ? AND user_id = ? AND device_id = ?", group.ID, member.UserID, deviceID).First(&deviceRead).Error
+		if err == nil {
+			lastAckID = deviceRead.LastAckID
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			respondError(c, 500, "could not load device read cursor")
+			return
+		}
+	}
 	var count int64
-	if err := s.DB.Model(&GroupMessage{}).Where("group_id = ? AND id > ? AND sender_id <> ?", group.ID, read.LastAckID, uid(c)).Count(&count).Error; err != nil {
+	if err := s.DB.Model(&GroupMessage{}).Where("group_id = ? AND id > ? AND sender_id <> ?", group.ID, lastAckID, uid(c)).Count(&count).Error; err != nil {
 		respondError(c, 500, "could not count unread messages")
 		return
 	}
-	c.JSON(200, gin.H{"unread_count": count, "last_ack_id": read.LastAckID})
+	c.JSON(200, gin.H{"unread_count": count, "last_ack_id": lastAckID})
 }
 
 func (s *Server) ackGroupMessage(c *gin.Context) {
+	deviceID, valid := requestDeviceID(c)
+	if !valid {
+		return
+	}
 	group, _, ok := s.memberGroup(c)
 	if !ok {
 		return
@@ -222,6 +245,35 @@ func (s *Server) ackGroupMessage(c *gin.Context) {
 	var msg GroupMessage
 	if err := s.DB.Where("id = ? AND group_id = ?", messageID, group.ID).First(&msg).Error; err != nil {
 		respondError(c, 404, "group message not found")
+		return
+	}
+	if deviceID != "" {
+		var shared GroupRead
+		if err := s.DB.Where("group_id = ? AND user_id = ?", group.ID, uid(c)).First(&shared).Error; err != nil {
+			respondError(c, 404, "group membership not found")
+			return
+		}
+		initial := shared.LastAckID
+		if msg.ID > initial {
+			initial = msg.ID
+		}
+		err := s.DB.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&GroupDeviceRead{GroupID: group.ID, UserID: uid(c), DeviceID: deviceID, LastAckID: initial}).Error; err != nil {
+				return err
+			}
+			return tx.Model(&GroupDeviceRead{}).Where("group_id = ? AND user_id = ? AND device_id = ?", group.ID, uid(c), deviceID).
+				UpdateColumn("last_ack_id", gorm.Expr("CASE WHEN last_ack_id < ? THEN ? ELSE last_ack_id END", msg.ID, msg.ID)).Error
+		})
+		if err != nil {
+			respondError(c, 500, "could not acknowledge group message")
+			return
+		}
+		var deviceRead GroupDeviceRead
+		if err := s.DB.Where("group_id = ? AND user_id = ? AND device_id = ?", group.ID, uid(c), deviceID).First(&deviceRead).Error; err != nil {
+			respondError(c, 500, "could not load device read cursor")
+			return
+		}
+		c.JSON(200, gin.H{"acked": true, "last_ack_id": deviceRead.LastAckID})
 		return
 	}
 	res := s.DB.Model(&GroupRead{}).Where("group_id = ? AND user_id = ?", group.ID, uid(c)).

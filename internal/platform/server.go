@@ -134,7 +134,7 @@ func cors() gin.HandlerFunc {
 				c.Header("Vary", "Origin")
 			}
 		}
-		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-GoStream-Device-ID")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(204)

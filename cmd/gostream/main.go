@@ -54,7 +54,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("connect database: %v", err)
 	}
-	if err = db.AutoMigrate(&platform.User{}, &platform.MediaAsset{}, &platform.UploadSession{}, &platform.UploadChunk{}, &platform.Video{}, &platform.VideoProcessJob{}, &platform.Follow{}, &platform.VideoAction{}, &platform.Comment{}, &platform.Notification{}, &platform.ChatMessage{}, &platform.ChatGroup{}, &platform.GroupMember{}, &platform.GroupMessage{}, &platform.GroupRead{}, &platform.OutboxEvent{}); err != nil {
+	if err = db.AutoMigrate(&platform.User{}, &platform.MediaAsset{}, &platform.UploadSession{}, &platform.UploadChunk{}, &platform.Video{}, &platform.VideoProcessJob{}, &platform.Follow{}, &platform.VideoAction{}, &platform.Comment{}, &platform.Notification{}, &platform.ChatMessage{}, &platform.MessageDeviceAck{}, &platform.ChatGroup{}, &platform.GroupMember{}, &platform.GroupMessage{}, &platform.GroupRead{}, &platform.GroupDeviceRead{}, &platform.OutboxEvent{}); err != nil {
 		log.Fatalf("migrate database: %v", err)
 	}
 	sqlDB, err := db.DB()

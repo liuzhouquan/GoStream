@@ -129,6 +129,16 @@ type ChatMessage struct {
 	AckedAt     *time.Time `json:"acked_at" gorm:"index:idx_message_unacked,priority:2"`
 }
 
+// MessageDeviceAck records exact incoming messages displayed on one device.
+// The legacy ChatMessage.AckedAt remains available to clients without a device ID.
+type MessageDeviceAck struct {
+	ID        uint      `gorm:"primaryKey"`
+	UserID    uint      `gorm:"uniqueIndex:ux_message_device_ack,priority:1;not null"`
+	DeviceID  string    `gorm:"uniqueIndex:ux_message_device_ack,priority:2;size:36;not null"`
+	MessageID uint      `gorm:"uniqueIndex:ux_message_device_ack,priority:3;not null"`
+	CreatedAt time.Time `gorm:"not null"`
+}
+
 type ChatGroup struct {
 	ID        uint      `json:"id" gorm:"primaryKey"`
 	OwnerID   uint      `json:"owner_id" gorm:"index;not null"`
@@ -157,6 +167,15 @@ type GroupRead struct {
 	GroupID   uint `gorm:"uniqueIndex:ux_group_read,priority:1;not null"`
 	UserID    uint `gorm:"uniqueIndex:ux_group_read,priority:2;not null"`
 	LastAckID uint `gorm:"not null;default:0"`
+}
+
+// GroupDeviceRead advances independently of the account-level legacy cursor.
+type GroupDeviceRead struct {
+	ID        uint   `gorm:"primaryKey"`
+	GroupID   uint   `gorm:"uniqueIndex:ux_group_device_read,priority:1;not null"`
+	UserID    uint   `gorm:"uniqueIndex:ux_group_device_read,priority:2;not null"`
+	DeviceID  string `gorm:"uniqueIndex:ux_group_device_read,priority:3;size:36;not null"`
+	LastAckID uint   `gorm:"not null;default:0"`
 }
 
 type OutboxEvent struct {

@@ -3,9 +3,18 @@ const $ = (selector, root = document) => root.querySelector(selector);
 const content = $('#content');
 const titles = {feed:'发现灵感',following:'关注动态',hot:'热门视频',search:'发现创作者',upload:'发布作品',notifications:'通知中心',chat:'即时消息',profile:'个人主页'};
 const esc = (s='') => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function currentDeviceID(){
+  if(!state.user)return '';
+  const key=`gostream.device.${state.user.id}`;
+  let id=localStorage.getItem(key);
+  if(!/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id||'')){
+    id=crypto.randomUUID();localStorage.setItem(key,id);
+  }
+  return id;
+}
 async function api(path, options={}) {
   const headers = new Headers(options.headers || {});
-  if (state.token) headers.set('Authorization', `Bearer ${state.token}`);
+  if (state.token){headers.set('Authorization', `Bearer ${state.token}`);if(state.user)headers.set('X-GoStream-Device-ID',currentDeviceID());}
   if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type','application/json');
   const res = await fetch(path,{...options,headers});
   if (res.status === 204) return null;
@@ -93,7 +102,9 @@ async function renderChat(){
 function ensureSocket(){
   if(!state.token || (state.socket&&state.socket.readyState<=1))return;
   const protocol=location.protocol==='https:'?'wss':'ws';
-  const ws=new WebSocket(`${protocol}://${location.host}/api/ws`,['gostream',`gostream.jwt.${state.token}`]);
+  const protocols=['gostream',`gostream.jwt.${state.token}`],deviceID=currentDeviceID();
+  if(deviceID)protocols.push(`gostream.device.${deviceID}`);
+  const ws=new WebSocket(`${protocol}://${location.host}/api/ws`,protocols);
   state.socket=ws;
   ws.onopen=()=>{state.socketRetry=0;if(state.heartbeatTimer)clearInterval(state.heartbeatTimer);state.heartbeatTimer=setInterval(()=>{if(ws.readyState===1)ws.send(JSON.stringify({type:'ping'}));},25000);toast('即时消息已连接');};
   ws.onmessage=event=>{

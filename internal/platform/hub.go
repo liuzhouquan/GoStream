@@ -129,11 +129,17 @@ type socketEvent struct {
 }
 
 func (s *Server) websocket(c *gin.Context) {
-	var raw string
+	var raw, deviceID string
 	for _, protocol := range websocket.Subprotocols(c.Request) {
 		if strings.HasPrefix(protocol, "gostream.jwt.") {
 			raw = strings.TrimPrefix(protocol, "gostream.jwt.")
-			break
+		} else if strings.HasPrefix(protocol, deviceProtocolPrefix) {
+			var ok bool
+			deviceID, ok = normalizeDeviceID(strings.TrimPrefix(protocol, deviceProtocolPrefix))
+			if !ok {
+				respondError(c, http.StatusBadRequest, "invalid device ID")
+				return
+			}
 		}
 	}
 	userID, err := s.userFromToken(raw)
@@ -174,8 +180,8 @@ func (s *Server) websocket(c *gin.Context) {
 	_ = conn.SetReadDeadline(time.Now().Add(70 * time.Second))
 	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(70 * time.Second)) })
 	_ = client.send(gin.H{"type": "ready"})
-	s.replayPending(userID, client)
-	s.replayPendingGroups(userID, client)
+	s.replayPending(userID, deviceID, client)
+	s.replayPendingGroups(userID, deviceID, client)
 	for {
 		var e socketEvent
 		if err = conn.ReadJSON(&e); err != nil {
@@ -239,9 +245,9 @@ func (s *Server) websocket(c *gin.Context) {
 	}
 }
 
-func (s *Server) replayPending(userID uint, client *hubClient) {
+func (s *Server) replayPending(userID uint, deviceID string, client *hubClient) {
 	var rows []ChatMessage
-	if err := s.DB.Where("recipient_id = ? AND acked_at IS NULL", userID).Order("id ASC").Limit(101).Find(&rows).Error; err != nil {
+	if err := s.pendingDirectMessages(userID, deviceID).Order("chat_messages.id ASC").Limit(101).Find(&rows).Error; err != nil {
 		_ = client.send(gin.H{"type": "error", "message": "pending messages could not be loaded"})
 		return
 	}
@@ -259,12 +265,18 @@ func (s *Server) replayPending(userID uint, client *hubClient) {
 	}
 }
 
-func (s *Server) replayPendingGroups(userID uint, client *hubClient) {
+func (s *Server) replayPendingGroups(userID uint, deviceID string, client *hubClient) {
 	var rows []GroupMessage
-	err := s.DB.Model(&GroupMessage{}).
+	q := s.DB.Model(&GroupMessage{}).
 		Joins("JOIN group_members ON group_members.group_id = group_messages.group_id AND group_members.user_id = ?", userID).
-		Joins("JOIN group_reads ON group_reads.group_id = group_messages.group_id AND group_reads.user_id = ?", userID).
-		Where("group_messages.id > group_reads.last_ack_id AND group_messages.sender_id <> ?", userID).
+		Joins("JOIN group_reads ON group_reads.group_id = group_messages.group_id AND group_reads.user_id = ?", userID)
+	if deviceID != "" {
+		q = q.Joins("LEFT JOIN group_device_reads ON group_device_reads.group_id = group_messages.group_id AND group_device_reads.user_id = ? AND group_device_reads.device_id = ?", userID, deviceID).
+			Where("group_messages.id > COALESCE(group_device_reads.last_ack_id, group_reads.last_ack_id)").Select("group_messages.*")
+	} else {
+		q = q.Where("group_messages.id > group_reads.last_ack_id")
+	}
+	err := q.Where("group_messages.sender_id <> ?", userID).
 		Order("group_messages.id ASC").Limit(101).Find(&rows).Error
 	if err != nil {
 		_ = client.send(gin.H{"type": "error", "message": "pending group messages could not be loaded"})

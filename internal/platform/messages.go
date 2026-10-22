@@ -6,7 +6,18 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
+
+func (s *Server) pendingDirectMessages(userID uint, deviceID string) *gorm.DB {
+	q := s.DB.Model(&ChatMessage{}).Where("chat_messages.recipient_id = ? AND chat_messages.acked_at IS NULL", userID)
+	if deviceID != "" {
+		q = q.Joins("LEFT JOIN message_device_acks ON message_device_acks.message_id = chat_messages.id AND message_device_acks.user_id = ? AND message_device_acks.device_id = ?", userID, deviceID).
+			Where("message_device_acks.id IS NULL").Select("chat_messages.*")
+	}
+	return q
+}
 
 func (s *Server) history(c *gin.Context) {
 	other, err := strconv.ParseUint(c.Query("user_id"), 10, 64)
@@ -45,7 +56,11 @@ func (s *Server) history(c *gin.Context) {
 }
 
 func (s *Server) unreadMessages(c *gin.Context) {
-	after, err := strconv.ParseUint(c.DefaultQuery("after_id", "0"), 10, 32)
+	deviceID, ok := requestDeviceID(c)
+	if !ok {
+		return
+	}
+	after, err := strconv.ParseUint(c.DefaultQuery("after_id", "0"), 10, 64)
 	if err != nil {
 		respondError(c, 400, "invalid after_id")
 		return
@@ -56,7 +71,8 @@ func (s *Server) unreadMessages(c *gin.Context) {
 		return
 	}
 	rows := make([]ChatMessage, 0)
-	if err := s.DB.Where("recipient_id = ? AND acked_at IS NULL AND id > ?", uid(c), after).Order("id ASC").Limit(limit + 1).Find(&rows).Error; err != nil {
+	q := s.pendingDirectMessages(uid(c), deviceID).Where("chat_messages.id > ?", after)
+	if err := q.Order("chat_messages.id ASC").Limit(limit + 1).Find(&rows).Error; err != nil {
 		respondError(c, 500, "could not load unread messages")
 		return
 	}
@@ -72,7 +88,33 @@ func (s *Server) unreadMessages(c *gin.Context) {
 }
 
 func (s *Server) ackMessage(c *gin.Context) {
-	id := c.Param("id")
+	deviceID, ok := requestDeviceID(c)
+	if !ok {
+		return
+	}
+	id, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || id == 0 {
+		respondError(c, http.StatusBadRequest, "invalid message ID")
+		return
+	}
+	if deviceID != "" {
+		var count int64
+		if err := s.DB.Model(&ChatMessage{}).Where("id = ? AND recipient_id = ?", id, uid(c)).Count(&count).Error; err != nil {
+			respondError(c, 500, "could not check message")
+			return
+		}
+		if count == 0 {
+			respondError(c, 404, "message not found")
+			return
+		}
+		created, err := s.ackDeviceMessages(uid(c), deviceID, []uint{uint(id)})
+		if err != nil {
+			respondError(c, 500, "could not acknowledge message")
+			return
+		}
+		c.JSON(200, gin.H{"acked": true, "acked_count": created})
+		return
+	}
 	now := time.Now()
 	res := s.DB.Model(&ChatMessage{}).Where("id = ? AND recipient_id = ? AND acked_at IS NULL", id, uid(c)).Update("acked_at", now)
 	if res.Error != nil {
@@ -90,6 +132,10 @@ func (s *Server) ackMessage(c *gin.Context) {
 }
 
 func (s *Server) ackMessages(c *gin.Context) {
+	deviceID, ok := requestDeviceID(c)
+	if !ok {
+		return
+	}
 	var in struct {
 		IDs []uint `json:"ids"`
 	}
@@ -118,10 +164,28 @@ func (s *Server) ackMessages(c *gin.Context) {
 		respondError(c, http.StatusNotFound, "message not found")
 		return
 	}
+	if deviceID != "" {
+		created, err := s.ackDeviceMessages(uid(c), deviceID, in.IDs)
+		if err != nil {
+			respondError(c, http.StatusInternalServerError, "could not acknowledge messages")
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"acked": true, "acked_count": created})
+		return
+	}
 	res := s.DB.Model(&ChatMessage{}).Where("id IN ? AND recipient_id = ? AND acked_at IS NULL", in.IDs, uid(c)).Update("acked_at", time.Now().UTC())
 	if res.Error != nil {
 		respondError(c, http.StatusInternalServerError, "could not acknowledge messages")
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"acked": true, "acked_count": res.RowsAffected})
+}
+
+func (s *Server) ackDeviceMessages(userID uint, deviceID string, ids []uint) (int64, error) {
+	rows := make([]MessageDeviceAck, 0, len(ids))
+	for _, id := range ids {
+		rows = append(rows, MessageDeviceAck{UserID: userID, DeviceID: deviceID, MessageID: id})
+	}
+	result := s.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows)
+	return result.RowsAffected, result.Error
 }
