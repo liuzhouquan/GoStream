@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"net/http"
 	"strconv"
 	"time"
 
@@ -8,14 +9,39 @@ import (
 )
 
 func (s *Server) history(c *gin.Context) {
-	other, err := strconv.ParseUint(c.Query("user_id"), 10, 32)
-	if err != nil || other == 0 {
+	other, err := strconv.ParseUint(c.Query("user_id"), 10, 64)
+	if err != nil || other == 0 || other == uint64(uid(c)) {
 		respondError(c, 400, "user_id is required")
 		return
 	}
+	before, err := strconv.ParseUint(c.DefaultQuery("before_id", "0"), 10, 64)
+	if err != nil {
+		respondError(c, 400, "invalid before_id")
+		return
+	}
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	if err != nil || limit < 1 || limit > 100 {
+		respondError(c, 400, "limit must be 1-100")
+		return
+	}
+	q := s.DB.Where("(sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?)", uid(c), other, other, uid(c))
+	if before > 0 {
+		q = q.Where("id < ?", before)
+	}
 	rows := make([]ChatMessage, 0)
-	s.DB.Where("(sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?)", uid(c), other, other, uid(c)).Order("created_at DESC").Limit(100).Find(&rows)
-	c.JSON(200, gin.H{"items": rows})
+	if err := q.Order("id DESC").Limit(limit + 1).Find(&rows).Error; err != nil {
+		respondError(c, 500, "could not load messages")
+		return
+	}
+	more := len(rows) > limit
+	if more {
+		rows = rows[:limit]
+	}
+	next := uint(0)
+	if len(rows) > 0 {
+		next = rows[len(rows)-1].ID
+	}
+	c.JSON(200, gin.H{"items": rows, "next_cursor": next, "has_more": more})
 }
 
 func (s *Server) unreadMessages(c *gin.Context) {
@@ -61,4 +87,41 @@ func (s *Server) ackMessage(c *gin.Context) {
 		}
 	}
 	c.JSON(200, gin.H{"acked": true})
+}
+
+func (s *Server) ackMessages(c *gin.Context) {
+	var in struct {
+		IDs []uint `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&in); err != nil || len(in.IDs) == 0 || len(in.IDs) > 100 {
+		respondError(c, http.StatusBadRequest, "ids must contain 1-100 message IDs")
+		return
+	}
+	seen := make(map[uint]struct{}, len(in.IDs))
+	for _, id := range in.IDs {
+		if id == 0 {
+			respondError(c, http.StatusBadRequest, "invalid message ID")
+			return
+		}
+		if _, exists := seen[id]; exists {
+			respondError(c, http.StatusBadRequest, "duplicate message ID")
+			return
+		}
+		seen[id] = struct{}{}
+	}
+	var count int64
+	if err := s.DB.Model(&ChatMessage{}).Where("id IN ? AND recipient_id = ?", in.IDs, uid(c)).Count(&count).Error; err != nil {
+		respondError(c, http.StatusInternalServerError, "could not check messages")
+		return
+	}
+	if count != int64(len(in.IDs)) {
+		respondError(c, http.StatusNotFound, "message not found")
+		return
+	}
+	res := s.DB.Model(&ChatMessage{}).Where("id IN ? AND recipient_id = ? AND acked_at IS NULL", in.IDs, uid(c)).Update("acked_at", time.Now().UTC())
+	if res.Error != nil {
+		respondError(c, http.StatusInternalServerError, "could not acknowledge messages")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"acked": true, "acked_count": res.RowsAffected})
 }

@@ -120,10 +120,10 @@ type Notification struct {
 }
 
 type ChatMessage struct {
-	ID          uint       `json:"id" gorm:"primaryKey"`
+	ID          uint       `json:"id" gorm:"primaryKey;index:idx_message_thread_id,priority:3,sort:desc"`
 	ClientID    string     `json:"client_id" gorm:"uniqueIndex:ux_message_client,priority:1;size:80;not null"`
-	SenderID    uint       `json:"sender_id" gorm:"uniqueIndex:ux_message_client,priority:2;index:idx_message_thread,priority:1;not null"`
-	RecipientID uint       `json:"recipient_id" gorm:"index:idx_message_thread,priority:2;index:idx_message_unacked,priority:1;not null"`
+	SenderID    uint       `json:"sender_id" gorm:"uniqueIndex:ux_message_client,priority:2;index:idx_message_thread,priority:1;index:idx_message_thread_id,priority:1;not null"`
+	RecipientID uint       `json:"recipient_id" gorm:"index:idx_message_thread,priority:2;index:idx_message_thread_id,priority:2;index:idx_message_unacked,priority:1;not null"`
 	Body        string     `json:"body" gorm:"size:4000;not null"`
 	CreatedAt   time.Time  `json:"created_at" gorm:"index:idx_message_thread,priority:3"`
 	AckedAt     *time.Time `json:"acked_at" gorm:"index:idx_message_unacked,priority:2"`

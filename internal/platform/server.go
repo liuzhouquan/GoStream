@@ -102,6 +102,7 @@ func (s *Server) Router() *gin.Engine {
 	api.PATCH("/notifications/read", s.auth(), s.markNotificationsRead)
 	api.GET("/messages", s.auth(), s.history)
 	api.GET("/messages/unread", s.auth(), s.unreadMessages)
+	api.POST("/messages/acks", s.auth(), s.ackMessages)
 	api.POST("/messages/:id/ack", s.auth(), s.ackMessage)
 	api.POST("/groups", s.auth(), s.createGroup)
 	api.GET("/groups", s.auth(), s.listGroups)
