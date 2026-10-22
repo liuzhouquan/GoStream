@@ -61,9 +61,15 @@ func TestVideoProcessingStateRetriesAndPrivacy(t *testing.T) {
 	if err := db.Where("video_id = ?", video.ID).First(&job).Error; err != nil || job.DeadAt == nil || job.Attempts != videoProcessAttempts {
 		t.Fatalf("dead job state: %+v %v", job, err)
 	}
+	if err := db.Model(&video).Updates(map[string]any{"duration_ms": 2000, "width": 640, "height": 360}).Error; err != nil {
+		t.Fatal(err)
+	}
 	retry := request(t, h, http.MethodPatch, path, token, map[string]string{"media_url": asset.URL})
 	if retry.Code != http.StatusOK || !jsonContainsStatus(retry.Body.Bytes(), "processing") {
 		t.Fatalf("retry failed video: %d %s", retry.Code, retry.Body.String())
+	}
+	if err := db.First(&video, video.ID).Error; err != nil || video.DurationMS != 0 || video.Width != 0 || video.Height != 0 {
+		t.Fatalf("retry retained old metadata: %+v %v", video, err)
 	}
 	claimed, err := s.claimVideoProcessJob()
 	if err != nil || claimed == nil {
@@ -72,7 +78,7 @@ func TestVideoProcessingStateRetriesAndPrivacy(t *testing.T) {
 	if deleted := request(t, h, http.MethodDelete, path, token, nil); deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete processing video: %d %s", deleted.Code, deleted.Body.String())
 	}
-	published, _, err := s.completeVideoJob(*claimed, "/media/late.mp4", "/media/late.jpg", 10, 10)
+	published, _, err := s.completeVideoJob(*claimed, "/media/late.mp4", "/media/late.jpg", 10, 10, videoMetadata{DurationMS: 1000, Width: 160, Height: 90})
 	if err != nil || published {
 		t.Fatalf("deleted video was republished: published=%v err=%v", published, err)
 	}
@@ -101,11 +107,11 @@ func TestVideoProcessingCompletionPublishesAtomically(t *testing.T) {
 	if err != nil || job == nil {
 		t.Fatalf("claim: %+v %v", job, err)
 	}
-	published, coverUsed, err := s.completeVideoJob(*job, "/media/processed-test.mp4", "/media/cover-test.jpg", 200, 20)
+	published, coverUsed, err := s.completeVideoJob(*job, "/media/processed-test.mp4", "/media/cover-test.jpg", 200, 20, videoMetadata{DurationMS: 1000, Width: 160, Height: 90})
 	if err != nil || !published || !coverUsed {
 		t.Fatalf("complete: published=%v cover=%v err=%v", published, coverUsed, err)
 	}
-	if err := db.First(&video, video.ID).Error; err != nil || video.Status != "published" || video.MediaURL != "/media/processed-test.mp4" || video.CoverURL != "/media/cover-test.jpg" {
+	if err := db.First(&video, video.ID).Error; err != nil || video.Status != "published" || video.MediaURL != "/media/processed-test.mp4" || video.CoverURL != "/media/cover-test.jpg" || video.DurationMS != 1000 || video.Width != 160 || video.Height != 90 {
 		t.Fatalf("published state: %+v %v", video, err)
 	}
 	if got := request(t, h, http.MethodGet, "/api/feed", "", nil); !jsonContainsVideo(got.Body.Bytes(), video.ID) {
@@ -115,7 +121,7 @@ func TestVideoProcessingCompletionPublishesAtomically(t *testing.T) {
 	if err := db.Model(&MediaAsset{}).Where("url IN ?", []string{video.MediaURL, video.CoverURL}).Count(&count).Error; err != nil || count != 2 {
 		t.Fatalf("generated assets not registered: %d %v", count, err)
 	}
-	if _, _, err := s.completeVideoJob(*job, "/media/other.mp4", "/media/other.jpg", 1, 1); err == nil {
+	if _, _, err := s.completeVideoJob(*job, "/media/other.mp4", "/media/other.jpg", 1, 1, videoMetadata{}); err == nil {
 		t.Fatal("completed job accepted duplicate completion")
 	}
 }

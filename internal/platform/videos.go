@@ -288,6 +288,11 @@ func (s *Server) updateVideo(c *gin.Context) {
 			return err
 		}
 		needProcessing := s.ffmpegBin != "" && in.MediaURL != nil && (*in.MediaURL != current.MediaURL || current.Status == "failed")
+		if in.MediaURL != nil && (*in.MediaURL != current.MediaURL || needProcessing) {
+			updates["duration_ms"] = 0
+			updates["width"] = 0
+			updates["height"] = 0
+		}
 		if needProcessing {
 			updates["status"] = "processing"
 			if in.CoverURL == nil {

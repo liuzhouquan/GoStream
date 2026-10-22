@@ -26,6 +26,9 @@ type Video struct {
 	CommentCount  int64     `json:"comment_count"`
 	FavoriteCount int64     `json:"favorite_count"`
 	PlayCount     int64     `json:"play_count"`
+	DurationMS    int64     `json:"duration_ms" gorm:"not null;default:0"`
+	Width         int       `json:"width" gorm:"not null;default:0"`
+	Height        int       `json:"height" gorm:"not null;default:0"`
 	CreatedAt     time.Time `json:"created_at" gorm:"index:idx_video_feed,priority:2,sort:desc;index:idx_video_author,priority:2,sort:desc"`
 }
 

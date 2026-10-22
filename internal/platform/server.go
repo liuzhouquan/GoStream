@@ -16,15 +16,16 @@ import (
 )
 
 type Server struct {
-	DB        *gorm.DB
-	Secret    []byte
-	MediaDir  string
-	Hub       *Hub
-	metrics   *serverMetrics
-	cache     *redisFeedCache
-	realtime  *realtimeBridge
-	ffmpegBin string
-	upgrader  websocket.Upgrader
+	DB         *gorm.DB
+	Secret     []byte
+	MediaDir   string
+	Hub        *Hub
+	metrics    *serverMetrics
+	cache      *redisFeedCache
+	realtime   *realtimeBridge
+	ffmpegBin  string
+	ffprobeBin string
+	upgrader   websocket.Upgrader
 }
 
 func NewServer(db *gorm.DB, secret, mediaDir string) *Server {

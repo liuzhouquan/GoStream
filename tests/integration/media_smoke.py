@@ -68,11 +68,14 @@ def main():
         raise RuntimeError("processed media is not MP4")
     if not cover_bytes.startswith(b"\xff\xd8"):
         raise RuntimeError("generated cover is not JPEG")
+    if item.get("duration_ms", 0) <= 0 or item.get("width", 0) <= 0 or item.get("height", 0) <= 0:
+        raise RuntimeError("published video is missing probed duration or dimensions")
     feed = call(base, "/api/feed?scene=timeline&limit=20")
     if not any(row["id"] == video_id for row in feed["items"]):
         raise RuntimeError("processed video is absent from public Feed")
     print(json.dumps({"video_id": video_id, "status": item["status"],
                       "media_bytes": len(media_bytes), "cover_bytes": len(cover_bytes),
+                      "duration_ms": item["duration_ms"], "width": item["width"], "height": item["height"],
                       "media_url": item["media_url"], "cover_url": item["cover_url"]}))
 
 

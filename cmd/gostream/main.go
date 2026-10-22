@@ -67,7 +67,12 @@ func main() {
 		if _, err := exec.LookPath(ffmpegBin); err != nil {
 			log.Fatalf("FFMPEG_BIN is unavailable: %v", err)
 		}
+		ffprobeBin := env("FFPROBE_BIN", "ffprobe")
+		if _, err := exec.LookPath(ffprobeBin); err != nil {
+			log.Fatalf("FFPROBE_BIN is unavailable: %v", err)
+		}
 		server.UseFFmpeg(ffmpegBin)
+		server.UseFFprobe(ffprobeBin)
 	}
 	if redisAddr := os.Getenv("REDIS_ADDR"); redisAddr != "" {
 		client := redis.NewClient(&redis.Options{Addr: redisAddr, DialTimeout: 500 * time.Millisecond, ReadTimeout: 100 * time.Millisecond, WriteTimeout: 100 * time.Millisecond, MaxRetries: 0})

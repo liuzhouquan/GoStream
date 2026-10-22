@@ -18,7 +18,12 @@ import (
 
 const videoProcessAttempts = 3
 
-func (s *Server) UseFFmpeg(binary string) { s.ffmpegBin = binary }
+func (s *Server) UseFFmpeg(binary string) {
+	s.ffmpegBin = binary
+	s.ffprobeBin = "ffprobe"
+}
+
+func (s *Server) UseFFprobe(binary string) { s.ffprobeBin = binary }
 
 // RunVideoProcessing claims durable jobs. A crashed worker leaves a lease that
 // another instance can reclaim. Only one process handles a job at a time.
@@ -106,7 +111,7 @@ func (s *Server) processVideoJob(ctx context.Context, job VideoProcessJob) error
 		return err
 	}
 	if video.Status == "deleted" || video.MediaURL != job.SourceURL {
-		_, _, err := s.completeVideoJob(job, "", "", 0, 0)
+		_, _, err := s.completeVideoJob(job, "", "", 0, 0, videoMetadata{})
 		return err
 	}
 	name := strings.TrimPrefix(job.SourceURL, "/media/")
@@ -116,6 +121,9 @@ func (s *Server) processVideoJob(ctx context.Context, job VideoProcessJob) error
 	source := filepath.Join(s.MediaDir, name)
 	if _, err := os.Stat(source); err != nil {
 		return fmt.Errorf("source media unavailable: %w", err)
+	}
+	if _, err := probeVideo(ctx, s.ffprobeBin, source); err != nil {
+		return fmt.Errorf("inspect source media: %w", err)
 	}
 	workDir, err := os.MkdirTemp(filepath.Dir(s.MediaDir), ".gostream-process-")
 	if err != nil {
@@ -135,6 +143,10 @@ func (s *Server) processVideoJob(ctx context.Context, job VideoProcessJob) error
 	if err := runFFmpeg(commandCtx, s.ffmpegBin, "-nostdin", "-hide_banner", "-loglevel", "error", "-i", output,
 		"-vf", "thumbnail,scale=320:-2", "-frames:v", "1", "-y", thumbnail); err != nil {
 		return err
+	}
+	metadata, err := probeVideo(commandCtx, s.ffprobeBin, output)
+	if err != nil {
+		return fmt.Errorf("inspect transcoded media: %w", err)
 	}
 	videoInfo, err := os.Stat(output)
 	if err != nil || videoInfo.Size() == 0 {
@@ -168,7 +180,7 @@ func (s *Server) processVideoJob(ctx context.Context, job VideoProcessJob) error
 	if err := os.Rename(thumbnail, coverPath); err != nil {
 		return err
 	}
-	published, coverUsed, err := s.completeVideoJob(job, "/media/"+videoName, "/media/"+coverName, videoInfo.Size(), coverInfo.Size())
+	published, coverUsed, err := s.completeVideoJob(job, "/media/"+videoName, "/media/"+coverName, videoInfo.Size(), coverInfo.Size(), metadata)
 	if err != nil {
 		return err
 	}
@@ -202,7 +214,7 @@ func randomMediaName(ext string) (string, error) {
 	return hex.EncodeToString(value[:]) + ext, nil
 }
 
-func (s *Server) completeVideoJob(job VideoProcessJob, videoURL, coverURL string, videoSize, coverSize int64) (published, coverUsed bool, err error) {
+func (s *Server) completeVideoJob(job VideoProcessJob, videoURL, coverURL string, videoSize, coverSize int64, metadata videoMetadata) (published, coverUsed bool, err error) {
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		res := tx.Model(&VideoProcessJob{}).Where("id = ? AND lease_until = ? AND done_at IS NULL AND dead_at IS NULL", job.ID, job.LeaseUntil).
@@ -223,7 +235,7 @@ func (s *Server) completeVideoJob(job VideoProcessJob, videoURL, coverURL string
 		if err := tx.Create(&MediaAsset{OwnerID: video.AuthorID, URL: videoURL, Kind: "video", Size: videoSize}).Error; err != nil {
 			return err
 		}
-		updates := map[string]any{"media_url": videoURL, "status": "published"}
+		updates := map[string]any{"media_url": videoURL, "status": "published", "duration_ms": metadata.DurationMS, "width": metadata.Width, "height": metadata.Height}
 		if video.CoverURL == "" {
 			if err := tx.Create(&MediaAsset{OwnerID: video.AuthorID, URL: coverURL, Kind: "image", Size: coverSize}).Error; err != nil {
 				return err
@@ -252,7 +264,8 @@ func (s *Server) failVideoJob(job VideoProcessJob, cause error) {
 	if err := s.DB.Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		updates := map[string]any{"last_error": message, "lease_until": nil}
-		if job.Attempts >= videoProcessAttempts {
+		permanent := errors.Is(cause, errUnsupportedVideo)
+		if permanent || job.Attempts >= videoProcessAttempts {
 			updates["dead_at"] = now
 		} else {
 			updates["available_at"] = now.Add(time.Duration(job.Attempts*job.Attempts) * 5 * time.Second)
@@ -261,7 +274,7 @@ func (s *Server) failVideoJob(job VideoProcessJob, cause error) {
 		if res.Error != nil {
 			return res.Error
 		}
-		if res.RowsAffected == 1 && job.Attempts >= videoProcessAttempts {
+		if res.RowsAffected == 1 && (permanent || job.Attempts >= videoProcessAttempts) {
 			return tx.Model(&Video{}).Where("id = ? AND media_url = ? AND status = ?", job.VideoID, job.SourceURL, "processing").Update("status", "failed").Error
 		}
 		return nil
