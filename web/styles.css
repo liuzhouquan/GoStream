@@ -5,3 +5,17 @@
 .avatar-button{overflow:hidden;padding:0}.avatar-button img{display:block;width:100%;height:100%;object-fit:cover}.profile-avatar{width:64px;height:64px;object-fit:cover;border-radius:50%;margin:12px 0;border:1px solid #ffffff33}.managed-video{min-width:0}.manage-actions{display:flex;gap:12px;margin:8px 0}.video-edit-form{margin:8px 0 20px}
 .profile-video-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:30px 0 16px}.profile-video-heading h2{margin:0}.video-retry-form{margin:8px 0 24px;gap:8px}.video-retry-form input{width:100%;min-width:0}.video-retry-form .retry-progress{margin:0;min-height:1.2em}.primary-button:disabled,.text-button:disabled{opacity:.55;cursor:wait}
 .chat-section-title{margin-top:42px;color:#f5f6f8;font:700 17px Manrope,sans-serif}.group-list{display:flex;flex-wrap:wrap;gap:8px;margin:15px 0 20px}.group-chip{border:1px solid #ffffff22;border-radius:999px;padding:8px 11px;background:#ffffff0a}.group-chip:hover{background:#b8a6ff20}
+
+/* Comment threads */
+.comment-slot{margin-top:12px;padding:12px;border:1px solid var(--line);border-radius:12px;background:#101116;max-height:520px;overflow:auto}
+.comment-list{display:grid;gap:8px}
+.comment-thread{padding:10px}
+.comment-text{line-height:1.55;overflow-wrap:anywhere}
+.comment-tools{display:flex;gap:12px;margin-top:7px}
+.comment-tools .text-button{padding:0}
+.reply-list{display:grid;gap:7px;margin:10px 0 0 12px;padding-left:10px;border-left:2px solid #b8a6ff33}
+.reply-row{padding:9px 11px;background:#171921}
+.reply-form-slot{margin-left:12px}
+.comment-more{margin-top:10px}
+.comment-empty{font-size:11px;color:var(--muted)}
+.comment-slot [hidden]{display:none}

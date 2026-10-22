@@ -96,13 +96,14 @@ type VideoAction struct {
 }
 
 type Comment struct {
-	ID        uint      `json:"id" gorm:"primaryKey"`
-	VideoID   uint      `json:"video_id" gorm:"index:idx_comment_page,priority:1;not null"`
-	UserID    uint      `json:"user_id" gorm:"not null"`
-	User      User      `json:"user,omitempty" gorm:"foreignKey:UserID"`
-	ParentID  *uint     `json:"parent_id" gorm:"index"`
-	Body      string    `json:"body" gorm:"size:2000;not null"`
-	CreatedAt time.Time `json:"created_at" gorm:"index:idx_comment_page,priority:2,sort:desc"`
+	ID         uint      `json:"id" gorm:"primaryKey;index:idx_comment_thread,priority:4,sort:desc"`
+	VideoID    uint      `json:"video_id" gorm:"index:idx_comment_page,priority:1;index:idx_comment_thread,priority:1;not null"`
+	UserID     uint      `json:"user_id" gorm:"not null"`
+	User       User      `json:"user,omitempty" gorm:"foreignKey:UserID"`
+	ParentID   *uint     `json:"parent_id" gorm:"index:idx_comment_thread,priority:2"`
+	Body       string    `json:"body" gorm:"size:2000;not null"`
+	CreatedAt  time.Time `json:"created_at" gorm:"index:idx_comment_page,priority:2,sort:desc;index:idx_comment_thread,priority:3,sort:desc"`
+	ReplyCount int64     `json:"reply_count,omitempty" gorm:"-"`
 }
 
 type Notification struct {

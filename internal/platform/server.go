@@ -95,6 +95,7 @@ func (s *Server) Router() *gin.Engine {
 	api.DELETE("/videos/:id/favorite", s.auth(), s.action("favorite", false))
 	api.POST("/videos/:id/comments", s.auth(), s.createComment)
 	api.GET("/videos/:id/comments", s.comments)
+	api.GET("/videos/:id/comments/:comment_id/replies", s.commentReplies)
 	api.POST("/videos/:id/views", s.recordView)
 	api.GET("/notifications", s.auth(), s.notifications)
 	api.GET("/notifications/unread", s.auth(), s.unread)

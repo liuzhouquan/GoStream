@@ -14,6 +14,8 @@ Following Feed is a database join. Its first page can use a short-lived, viewer-
 
 Counts are maintained synchronously in the same database. A notification and an outbox event are written in the same transaction as a new interaction or comment. The outbox worker leases rows for 30 seconds, retries failed sends with exponential delay, and marks an event dead after eight attempts. The database inbox is authoritative; local WebSocket push is a convenience. The optional Redis page cache is invalidated by advancing a version after successful interaction writes; Redis does not own counters.
 
+Comment threads are one level deep. Root and reply listings use separate `(created_at DESC, id DESC)` keyset pages with a cursor bound to the video and root comment. The API queries `limit + 1` rows and batches reply counts for the visible root IDs. A reply checks that its parent belongs to the same published video, then commits the comment, video counter, and any author/parent notifications in one transaction. The UI loads replies on demand, supports pagination in each thread, and refreshes the relevant page after posting.
+
 ## Messaging semantics
 
 The WebSocket hub in `internal/platform/hub.go` is process-local. A message, notification, and outbox event commit before the sender receives an ACK. `(sender_id, client_id)` makes exact retries resolve to the same stored message; reusing an ID with different content is rejected. A recipient reconnect replays up to 100 unacknowledged messages; `GET /api/messages/unread` pages through the rest. Recipient ACK is an idempotent HTTP call that stores `acked_at`.

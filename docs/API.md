@@ -23,7 +23,8 @@ JSON errors use `{ "error": "..." }`; authenticated routes require `Authorizatio
 | GET | `/api/users/me/following`, `/api/users/me/followers` | Relationship lists | Implemented |
 | PUT/DELETE | `/api/videos/:id/like` | Like state | Implemented |
 | PUT/DELETE | `/api/videos/:id/favorite` | Favorite state | Implemented |
-| POST/GET | `/api/videos/:id/comments` | Create/list comments | Implemented |
+| POST/GET | `/api/videos/:id/comments` | Create a comment or page through top-level comments | Implemented |
+| GET | `/api/videos/:id/comments/:comment_id/replies` | Page through one comment's replies | Implemented |
 | POST | `/api/videos/:id/views` | Increment play count | Implemented |
 | GET | `/api/notifications`, `/api/notifications/unread` | Notification inbox and unread count | Implemented |
 | PATCH | `/api/notifications/read` | Mark all notifications read | Implemented |
@@ -51,6 +52,8 @@ For resumable upload, create a session with `{"filename":"clip.mp4","size":12345
 Feed scenes are `timeline`, `following`, `recommend`, and `hot`; limit defaults to 10 and caps at 50. Timeline and following use descending `(created_at, id)` keyset cursors. Hot sorts by `3*likes + 5*comments + 4*favorites`, then descending video ID. Recommendation adds 12 points for age under 24 hours or 5 for age under seven days, 12 for a followed author, and 6 for an author in the viewer's recent likes/favorites. Anonymous recommendation uses interaction and age only. Recommendation cursors carry a scene and time anchor, expire after 24 hours, and should not be reused for another scene. Cursor values are opaque URL-safe base64 JSON. Responses contain `scene`, `items`, `next_cursor`, and `has_more`.
 
 When a valid optional access token is provided, each Feed item also contains `liked` and `favorited` booleans for that viewer. Anonymous Feed requests return both as `false`.
+
+`POST /api/videos/:id/comments` accepts `{"body":"..."}` for a top-level comment or `{"body":"...","parent_id":123}` to reply to a top-level comment on the same published video. Bodies are trimmed and limited to 2,000 UTF-8 bytes. Replies to replies are rejected with 400. `GET /api/videos/:id/comments` returns only top-level comments; `GET /api/videos/:id/comments/:comment_id/replies` returns that root's direct replies. Both accept `limit` (default 20, maximum 50) and an opaque `cursor`; responses contain `items`, `next_cursor`, and `has_more`, ordered newest first by `(created_at, id)`. Top-level rows include `reply_count` when nonzero. A cursor belongs to one video and one comment thread; reusing it elsewhere returns 400. Listing is public, while posting requires authentication. Each comment notifies the video author unless they wrote it; a reply also notifies the parent author unless they wrote the reply or are the video author. The comment counter and notification outbox entries commit with the comment.
 
 If `REDIS_ADDR` is configured, anonymous timeline/recommend/hot pages and each authenticated viewer's following first page use a five-second Redis cache. The following cache key includes the viewer ID and a version advanced by follow/unfollow. A successful write that changes a video card or interaction score advances the shared cache version. Authenticated non-following requests and following cursor pages read the database; Redis errors also fall back to database reads. Play counts on a cached card may lag by up to five seconds.
 

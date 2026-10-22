@@ -129,3 +129,61 @@ func TestMySQLResumableUploadLeaseIntegration(t *testing.T) {
 		t.Fatalf("completed session lease: %+v %v", session, err)
 	}
 }
+
+// Exercises the comment thread index and equal-timestamp cursor against the
+// MySQL datetime precision used by the Compose database.
+func TestMySQLCommentThreadsIntegration(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to run the MySQL integration test")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !db.Migrator().HasIndex(&Comment{}, "idx_comment_thread") {
+		t.Fatal("comment thread index is missing; start the migrated API first")
+	}
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	defer tx.Rollback()
+	s := NewServer(tx, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	h := s.Router()
+	unique := time.Now().UnixNano()
+	authorID, _ := registerTestUser(t, h, fmt.Sprintf("mysqlca%d", unique))
+	_, commenterToken := registerTestUser(t, h, fmt.Sprintf("mysqlcb%d", unique))
+	video := Video{AuthorID: authorID, Title: "thread", MediaURL: "/media/thread.mp4", Status: "published"}
+	if err := tx.Create(&video).Error; err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/api/videos/%d/comments", video.ID)
+	ids := make([]uint, 0, 3)
+	for _, body := range []string{"root one", "root two"} {
+		res := request(t, h, http.MethodPost, path, commenterToken, map[string]any{"body": body})
+		var comment Comment
+		if res.Code != http.StatusCreated || json.Unmarshal(res.Body.Bytes(), &comment) != nil {
+			t.Fatalf("create root: %d %s", res.Code, res.Body.String())
+		}
+		ids = append(ids, comment.ID)
+	}
+	reply := request(t, h, http.MethodPost, path, commenterToken, map[string]any{"body": "reply", "parent_id": ids[0]})
+	if reply.Code != http.StatusCreated {
+		t.Fatalf("create reply: %d %s", reply.Code, reply.Body.String())
+	}
+	stamp := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := tx.Model(&Comment{}).Where("video_id = ?", video.ID).UpdateColumn("created_at", stamp).Error; err != nil {
+		t.Fatal(err)
+	}
+	first := request(t, h, http.MethodGet, path+"?limit=1", "", nil)
+	var page1 commentPageResponse
+	if first.Code != http.StatusOK || json.Unmarshal(first.Body.Bytes(), &page1) != nil || len(page1.Items) != 1 || page1.Items[0].ID != ids[1] || !page1.HasMore {
+		t.Fatalf("first MySQL page: %d %s", first.Code, first.Body.String())
+	}
+	second := request(t, h, http.MethodGet, path+"?limit=1&cursor="+page1.NextCursor, "", nil)
+	var page2 commentPageResponse
+	if second.Code != http.StatusOK || json.Unmarshal(second.Body.Bytes(), &page2) != nil || len(page2.Items) != 1 || page2.Items[0].ID != ids[0] || page2.Items[0].ReplyCount != 1 || page2.HasMore {
+		t.Fatalf("second MySQL page: %d %s", second.Code, second.Body.String())
+	}
+}
