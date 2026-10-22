@@ -107,6 +107,7 @@ func main() {
 	defer stop()
 	go server.RunOutbox(ctx)
 	go server.RunUploadCleanup(ctx)
+	go server.RunMediaReconciliation(ctx)
 	go server.RunVideoProcessing(ctx)
 	go server.RunRealtimeBridge(ctx)
 	select {

@@ -218,7 +218,7 @@ func (s *Server) completeVideoJob(job VideoProcessJob, videoURL, coverURL string
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		res := tx.Model(&VideoProcessJob{}).Where("id = ? AND lease_until = ? AND done_at IS NULL AND dead_at IS NULL", job.ID, job.LeaseUntil).
-			Updates(map[string]any{"done_at": now, "lease_until": nil, "last_error": ""})
+			Updates(map[string]any{"done_at": now, "lease_until": nil, "last_error": "", "failure_code": ""})
 		if res.Error != nil {
 			return res.Error
 		}
@@ -263,7 +263,12 @@ func (s *Server) failVideoJob(job VideoProcessJob, cause error) {
 	}
 	if err := s.DB.Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
-		updates := map[string]any{"last_error": message, "lease_until": nil}
+		code := "processing_failed"
+		var validation *videoValidationError
+		if errors.As(cause, &validation) {
+			code = validation.Code
+		}
+		updates := map[string]any{"last_error": message, "failure_code": code, "lease_until": nil}
 		permanent := errors.Is(cause, errUnsupportedVideo)
 		if permanent || job.Attempts >= videoProcessAttempts {
 			updates["dead_at"] = now

@@ -57,6 +57,9 @@ func TestVideoProcessingStateRetriesAndPrivacy(t *testing.T) {
 	if err := db.First(&video, video.ID).Error; err != nil || video.Status != "failed" {
 		t.Fatalf("failed video state: %+v %v", video, err)
 	}
+	if owner := request(t, h, http.MethodGet, path, token, nil); owner.Code != http.StatusOK || !jsonContainsProcessingError(owner.Body.Bytes(), "processing_failed") {
+		t.Fatalf("generic failure code: %d %s", owner.Code, owner.Body.String())
+	}
 	var job VideoProcessJob
 	if err := db.Where("video_id = ?", video.ID).First(&job).Error; err != nil || job.DeadAt == nil || job.Attempts != videoProcessAttempts {
 		t.Fatalf("dead job state: %+v %v", job, err)

@@ -14,22 +14,23 @@ type User struct {
 }
 
 type Video struct {
-	ID            uint      `json:"id" gorm:"primaryKey"`
-	AuthorID      uint      `json:"author_id" gorm:"index:idx_video_author,priority:1;not null"`
-	Author        User      `json:"author,omitempty" gorm:"foreignKey:AuthorID"`
-	Title         string    `json:"title" gorm:"size:120;not null"`
-	Description   string    `json:"description" gorm:"size:2000"`
-	MediaURL      string    `json:"media_url" gorm:"size:512;not null"`
-	CoverURL      string    `json:"cover_url" gorm:"size:512"`
-	Status        string    `json:"status" gorm:"size:16;index:idx_video_feed,priority:1;not null;default:published"`
-	LikeCount     int64     `json:"like_count"`
-	CommentCount  int64     `json:"comment_count"`
-	FavoriteCount int64     `json:"favorite_count"`
-	PlayCount     int64     `json:"play_count"`
-	DurationMS    int64     `json:"duration_ms" gorm:"not null;default:0"`
-	Width         int       `json:"width" gorm:"not null;default:0"`
-	Height        int       `json:"height" gorm:"not null;default:0"`
-	CreatedAt     time.Time `json:"created_at" gorm:"index:idx_video_feed,priority:2,sort:desc;index:idx_video_author,priority:2,sort:desc"`
+	ID              uint      `json:"id" gorm:"primaryKey"`
+	AuthorID        uint      `json:"author_id" gorm:"index:idx_video_author,priority:1;not null"`
+	Author          User      `json:"author,omitempty" gorm:"foreignKey:AuthorID"`
+	Title           string    `json:"title" gorm:"size:120;not null"`
+	Description     string    `json:"description" gorm:"size:2000"`
+	MediaURL        string    `json:"media_url" gorm:"size:512;not null"`
+	CoverURL        string    `json:"cover_url" gorm:"size:512"`
+	Status          string    `json:"status" gorm:"size:16;index:idx_video_feed,priority:1;not null;default:published"`
+	LikeCount       int64     `json:"like_count"`
+	CommentCount    int64     `json:"comment_count"`
+	FavoriteCount   int64     `json:"favorite_count"`
+	PlayCount       int64     `json:"play_count"`
+	DurationMS      int64     `json:"duration_ms" gorm:"not null;default:0"`
+	Width           int       `json:"width" gorm:"not null;default:0"`
+	Height          int       `json:"height" gorm:"not null;default:0"`
+	ProcessingError string    `json:"processing_error,omitempty" gorm:"-"`
+	CreatedAt       time.Time `json:"created_at" gorm:"index:idx_video_feed,priority:2,sort:desc;index:idx_video_author,priority:2,sort:desc"`
 }
 
 // VideoProcessJob survives restarts and lets another instance reclaim an expired lease.
@@ -43,6 +44,7 @@ type VideoProcessJob struct {
 	DoneAt      *time.Time `gorm:"index"`
 	DeadAt      *time.Time `gorm:"index"`
 	LastError   string     `gorm:"size:500"`
+	FailureCode string     `gorm:"size:32;not null;default:''"`
 	CreatedAt   time.Time
 }
 

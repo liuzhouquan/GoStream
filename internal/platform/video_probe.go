@@ -20,6 +20,18 @@ const (
 
 var errUnsupportedVideo = errors.New("unsupported video")
 
+type videoValidationError struct {
+	Code   string
+	Detail string
+}
+
+func (e *videoValidationError) Error() string { return errUnsupportedVideo.Error() + ": " + e.Detail }
+func (e *videoValidationError) Unwrap() error { return errUnsupportedVideo }
+
+func invalidVideo(code, detail string) error {
+	return &videoValidationError{Code: code, Detail: detail}
+}
+
 type videoMetadata struct {
 	DurationMS int64
 	Width      int
@@ -53,22 +65,25 @@ func parseVideoProbe(output []byte) (videoMetadata, error) {
 		} `json:"format"`
 	}
 	if err := json.Unmarshal(output, &report); err != nil {
-		return videoMetadata{}, fmt.Errorf("%w: invalid ffprobe output: %v", errUnsupportedVideo, err)
+		return videoMetadata{}, invalidVideo("invalid_media", "invalid ffprobe output")
 	}
 	if len(report.Streams) != 1 {
-		return videoMetadata{}, fmt.Errorf("%w: exactly one first video stream is required", errUnsupportedVideo)
+		return videoMetadata{}, invalidVideo("missing_video", "a video stream is required")
 	}
 	stream := report.Streams[0]
 	if stream.Width < 1 || stream.Height < 1 || stream.Width > maxVideoSide || stream.Height > maxVideoSide || int64(stream.Width)*int64(stream.Height) > maxVideoPixels {
-		return videoMetadata{}, fmt.Errorf("%w: frame dimensions exceed 4096 pixels per side or 3840x2160 pixels total", errUnsupportedVideo)
+		return videoMetadata{}, invalidVideo("resolution_limit", "frame dimensions exceed 4096 pixels per side or 3840x2160 pixels total")
 	}
 	duration := report.Format.Duration
 	if duration == "" || duration == "N/A" {
 		duration = stream.Duration
 	}
 	seconds, err := strconv.ParseFloat(duration, 64)
-	if err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 || seconds > maxVideoDuration.Seconds() {
-		return videoMetadata{}, fmt.Errorf("%w: duration must be between 0 and 10 minutes", errUnsupportedVideo)
+	if err != nil || math.IsNaN(seconds) || math.IsInf(seconds, 0) || seconds <= 0 {
+		return videoMetadata{}, invalidVideo("invalid_duration", "video duration is unavailable or invalid")
+	}
+	if seconds > maxVideoDuration.Seconds() {
+		return videoMetadata{}, invalidVideo("duration_limit", "duration exceeds 10 minutes")
 	}
 	durationMS := int64(math.Round(seconds * 1000))
 	if durationMS < 1 {

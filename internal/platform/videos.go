@@ -202,7 +202,25 @@ func (s *Server) getVideo(c *gin.Context) {
 		respondError(c, 404, "video not found")
 		return
 	}
+	if v.Status == "failed" {
+		var job VideoProcessJob
+		err := s.DB.Select("failure_code").Where("video_id = ? AND dead_at IS NOT NULL", v.ID).Order("id DESC").First(&job).Error
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			respondError(c, 500, "could not load video status")
+			return
+		}
+		v.ProcessingError = publicProcessingCode(job.FailureCode)
+	}
 	c.JSON(200, v)
+}
+
+func publicProcessingCode(code string) string {
+	switch code {
+	case "duration_limit", "resolution_limit", "invalid_duration", "missing_video", "invalid_media":
+		return code
+	default:
+		return "processing_failed"
+	}
 }
 
 func (s *Server) deleteVideo(c *gin.Context) {
@@ -330,6 +348,32 @@ func (s *Server) userVideos(c *gin.Context) {
 	if err := q.Order("created_at DESC").Limit(50).Find(&items).Error; err != nil {
 		respondError(c, 500, "could not load user videos")
 		return
+	}
+	if uid(c) == uint(authorID) && authorID > 0 {
+		failedIDs := make([]uint, 0)
+		for _, video := range items {
+			if video.Status == "failed" {
+				failedIDs = append(failedIDs, video.ID)
+			}
+		}
+		if len(failedIDs) > 0 {
+			var jobs []VideoProcessJob
+			if err := s.DB.Select("video_id", "failure_code").Where("video_id IN ? AND dead_at IS NOT NULL", failedIDs).Order("id DESC").Find(&jobs).Error; err != nil {
+				respondError(c, 500, "could not load video status")
+				return
+			}
+			codes := make(map[uint]string, len(jobs))
+			for _, job := range jobs {
+				if _, exists := codes[job.VideoID]; !exists {
+					codes[job.VideoID] = job.FailureCode
+				}
+			}
+			for i := range items {
+				if items[i].Status == "failed" {
+					items[i].ProcessingError = publicProcessingCode(codes[items[i].ID])
+				}
+			}
+		}
 	}
 	c.JSON(200, gin.H{"items": items})
 }
