@@ -1,6 +1,6 @@
 # GoStream development progress
 
-Last updated: 2026-10-22
+Last updated: 2026-10-23
 
 ## Stage 0 — project foundation
 
@@ -28,19 +28,20 @@ Last updated: 2026-10-22
 - [x] Expose stable processing failure codes only to the author and show readable reasons in the creator page; reconcile old unregistered media files after a 24-hour grace period with database reference checks and a Prometheus counter.
 - [x] Add creator-page controls to retry transient failures or replace invalid video files, and fix a MySQL strict-mode zero-date failure in resumable upload sessions with a nullable lease and a real MySQL regression test.
 - [x] Complete one-level comment threads in the API and web client: separate root/reply cursor pages, batched reply counts, author and parent notifications, public reading, and same-timestamp pagination tests.
+- [x] Allow up to eight simultaneous WebSocket connections per account and API instance; deliver committed direct/group events to every active device, keep ACK/error/replay on the originating socket, and relay sender-device echoes across instances.
 
 ## Stages
 
 1. Local runnable application: account/auth, media upload, videos, timeline/recommendation feeds, follows, interactions, comments, search, notifications, basic web client. **Implemented and locally verified.**
 2. Reliability: cursor and idempotency review, transactional outbox, retry/dead-letter handling, test hardening and API documentation. **Partly implemented:** a database-backed outbox worker dispatches notifications and records dead letters. The initial handlers still call GORM directly; splitting Domain/Application/Infrastructure layers remains.
 3. Feed scale: short-lived Redis page caching for anonymous scenes and each viewer's following first page, version invalidation, a preference/recency-aware recommendation baseline, and local MySQL/Redis comparisons for anonymous recommendation and authenticated following first pages are implemented. Per-video cards/stat caching, hybrid fanout, and authenticated recommendation measurements remain.
-4. IM: Direct and group WebSocket messages, persistence, offline replay/ACK, group unread cursors, and local online presence are implemented. Both direct and group reconnects replay up to 100 pending messages; larger backlogs require history/unread paging. Optional Redis Pub/Sub relays committed direct, group, and notification events between API instances. Expiring Redis presence entries provide a cross-instance online check when enabled. Pub/Sub delivery is best effort. Cross-device read cursors remain.
+4. IM: Direct and group WebSocket messages, persistence, offline replay/ACK, group unread cursors, multiple sockets per account, and local online presence are implemented. Both direct and group reconnects replay up to 100 pending messages to the connecting socket; larger backlogs require history/unread paging. Optional Redis Pub/Sub relays committed direct, group, and notification events between API instances, including echoes to the sender's other devices. Expiring Redis presence entries provide a cross-instance online check when enabled. Pub/Sub delivery is best effort. Independent per-device read cursors remain.
 5. Media pipeline: local resumable upload and integrity checks are implemented. Compose enables a durable FFmpeg worker with source duration/dimension limits, MP4 transcode, JPEG cover generation, and output metadata persisted before public Feed publication; local SQLite can opt in through `FFMPEG_BIN`. A periodic worker removes old generated files without database references. MinIO/object storage, frame-by-frame validation, and garbage collection of registered but unused assets remain.
 6. Operations: MySQL/API/Redis Compose was built with Go 1.27.2 and verified through real registration, upload, publish, Feed, interaction, follow, and notification requests. The optional Prometheus/Grafana profile was started and its scrape target and provisioned dashboard verified. HTTP metrics, readiness, pprof, an in-process benchmark, local SQLite results, and three-run MySQL/Redis cached-versus-uncached results are present. k6 and a multi-host load test remain.
 
 ## Verification ledger
 
-Commands run through 2026-10-22 using Go 1.27.2:
+Commands run through 2026-10-23 using Go 1.27.2:
 
 - `go test ./...` — passed, including account/video/feed/interaction/follow/notification, upload resume, outbox, direct/group messaging and presence, group reconnect replay, plus Redis cache hit/invalidation/fallback and two-instance socket routing checks using an in-process Redis-compatible test server.
 - `go vet ./...` — passed.
@@ -66,6 +67,8 @@ Commands run through 2026-10-22 using Go 1.27.2:
 - In an isolated browser session, a 601-second video failed with owner-only `duration_limit`; the creator page showed the readable reason and replacement form but hid same-source retry. Selecting a valid MP4 ran the resumable uploader and changed the video from failed to processing, then published after a status refresh with 1000 ms/160×90 metadata. The fixture account, video, jobs, assets, session, and media files were removed; `/ready` still passed.
 - After comment-thread changes, `go test ./...`, `go test -race ./...`, `go vet ./...`, `node --check web/app.js`, and `git diff --check` passed. SQLite tests cover equal-timestamp root/reply cursors, scope rejection, reply counts, cross-video/nested reply rejection, transactionally committed author/parent notifications, self-reply suppression, and video counters. The rebuilt Compose API migrated the comment-thread index; `TestMySQLCommentThreadsIntegration` passed against its MySQL with a rolled-back fixture transaction.
 - An isolated browser session on the rebuilt Compose app confirmed anonymous comment reading, two-account root comment and reply posting, immediate thread display and total-count update, and the parent author's reply notification. Browser-created users, comments, notifications and outbox rows were removed in one SQL transaction; video 1011's comment count returned to zero.
+- On 2026-10-23, `go test ./...`, `go test -race ./...`, `go vet ./...`, `node --check web/app.js`, and `git diff --check` passed after the multi-device Hub change. Ten repeated runs of the focused local fanout, eight-connection limit, and Redis cross-instance tests passed after giving each SQLite test invocation a unique in-memory DSN. Tests verify origin-only control frames, per-connection replay, direct/group delivery to other devices, last-disconnect presence, cross-instance sender echoes, and delivery after another device's ACK.
+- Docker Hub metadata lookup for `golang:1.27.2-bookworm` timed out during the normal Compose rebuild on 2026-10-23. A Go 1.27.2 CGO binary built locally required at most glibc 2.34, within the cached container's glibc 2.36. An offline overlay image based on the previously built GoStream API image carried the new binary and web files; `docker compose up -d --no-build api` started it and `/ready` passed. A real Compose MySQL/Redis WebSocket smoke opened two sender and two recipient sockets, verified origin-only pong, both direct-message echoes/deliveries, and delivery after one recipient socket closed. The two temporary users, messages, notifications, and outbox rows were removed in one SQL transaction. The standard Dockerfile remains the source for a normal rebuild when Docker Hub is reachable.
 
 `BenchmarkTimelineFeed1000` was run three times against a 1,000-video SQLite memory database: 358,682, 362,115, and 373,384 ns/op, with about 93 KB and 881 allocations per operation. These are in-process benchmark results, not QPS or P95 measurements. Details are in `docs/PERFORMANCE.md`.
 

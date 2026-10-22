@@ -17,40 +17,66 @@ import (
 
 type Hub struct {
 	mu      sync.RWMutex
-	clients map[uint]*websocket.Conn
-	writeMu map[uint]*sync.Mutex
+	clients map[uint]map[*hubClient]struct{}
 }
 
-func NewHub() *Hub { return &Hub{clients: map[uint]*websocket.Conn{}, writeMu: map[uint]*sync.Mutex{}} }
-func (h *Hub) add(id uint, c *websocket.Conn) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	if old := h.clients[id]; old != nil {
-		_ = old.Close()
-	}
-	h.clients[id] = c
-	h.writeMu[id] = &sync.Mutex{}
+const maxConnectionsPerUser = 8
+
+type hubClient struct {
+	conn    *websocket.Conn
+	writeMu sync.Mutex
 }
-func (h *Hub) remove(id uint, c *websocket.Conn) bool {
+
+func NewHub() *Hub { return &Hub{clients: map[uint]map[*hubClient]struct{}{}} }
+
+func (h *Hub) add(id uint, c *websocket.Conn) *hubClient {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if h.clients[id] == c {
+	if len(h.clients[id]) >= maxConnectionsPerUser {
+		return nil
+	}
+	if h.clients[id] == nil {
+		h.clients[id] = make(map[*hubClient]struct{})
+	}
+	client := &hubClient{conn: c}
+	h.clients[id][client] = struct{}{}
+	return client
+}
+
+func (h *Hub) hasCapacity(id uint) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return len(h.clients[id]) < maxConnectionsPerUser
+}
+
+// remove reports whether the user has no local connections left.
+func (h *Hub) remove(id uint, client *hubClient) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.clients[id], client)
+	if len(h.clients[id]) == 0 {
 		delete(h.clients, id)
-		delete(h.writeMu, id)
 		return true
 	}
 	return false
 }
+
 func (h *Hub) online(id uint) bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.clients[id] != nil
+	return len(h.clients[id]) > 0
 }
+
 func (h *Hub) count() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return len(h.clients)
+	count := 0
+	for _, clients := range h.clients {
+		count += len(clients)
+	}
+	return count
 }
+
 func (h *Hub) onlineIDs() []uint {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
@@ -60,17 +86,37 @@ func (h *Hub) onlineIDs() []uint {
 	}
 	return ids
 }
-func (h *Hub) send(id uint, v any) error {
-	h.mu.RLock()
-	c, mu := h.clients[id], h.writeMu[id]
-	h.mu.RUnlock()
-	if c == nil {
-		return nil
+
+func (client *hubClient) send(v any) error {
+	client.writeMu.Lock()
+	defer client.writeMu.Unlock()
+	_ = client.conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := client.conn.WriteJSON(v); err != nil {
+		_ = client.conn.Close()
+		return err
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	_ = c.SetWriteDeadline(time.Now().Add(5 * time.Second))
-	return c.WriteJSON(v)
+	return nil
+}
+
+func (h *Hub) send(id uint, v any) error { return h.sendExcept(id, nil, v) }
+
+// sendExcept broadcasts a committed event to the user's other local devices.
+func (h *Hub) sendExcept(id uint, excluded *hubClient, v any) error {
+	h.mu.RLock()
+	clients := make([]*hubClient, 0, len(h.clients[id]))
+	for client := range h.clients[id] {
+		if client != excluded {
+			clients = append(clients, client)
+		}
+	}
+	h.mu.RUnlock()
+	var firstErr error
+	for _, client := range clients {
+		if err := client.send(v); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 type socketEvent struct {
@@ -95,11 +141,20 @@ func (s *Server) websocket(c *gin.Context) {
 		respondError(c, http.StatusUnauthorized, "valid WebSocket token protocol required")
 		return
 	}
+	if !s.Hub.hasCapacity(userID) {
+		respondError(c, http.StatusTooManyRequests, "too many WebSocket connections")
+		return
+	}
 	conn, err := s.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		return
 	}
-	s.Hub.add(userID, conn)
+	client := s.Hub.add(userID, conn)
+	if client == nil {
+		_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.ClosePolicyViolation, "too many connections"), time.Now().Add(time.Second))
+		_ = conn.Close()
+		return
+	}
 	s.refreshPresence(context.Background(), userID)
 	presenceCtx, stopPresence := context.WithCancel(context.Background())
 	if s.realtime != nil {
@@ -108,7 +163,7 @@ func (s *Server) websocket(c *gin.Context) {
 	s.metrics.wsConnections.Set(float64(s.Hub.count()))
 	defer func() {
 		stopPresence()
-		if s.Hub.remove(userID, conn) {
+		if s.Hub.remove(userID, client) {
 			s.clearPresence(userID)
 			_ = s.DB.Model(&User{}).Where("id = ?", userID).Update("last_seen_at", time.Now().UTC()).Error
 		}
@@ -118,9 +173,9 @@ func (s *Server) websocket(c *gin.Context) {
 	conn.SetReadLimit(8192)
 	_ = conn.SetReadDeadline(time.Now().Add(70 * time.Second))
 	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(70 * time.Second)) })
-	_ = s.Hub.send(userID, gin.H{"type": "ready"})
-	s.replayPending(userID)
-	s.replayPendingGroups(userID)
+	_ = client.send(gin.H{"type": "ready"})
+	s.replayPending(userID, client)
+	s.replayPendingGroups(userID, client)
 	for {
 		var e socketEvent
 		if err = conn.ReadJSON(&e); err != nil {
@@ -129,15 +184,15 @@ func (s *Server) websocket(c *gin.Context) {
 		_ = conn.SetReadDeadline(time.Now().Add(70 * time.Second))
 		switch e.Type {
 		case "ping":
-			_ = s.Hub.send(userID, gin.H{"type": "pong"})
+			_ = client.send(gin.H{"type": "pong"})
 		case "message":
 			if e.RecipientID == 0 || e.RecipientID == userID || len(strings.TrimSpace(e.Body)) == 0 || len(e.Body) > 4000 || e.ClientID == "" || len(e.ClientID) > 80 {
-				_ = s.Hub.send(userID, gin.H{"type": "error", "message": "invalid message"})
+				_ = client.send(gin.H{"type": "error", "message": "invalid message"})
 				continue
 			}
 			var recipient User
 			if err = s.DB.Select("id").First(&recipient, e.RecipientID).Error; err != nil {
-				_ = s.Hub.send(userID, gin.H{"type": "error", "message": "recipient not found"})
+				_ = client.send(gin.H{"type": "error", "message": "recipient not found"})
 				continue
 			}
 			msg := ChatMessage{SenderID: userID, RecipientID: e.RecipientID, ClientID: e.ClientID, Body: e.Body}
@@ -161,32 +216,33 @@ func (s *Server) websocket(c *gin.Context) {
 				})
 			})
 			if err != nil {
-				_ = s.Hub.send(userID, gin.H{"type": "error", "message": "message could not be saved"})
+				_ = client.send(gin.H{"type": "error", "message": "message could not be saved"})
 				continue
 			}
 			if conflict {
-				_ = s.Hub.send(userID, gin.H{"type": "error", "message": "client_id already used for another message"})
+				_ = client.send(gin.H{"type": "error", "message": "client_id already used for another message"})
 				continue
 			}
-			_ = s.Hub.send(userID, gin.H{"type": "ack", "client_id": msg.ClientID, "message_id": msg.ID})
+			_ = client.send(gin.H{"type": "ack", "client_id": msg.ClientID, "message_id": msg.ID})
 			if created {
+				_ = s.Hub.sendExcept(userID, client, gin.H{"type": "message", "message": msg})
 				_ = s.Hub.send(msg.RecipientID, gin.H{"type": "message", "message": msg})
-				if err := s.publishRealtime(c.Request.Context(), realtimeEvent{Kind: "direct", UserID: msg.RecipientID, MessageID: msg.ID}); err != nil {
+				if err := s.publishRealtime(c.Request.Context(), realtimeEvent{Kind: "direct", UserID: msg.RecipientID, SenderID: userID, MessageID: msg.ID}); err != nil {
 					log.Printf("realtime direct publish failed for message %d: %v", msg.ID, err)
 				}
 			}
 		case "group_message":
-			s.sendGroupMessage(userID, e)
+			s.sendGroupMessage(userID, client, e)
 		default:
-			_ = s.Hub.send(userID, gin.H{"type": "error", "message": "unknown event type"})
+			_ = client.send(gin.H{"type": "error", "message": "unknown event type"})
 		}
 	}
 }
 
-func (s *Server) replayPending(userID uint) {
+func (s *Server) replayPending(userID uint, client *hubClient) {
 	var rows []ChatMessage
 	if err := s.DB.Where("recipient_id = ? AND acked_at IS NULL", userID).Order("id ASC").Limit(101).Find(&rows).Error; err != nil {
-		_ = s.Hub.send(userID, gin.H{"type": "error", "message": "pending messages could not be loaded"})
+		_ = client.send(gin.H{"type": "error", "message": "pending messages could not be loaded"})
 		return
 	}
 	more := len(rows) > 100
@@ -194,16 +250,16 @@ func (s *Server) replayPending(userID uint) {
 		rows = rows[:100]
 	}
 	for _, msg := range rows {
-		if s.Hub.send(userID, gin.H{"type": "message", "message": msg}) != nil {
+		if client.send(gin.H{"type": "message", "message": msg}) != nil {
 			return
 		}
 	}
 	if more {
-		_ = s.Hub.send(userID, gin.H{"type": "sync_required"})
+		_ = client.send(gin.H{"type": "sync_required"})
 	}
 }
 
-func (s *Server) replayPendingGroups(userID uint) {
+func (s *Server) replayPendingGroups(userID uint, client *hubClient) {
 	var rows []GroupMessage
 	err := s.DB.Model(&GroupMessage{}).
 		Joins("JOIN group_members ON group_members.group_id = group_messages.group_id AND group_members.user_id = ?", userID).
@@ -211,7 +267,7 @@ func (s *Server) replayPendingGroups(userID uint) {
 		Where("group_messages.id > group_reads.last_ack_id AND group_messages.sender_id <> ?", userID).
 		Order("group_messages.id ASC").Limit(101).Find(&rows).Error
 	if err != nil {
-		_ = s.Hub.send(userID, gin.H{"type": "error", "message": "pending group messages could not be loaded"})
+		_ = client.send(gin.H{"type": "error", "message": "pending group messages could not be loaded"})
 		return
 	}
 	more := len(rows) > 100
@@ -219,11 +275,11 @@ func (s *Server) replayPendingGroups(userID uint) {
 		rows = rows[:100]
 	}
 	for _, msg := range rows {
-		if s.Hub.send(userID, gin.H{"type": "group_message", "message": msg}) != nil {
+		if client.send(gin.H{"type": "group_message", "message": msg}) != nil {
 			return
 		}
 	}
 	if more {
-		_ = s.Hub.send(userID, gin.H{"type": "group_sync_required"})
+		_ = client.send(gin.H{"type": "group_sync_required"})
 	}
 }

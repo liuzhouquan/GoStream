@@ -238,14 +238,14 @@ func (s *Server) ackGroupMessage(c *gin.Context) {
 	c.JSON(200, gin.H{"acked": true, "last_ack_id": read.LastAckID})
 }
 
-func (s *Server) sendGroupMessage(userID uint, e socketEvent) {
+func (s *Server) sendGroupMessage(userID uint, client *hubClient, e socketEvent) {
 	if e.GroupID == 0 || e.ClientID == "" || len(e.ClientID) > 80 || strings.TrimSpace(e.Body) == "" || len(e.Body) > 4000 {
-		_ = s.Hub.send(userID, gin.H{"type": "error", "message": "invalid group message"})
+		_ = client.send(gin.H{"type": "error", "message": "invalid group message"})
 		return
 	}
 	var membership GroupMember
 	if err := s.DB.Where("group_id = ? AND user_id = ?", e.GroupID, userID).First(&membership).Error; err != nil {
-		_ = s.Hub.send(userID, gin.H{"type": "error", "message": "group not found"})
+		_ = client.send(gin.H{"type": "error", "message": "group not found"})
 		return
 	}
 	msg := GroupMessage{GroupID: e.GroupID, SenderID: userID, ClientID: e.ClientID, Body: e.Body}
@@ -266,17 +266,18 @@ func (s *Server) sendGroupMessage(userID uint, e socketEvent) {
 		return nil
 	})
 	if err != nil {
-		_ = s.Hub.send(userID, gin.H{"type": "error", "message": "group message could not be saved"})
+		_ = client.send(gin.H{"type": "error", "message": "group message could not be saved"})
 		return
 	}
 	if conflict {
-		_ = s.Hub.send(userID, gin.H{"type": "error", "message": "client_id already used for another group message"})
+		_ = client.send(gin.H{"type": "error", "message": "client_id already used for another group message"})
 		return
 	}
-	_ = s.Hub.send(userID, gin.H{"type": "ack", "client_id": msg.ClientID, "message_id": msg.ID, "group_id": msg.GroupID})
+	_ = client.send(gin.H{"type": "ack", "client_id": msg.ClientID, "message_id": msg.ID, "group_id": msg.GroupID})
 	if !created {
 		return
 	}
+	_ = s.Hub.sendExcept(userID, client, gin.H{"type": "group_message", "message": msg})
 	var members []GroupMember
 	if err := s.DB.Where("group_id = ? AND user_id <> ?", e.GroupID, userID).Find(&members).Error; err != nil {
 		return

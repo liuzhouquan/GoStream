@@ -34,6 +34,7 @@ Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECR
 - Database outbox with transactional notification writes, leased dispatch, retry, and dead-letter state
 - One-level comment threads with separate root/reply cursor pages, lazy loading in the web client, and reply notifications
 - Direct/group WebSocket messaging, persisted ACKs, offline direct-message replay, group unread cursors, and optional Redis cross-instance event relay and presence
+- Multiple WebSocket connections per account (up to eight per API instance), with committed direct/group messages sent to each active device and control replies kept on the originating connection
 - `/health`, database-backed `/ready`, `/metrics`, and optional `PPROF_ADDR`
 - SQLite is persistent and real; it is not a mock database
 - RabbitMQ, MinIO, and durable cross-instance group push are later stages

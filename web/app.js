@@ -99,15 +99,15 @@ function ensureSocket(){
   ws.onmessage=event=>{
     const data=JSON.parse(event.data);
     if(data.type==='message'){
-      if(String(data.message.sender_id)===String(state.chatPeer) && $('#chat-log')){
+      if((String(data.message.sender_id)===String(state.chatPeer) || (String(data.message.sender_id)===String(state.user.id) && String(data.message.recipient_id)===String(state.chatPeer))) && $('#chat-log')){
         appendMessage(data.message);
-        api(`/api/messages/${data.message.id}/ack`,{method:'POST'}).catch(()=>{});
-      }else toast('收到一条新私信');
+        if(String(data.message.recipient_id)===String(state.user.id))api(`/api/messages/${data.message.id}/ack`,{method:'POST'}).catch(()=>{});
+      }else toast(String(data.message.sender_id)===String(state.user.id)?'另一设备发送了一条私信':'收到一条新私信');
     }else if(data.type==='group_message'){
       if(String(data.message.group_id)===String(state.groupID) && $('#group-log')){
         appendGroupMessage(data.message);
-        api(`/api/groups/${data.message.group_id}/messages/${data.message.id}/ack`,{method:'POST'}).catch(()=>{});
-      }else toast('收到一条新群消息');
+        if(String(data.message.sender_id)!==String(state.user.id))api(`/api/groups/${data.message.group_id}/messages/${data.message.id}/ack`,{method:'POST'}).catch(()=>{});
+      }else toast(String(data.message.sender_id)===String(state.user.id)?'另一设备发送了一条群消息':'收到一条新群消息');
     }else if(data.type==='notification'){
       toast('收到一条新通知');if(state.view==='notifications')renderNotifications();
     }else if(data.type==='sync_required'||data.type==='group_sync_required')toast('离线消息较多，请打开聊天历史查看');

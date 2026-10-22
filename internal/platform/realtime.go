@@ -169,12 +169,15 @@ func (s *Server) runRealtimeBridge(ctx context.Context, ready chan<- struct{}) {
 func (s *Server) deliverRealtime(e realtimeEvent) {
 	switch e.Kind {
 	case "direct":
-		if !s.Hub.online(e.UserID) {
+		if !s.Hub.online(e.UserID) && !s.Hub.online(e.SenderID) {
 			return
 		}
 		var msg ChatMessage
-		if s.DB.Where("id = ? AND recipient_id = ? AND acked_at IS NULL", e.MessageID, e.UserID).First(&msg).Error == nil {
+		if s.DB.Where("id = ? AND recipient_id = ?", e.MessageID, e.UserID).First(&msg).Error == nil && (e.SenderID == 0 || msg.SenderID == e.SenderID) {
 			_ = s.Hub.send(e.UserID, gin.H{"type": "message", "message": msg})
+			if e.SenderID != 0 {
+				_ = s.Hub.send(e.SenderID, gin.H{"type": "message", "message": msg})
+			}
 		}
 	case "group":
 		ids := s.Hub.onlineIDs()
@@ -186,7 +189,7 @@ func (s *Server) deliverRealtime(e realtimeEvent) {
 			return
 		}
 		var members []GroupMember
-		if s.DB.Where("group_id = ? AND user_id IN ? AND user_id <> ?", e.GroupID, ids, e.SenderID).Find(&members).Error != nil {
+		if s.DB.Where("group_id = ? AND user_id IN ?", e.GroupID, ids).Find(&members).Error != nil {
 			return
 		}
 		for _, member := range members {

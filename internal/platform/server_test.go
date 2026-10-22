@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,13 +25,20 @@ import (
 	"gorm.io/gorm"
 )
 
+var testDatabaseSequence atomic.Uint64
+
 func testServer(t *testing.T) (*Server, *gin.Engine, *gorm.DB) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	db, err := gorm.Open(gormsqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	db, err := gorm.Open(gormsqlite.Open(fmt.Sprintf("file:gostream-test-%d?mode=memory&cache=shared", testDatabaseSequence.Add(1))), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
 	if err = db.AutoMigrate(&User{}, &MediaAsset{}, &UploadSession{}, &UploadChunk{}, &Video{}, &VideoProcessJob{}, &Follow{}, &VideoAction{}, &Comment{}, &Notification{}, &ChatMessage{}, &ChatGroup{}, &GroupMember{}, &GroupMessage{}, &GroupRead{}, &OutboxEvent{}); err != nil {
 		t.Fatal(err)
 	}

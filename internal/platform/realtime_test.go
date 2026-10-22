@@ -21,9 +21,9 @@ func TestRedisRealtimeCrossInstanceDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer redisServer.Close()
+	t.Cleanup(redisServer.Close)
 	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr(), MaxRetries: 0})
-	defer client.Close()
+	t.Cleanup(func() { _ = client.Close() })
 	senderServer, senderRouter, db := testServer(t)
 	recipientServer := NewServer(db, "test-signing-secret-at-least-32-bytes", t.TempDir())
 	recipientRouter := recipientServer.Router()
@@ -68,6 +68,7 @@ func TestRedisRealtimeCrossInstanceDelivery(t *testing.T) {
 		return conn
 	}
 	owner := connect(first.URL, ownerToken)
+	ownerOtherDevice := connect(second.URL, ownerToken)
 	member := connect(second.URL, memberToken)
 	if err := owner.WriteJSON(socketEvent{Type: "message", RecipientID: memberID, ClientID: "cross-direct", Body: "remote hello"}); err != nil {
 		t.Fatal(err)
@@ -82,6 +83,9 @@ func TestRedisRealtimeCrossInstanceDelivery(t *testing.T) {
 	}
 	if err := member.ReadJSON(&delivery); err != nil || delivery.Type != "message" || delivery.Message.Body != "remote hello" {
 		t.Fatalf("cross-instance direct delivery: %+v %v", delivery, err)
+	}
+	if err := ownerOtherDevice.ReadJSON(&delivery); err != nil || delivery.Type != "message" || delivery.Message.Body != "remote hello" || delivery.Message.SenderID != ownerID {
+		t.Fatalf("cross-instance sender-device echo: %+v %v", delivery, err)
 	}
 	created := request(t, senderRouter, http.MethodPost, "/api/groups", ownerToken, map[string]string{"name": "bridged group"})
 	var group ChatGroup
@@ -103,6 +107,9 @@ func TestRedisRealtimeCrossInstanceDelivery(t *testing.T) {
 	}
 	if err := member.ReadJSON(&groupDelivery); err != nil || groupDelivery.Type != "group_message" || groupDelivery.Message.Body != "remote group" {
 		t.Fatalf("cross-instance group delivery: %+v %v", groupDelivery, err)
+	}
+	if err := ownerOtherDevice.ReadJSON(&groupDelivery); err != nil || groupDelivery.Type != "group_message" || groupDelivery.Message.Body != "remote group" || groupDelivery.Message.SenderID != ownerID {
+		t.Fatalf("cross-instance sender group echo: %+v %v", groupDelivery, err)
 	}
 	if r := request(t, senderRouter, http.MethodPut, fmt.Sprintf("/api/users/me/following/%d", memberID), ownerToken, nil); r.Code != http.StatusOK {
 		t.Fatalf("follow: %d %s", r.Code, r.Body.String())
@@ -145,4 +152,38 @@ func TestRedisRealtimeCrossInstanceDelivery(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("remote presence did not clear after disconnect")
+}
+
+func TestRealtimeDirectEventStillReachesDeviceAfterUserACK(t *testing.T) {
+	s, h, db := testServer(t)
+	senderID, _ := registerTestUser(t, h, "ackedbridgesender")
+	recipientID, recipientToken := registerTestUser(t, h, "ackedbridgerecipient")
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+	u := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
+	conn, _, err := (&websocket.Dialer{Subprotocols: []string{"gostream", "gostream.jwt." + recipientToken}}).Dial(u, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	var ready map[string]any
+	if err := conn.SetReadDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.ReadJSON(&ready); err != nil || ready["type"] != "ready" {
+		t.Fatalf("ready: %+v %v", ready, err)
+	}
+	ackedAt := time.Now().UTC()
+	message := ChatMessage{ClientID: "acked-before-bridge", SenderID: senderID, RecipientID: recipientID, Body: "still deliver", AckedAt: &ackedAt}
+	if err := db.Create(&message).Error; err != nil {
+		t.Fatal(err)
+	}
+	s.deliverRealtime(realtimeEvent{Kind: "direct", UserID: recipientID, SenderID: senderID, MessageID: message.ID})
+	var event struct {
+		Type    string      `json:"type"`
+		Message ChatMessage `json:"message"`
+	}
+	if err := conn.ReadJSON(&event); err != nil || event.Type != "message" || event.Message.ID != message.ID {
+		t.Fatalf("delivery after another device ACK: %+v %v", event, err)
+	}
 }
