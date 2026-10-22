@@ -56,7 +56,7 @@ func (s *Server) history(c *gin.Context) {
 }
 
 func (s *Server) unreadMessages(c *gin.Context) {
-	deviceID, ok := requestDeviceID(c)
+	deviceID, ok := s.requestMessageDevice(c)
 	if !ok {
 		return
 	}
@@ -88,7 +88,7 @@ func (s *Server) unreadMessages(c *gin.Context) {
 }
 
 func (s *Server) ackMessage(c *gin.Context) {
-	deviceID, ok := requestDeviceID(c)
+	deviceID, ok := s.requestMessageDevice(c)
 	if !ok {
 		return
 	}
@@ -132,7 +132,7 @@ func (s *Server) ackMessage(c *gin.Context) {
 }
 
 func (s *Server) ackMessages(c *gin.Context) {
-	deviceID, ok := requestDeviceID(c)
+	deviceID, ok := s.requestMessageDevice(c)
 	if !ok {
 		return
 	}

@@ -196,7 +196,7 @@ func (s *Server) groupHistory(c *gin.Context) {
 }
 
 func (s *Server) groupUnread(c *gin.Context) {
-	deviceID, valid := requestDeviceID(c)
+	deviceID, valid := s.requestMessageDevice(c)
 	if !valid {
 		return
 	}
@@ -229,7 +229,7 @@ func (s *Server) groupUnread(c *gin.Context) {
 }
 
 func (s *Server) ackGroupMessage(c *gin.Context) {
-	deviceID, valid := requestDeviceID(c)
+	deviceID, valid := s.requestMessageDevice(c)
 	if !valid {
 		return
 	}

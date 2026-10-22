@@ -139,6 +139,20 @@ type MessageDeviceAck struct {
 	CreatedAt time.Time `gorm:"not null"`
 }
 
+// MessageDevice bounds the number of device-specific read states per account.
+type MessageDevice struct {
+	ID         uint      `json:"-" gorm:"primaryKey"`
+	UserID     uint      `json:"-" gorm:"uniqueIndex:ux_message_device,priority:1;not null"`
+	DeviceID   string    `json:"device_id" gorm:"uniqueIndex:ux_message_device,priority:2;size:36;not null"`
+	CreatedAt  time.Time `json:"created_at" gorm:"not null"`
+	LastSeenAt time.Time `json:"last_seen_at" gorm:"index;not null"`
+}
+
+type SchemaMigration struct {
+	Key       string `gorm:"primaryKey;size:80"`
+	AppliedAt time.Time
+}
+
 type ChatGroup struct {
 	ID        uint      `json:"id" gorm:"primaryKey"`
 	OwnerID   uint      `json:"owner_id" gorm:"index;not null"`
@@ -173,8 +187,8 @@ type GroupRead struct {
 type GroupDeviceRead struct {
 	ID        uint   `gorm:"primaryKey"`
 	GroupID   uint   `gorm:"uniqueIndex:ux_group_device_read,priority:1;not null"`
-	UserID    uint   `gorm:"uniqueIndex:ux_group_device_read,priority:2;not null"`
-	DeviceID  string `gorm:"uniqueIndex:ux_group_device_read,priority:3;size:36;not null"`
+	UserID    uint   `gorm:"uniqueIndex:ux_group_device_read,priority:2;index:idx_group_device_owner,priority:1;not null"`
+	DeviceID  string `gorm:"uniqueIndex:ux_group_device_read,priority:3;index:idx_group_device_owner,priority:2;size:36;not null"`
 	LastAckID uint   `gorm:"not null;default:0"`
 }
 

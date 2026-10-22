@@ -2,6 +2,7 @@ package platform
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -66,6 +67,139 @@ func TestDeviceIDValidation(t *testing.T) {
 		if _, ok := normalizeDeviceID(id); ok {
 			t.Fatalf("accepted invalid device ID %q", id)
 		}
+	}
+}
+
+func TestMessageDeviceLimitAndIdleEviction(t *testing.T) {
+	_, h, db := testServer(t)
+	userID, token := registerTestUser(t, h, "devicelimit")
+	for i := 1; i <= maxMessageDevices; i++ {
+		id := fmt.Sprintf("00000000-0000-4000-8000-%012x", i)
+		result := requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, id, nil)
+		if result.Code != http.StatusOK {
+			t.Fatalf("register device %d: %d %s", i, result.Code, result.Body.String())
+		}
+	}
+	newID := fmt.Sprintf("00000000-0000-4000-8000-%012x", maxMessageDevices+1)
+	if result := requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, newID, nil); result.Code != http.StatusTooManyRequests {
+		t.Fatalf("device cap: %d %s", result.Code, result.Body.String())
+	}
+	web := httptest.NewServer(h)
+	defer web.Close()
+	protocols := []string{"gostream", "gostream.jwt." + token, deviceProtocolPrefix + newID}
+	conn, response, err := (&websocket.Dialer{Subprotocols: protocols}).Dial("ws"+strings.TrimPrefix(web.URL, "http")+"/api/ws", nil)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil || response == nil || response.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("WebSocket device cap: response=%v err=%v", response, err)
+	}
+	firstID := fmt.Sprintf("00000000-0000-4000-8000-%012x", 1)
+	old := time.Now().UTC().Add(-deviceEvictionAge - time.Hour)
+	if err := db.Model(&MessageDevice{}).Where("user_id = ? AND device_id = ?", userID, firstID).UpdateColumn("last_seen_at", old).Error; err != nil {
+		t.Fatal(err)
+	}
+	if result := requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, newID, nil); result.Code != http.StatusOK {
+		t.Fatalf("evict idle device: %d %s", result.Code, result.Body.String())
+	}
+	var count int64
+	if err := db.Model(&MessageDevice{}).Where("user_id = ?", userID).Count(&count).Error; err != nil || count != maxMessageDevices {
+		t.Fatalf("device count after eviction: %d %v", count, err)
+	}
+	if err := db.Model(&MessageDevice{}).Where("user_id = ? AND device_id = ?", userID, firstID).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("oldest device remained: %d %v", count, err)
+	}
+}
+
+func TestExpiredMessageDeviceStateCanReplay(t *testing.T) {
+	s, h, db := testServer(t)
+	userID, token := registerTestUser(t, h, "deviceexpiry")
+	senderID, _ := registerTestUser(t, h, "deviceexpirysender")
+	first := ChatMessage{SenderID: senderID, RecipientID: userID, ClientID: "expiry-first", Body: "previously read"}
+	second := ChatMessage{SenderID: senderID, RecipientID: userID, ClientID: "expiry-second", Body: "still unread"}
+	if err := db.Create(&first).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&second).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{testDeviceA, testDeviceB} {
+		if result := requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, id, nil); result.Code != http.StatusOK {
+			t.Fatalf("register %s: %d %s", id, result.Code, result.Body.String())
+		}
+		if result := requestOnDevice(t, h, http.MethodPost, "/api/messages/acks", token, id, map[string]any{"ids": []uint{first.ID}}); result.Code != http.StatusOK {
+			t.Fatalf("ack %s: %d %s", id, result.Code, result.Body.String())
+		}
+	}
+	group := ChatGroup{OwnerID: senderID, Name: "expiry group"}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&GroupRead{GroupID: group.ID, UserID: userID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&GroupDeviceRead{GroupID: group.ID, UserID: userID, DeviceID: testDeviceA, LastAckID: 42}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&GroupDeviceRead{GroupID: group.ID, UserID: userID, DeviceID: testDeviceB, LastAckID: 41}).Error; err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().UTC().Add(-deviceExpirationAge - time.Hour)
+	if err := db.Model(&MessageDevice{}).Where("user_id = ? AND device_id = ?", userID, testDeviceA).UpdateColumn("last_seen_at", old).Error; err != nil {
+		t.Fatal(err)
+	}
+	removed, err := s.cleanupExpiredMessageDevices(context.Background(), time.Now(), 100)
+	if err != nil || removed != 1 {
+		t.Fatalf("cleanup expired device: removed=%d err=%v", removed, err)
+	}
+	for _, model := range []any{&MessageDevice{}, &MessageDeviceAck{}, &GroupDeviceRead{}} {
+		var count int64
+		if err := db.Model(model).Where("user_id = ? AND device_id = ?", userID, testDeviceA).Count(&count).Error; err != nil || count != 0 {
+			t.Fatalf("expired device state %T: count=%d err=%v", model, count, err)
+		}
+		if err := db.Model(model).Where("user_id = ? AND device_id = ?", userID, testDeviceB).Count(&count).Error; err != nil || count != 1 {
+			t.Fatalf("active device state %T: count=%d err=%v", model, count, err)
+		}
+	}
+	var page struct {
+		Items []ChatMessage `json:"items"`
+	}
+	result := requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, testDeviceA, nil)
+	if result.Code != http.StatusOK || json.Unmarshal(result.Body.Bytes(), &page) != nil || len(page.Items) != 2 || page.Items[0].ID != first.ID || page.Items[1].ID != second.ID {
+		t.Fatalf("expired device replay: %d %s", result.Code, result.Body.String())
+	}
+	result = requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, testDeviceB, nil)
+	if result.Code != http.StatusOK || json.Unmarshal(result.Body.Bytes(), &page) != nil || len(page.Items) != 1 || page.Items[0].ID != second.ID {
+		t.Fatalf("active device unread: %d %s", result.Code, result.Body.String())
+	}
+}
+
+func TestMessageDeviceBackfillPreservesExistingReadState(t *testing.T) {
+	s, h, db := testServer(t)
+	userID, token := registerTestUser(t, h, "devicebackfill")
+	senderID, _ := registerTestUser(t, h, "devicebackfillsender")
+	message := ChatMessage{SenderID: senderID, RecipientID: userID, ClientID: "backfill-message", Body: "already read"}
+	if err := db.Create(&message).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&MessageDeviceAck{UserID: userID, DeviceID: testDeviceA, MessageID: message.ID}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&GroupDeviceRead{GroupID: 1, UserID: userID, DeviceID: testDeviceB, LastAckID: 7}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if err := s.BackfillMessageDevices(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var count int64
+	if err := db.Model(&MessageDevice{}).Where("user_id = ?", userID).Count(&count).Error; err != nil || count != 2 {
+		t.Fatalf("backfilled device count: %d %v", count, err)
+	}
+	result := requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, testDeviceA, nil)
+	if result.Code != http.StatusOK || !strings.Contains(result.Body.String(), `"items":[]`) {
+		t.Fatalf("read state after backfill: %d %s", result.Code, result.Body.String())
 	}
 }
 

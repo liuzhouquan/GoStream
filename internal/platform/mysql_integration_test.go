@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +13,55 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
+
+func TestMySQLMessageDeviceLifecycleIntegration(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to run the MySQL integration test")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !db.Migrator().HasTable(&MessageDevice{}) || !db.Migrator().HasIndex(&GroupDeviceRead{}, "idx_group_device_owner") {
+		t.Fatal("message device migration is missing; start the migrated API first")
+	}
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	defer tx.Rollback()
+	user := User{Username: fmt.Sprintf("mysqldev%d", time.Now().UnixNano()), PasswordHash: "unused-test-credential", Nickname: "device integration"}
+	if err := tx.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(tx, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	if err := s.BackfillMessageDevices(context.Background()); err != nil {
+		t.Fatalf("MySQL device backfill: %v", err)
+	}
+	if err := s.ensureMessageDevice(context.Background(), user.ID, testDeviceA); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Create(&MessageDeviceAck{UserID: user.ID, DeviceID: testDeviceA, MessageID: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Create(&GroupDeviceRead{GroupID: 1, UserID: user.ID, DeviceID: testDeviceA, LastAckID: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Model(&MessageDevice{}).Where("user_id = ?", user.ID).UpdateColumn("last_seen_at", time.Now().UTC().Add(-deviceExpirationAge-time.Hour)).Error; err != nil {
+		t.Fatal(err)
+	}
+	removed, err := s.cleanupExpiredMessageDevices(context.Background(), time.Now(), 100)
+	if err != nil || removed != 1 {
+		t.Fatalf("MySQL device cleanup: removed=%d err=%v", removed, err)
+	}
+	for _, model := range []any{&MessageDevice{}, &MessageDeviceAck{}, &GroupDeviceRead{}} {
+		var count int64
+		if err := tx.Model(model).Where("user_id = ? AND device_id = ?", user.ID, testDeviceA).Count(&count).Error; err != nil || count != 0 {
+			t.Fatalf("MySQL device state %T: count=%d err=%v", model, count, err)
+		}
+	}
+}
 
 // Run with GOSTREAM_TEST_MYSQL_DSN against a migrated, disposable MySQL database.
 // All fixture rows are created inside one transaction and rolled back.

@@ -147,6 +147,12 @@ func (s *Server) websocket(c *gin.Context) {
 		respondError(c, http.StatusUnauthorized, "valid WebSocket token protocol required")
 		return
 	}
+	if deviceID != "" {
+		if err := s.ensureMessageDevice(c.Request.Context(), userID, deviceID); err != nil {
+			respondDeviceError(c, err)
+			return
+		}
+	}
 	if !s.Hub.hasCapacity(userID) {
 		respondError(c, http.StatusTooManyRequests, "too many WebSocket connections")
 		return
@@ -188,6 +194,12 @@ func (s *Server) websocket(c *gin.Context) {
 			return
 		}
 		_ = conn.SetReadDeadline(time.Now().Add(70 * time.Second))
+		if deviceID != "" {
+			if err := s.ensureMessageDevice(c.Request.Context(), userID, deviceID); err != nil {
+				_ = client.send(gin.H{"type": "error", "message": "message device unavailable"})
+				return
+			}
+		}
 		switch e.Type {
 		case "ping":
 			_ = client.send(gin.H{"type": "pong"})
