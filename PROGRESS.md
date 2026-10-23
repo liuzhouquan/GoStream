@@ -2,6 +2,8 @@
 
 Last updated: 2026-10-23
 
+The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs/DELIVERY_SCOPE.md). Checked items below record individual features or local verification; they do not mean the whole project has met those release gates.
+
 ## Stage 0 — project foundation
 
 - [x] Use the updated Go 1.27.2 toolchain.
