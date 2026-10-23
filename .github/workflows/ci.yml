@@ -93,5 +93,11 @@ jobs:
       - name: Test prior-schema adoption and interrupted migration recovery
         run: go test ./internal/migrations -run '^TestApplyMySQLLegacyIntegration$' -count=1
 
+      - name: Upgrade the prior MySQL version without losing outbox data
+        run: go test ./internal/migrations -run '^TestMySQLV002UpgradeIntegration$' -count=1
+
+      - name: Compare frozen and previous MySQL schema metadata
+        run: go test ./internal/migrations -run '^TestMySQLMigratedSchemaMatchesLegacyModels$' -count=1
+
       - name: Run real MySQL integration tests
         run: go test ./internal/platform -run '^TestMySQL' -count=1

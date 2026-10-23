@@ -1,0 +1,174 @@
+{
+  "chat_groups": [
+    "id",
+    "owner_id",
+    "name",
+    "created_at"
+  ],
+  "chat_messages": [
+    "id",
+    "client_id",
+    "sender_id",
+    "recipient_id",
+    "body",
+    "created_at",
+    "acked_at"
+  ],
+  "comments": [
+    "id",
+    "video_id",
+    "user_id",
+    "parent_id",
+    "body",
+    "created_at"
+  ],
+  "follows": [
+    "id",
+    "follower_id",
+    "followee_id",
+    "created_at"
+  ],
+  "group_device_reads": [
+    "id",
+    "group_id",
+    "user_id",
+    "device_id",
+    "last_ack_id"
+  ],
+  "group_members": [
+    "id",
+    "group_id",
+    "user_id",
+    "joined_at"
+  ],
+  "group_messages": [
+    "id",
+    "group_id",
+    "sender_id",
+    "client_id",
+    "body",
+    "created_at"
+  ],
+  "group_reads": [
+    "id",
+    "group_id",
+    "user_id",
+    "last_ack_id"
+  ],
+  "media_assets": [
+    "id",
+    "owner_id",
+    "url",
+    "kind",
+    "size",
+    "created_at"
+  ],
+  "message_device_acks": [
+    "id",
+    "user_id",
+    "device_id",
+    "message_id",
+    "created_at"
+  ],
+  "message_devices": [
+    "id",
+    "user_id",
+    "device_id",
+    "created_at",
+    "last_seen_at"
+  ],
+  "notifications": [
+    "id",
+    "user_id",
+    "event_key",
+    "kind",
+    "actor_id",
+    "video_id",
+    "text",
+    "read_at",
+    "created_at"
+  ],
+  "outbox_events": [
+    "id",
+    "event_key",
+    "topic",
+    "payload",
+    "attempts",
+    "available_at",
+    "published_at",
+    "dead_at",
+    "last_error",
+    "created_at"
+  ],
+  "schema_migrations": [
+    "key",
+    "applied_at"
+  ],
+  "upload_chunks": [
+    "id",
+    "session_id",
+    "index",
+    "size",
+    "sha256"
+  ],
+  "upload_sessions": [
+    "id",
+    "owner_id",
+    "ext",
+    "size",
+    "sha256",
+    "chunk_size",
+    "status",
+    "lease_until",
+    "cleaned_at",
+    "expires_at",
+    "created_at"
+  ],
+  "users": [
+    "id",
+    "username",
+    "password_hash",
+    "nickname",
+    "bio",
+    "avatar_url",
+    "last_seen_at",
+    "created_at"
+  ],
+  "video_actions": [
+    "id",
+    "user_id",
+    "video_id",
+    "kind",
+    "created_at"
+  ],
+  "video_process_jobs": [
+    "id",
+    "video_id",
+    "source_url",
+    "attempts",
+    "available_at",
+    "lease_until",
+    "done_at",
+    "dead_at",
+    "last_error",
+    "failure_code",
+    "created_at"
+  ],
+  "videos": [
+    "id",
+    "author_id",
+    "title",
+    "description",
+    "media_url",
+    "cover_url",
+    "status",
+    "like_count",
+    "comment_count",
+    "favorite_count",
+    "play_count",
+    "duration_ms",
+    "width",
+    "height",
+    "created_at"
+  ]
+}

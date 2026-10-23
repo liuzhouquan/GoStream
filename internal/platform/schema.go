@@ -2,8 +2,8 @@ package platform
 
 import "gorm.io/gorm"
 
-// MigrateSchema defines the first, additive schema baseline. It still reads
-// current models; freeze it before adding a second numbered migration.
+// MigrateSchema remains for test fixtures and comparison with the legacy
+// AutoMigrate database. Production startup uses frozen SQL in migrations.
 func MigrateSchema(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&User{}, &MediaAsset{}, &UploadSession{}, &UploadChunk{}, &Video{},

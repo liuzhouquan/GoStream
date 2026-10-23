@@ -2,7 +2,7 @@
 
 Read the current implementation in this order:
 
-1. `cmd/gostream` and `internal/migrations`: configuration, database startup, the one-time GORM schema baseline, and dependency assembly. The baseline is not yet a frozen SQL migration.
+1. `cmd/gostream` and `internal/migrations`: configuration, database startup, frozen SQLite/MySQL v001 SQL, the v002 outbox index upgrade, and dependency assembly. Follow the markers, MySQL lock, legacy index repair, and retry tests.
 2. `internal/platform/models.go` and `schema.go`: persisted entities, uniqueness constraints, indexes, and the current baseline model list.
 3. `internal/platform/server.go`: route registration, authentication middleware, and server setup.
 4. `internal/platform/accounts.go`, `videos.go`, `uploads.go`, `video_probe.go`, `video_processing.go`, `media_reconcile.go`, `feed.go`, `recommend.go`, `search.go`, and `social.go`: trace an HTTP request through validation, media source limits and output metadata, job failure reporting, orphan cleanup, recommendation weights, search cursors, transaction and response.
