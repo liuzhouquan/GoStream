@@ -4,7 +4,7 @@ GoStream is a runnable Go short-video social platform with a static web client, 
 
 ## Status
 
-This repository is under active staged development. See [delivery scope and acceptance criteria](docs/DELIVERY_SCOPE.md) for the target release and [PROGRESS.md](PROGRESS.md) for implemented, verified, and planned work. Do not treat planned modules as implemented features.
+This repository is under active staged development. See [delivery scope](docs/DELIVERY_SCOPE.md), [test and acceptance standards](docs/TEST_STANDARD.md), and [PROGRESS.md](PROGRESS.md) for the target release, evidence requirements, and current status. Do not treat planned modules as implemented features.
 
 ## Local requirements
 

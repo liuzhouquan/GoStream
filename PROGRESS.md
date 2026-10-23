@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-23
 
-The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs/DELIVERY_SCOPE.md). Checked items below record individual features or local verification; they do not mean the whole project has met those release gates.
+The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs/DELIVERY_SCOPE.md); the test matrix and pass criteria are in [`docs/TEST_STANDARD.md`](docs/TEST_STANDARD.md). Checked items below record individual features or local verification; they do not mean the whole project has met those release gates.
 
 ## Stage 0 — project foundation
 
@@ -50,6 +50,8 @@ The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs
 ## Verification ledger
 
 Commands run through 2026-10-23 using Go 1.27.2:
+
+- On 2026-10-23, the release boundary was expanded into a product/technology scope and an A01–A12 acceptance matrix with explicit correctness, fault, integration, browser, performance, and documentation evidence requirements. This was a documentation-only change; no new application tests or performance runs are claimed. A separate detailed study guide was saved locally and excluded through this clone's `.git/info/exclude`.
 
 - On 2026-10-23, search now accepts `type=all|users|videos`, `limit=1..50`, and independent `users_before_id`/`videos_before_id` cursors. SQLite tests covered 25-user/25-video multi-page scans, insertion after page one, hidden-video exclusion, literal wildcard characters, UTF-8 queries, authenticated like state, and invalid parameters. A real MySQL transaction test passed literal `_` and `%` matching. In an isolated browser session, controlled 13-video and 13-user fixtures each rendered 12 initial results and one older result after clicking its own load-more button; the video results used playable cards. Fixture rows were deleted and the browser session closed; MySQL counts returned 0/0. After sharing the viewer-action lookup between Feed and search, `go test ./...`, `go test -race ./...`, `go vet ./...`, `node --check web/app.js`, Compose config, and diff checks passed. The final Go 1.27.2 Compose image rebuilt, the MySQL integration test passed again, and `/ready` returned 200. No search throughput measurement is claimed.
 
