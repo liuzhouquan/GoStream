@@ -858,7 +858,7 @@ func TestGroupMessagesReplayOnReconnect(t *testing.T) {
 }
 
 func TestPresenceTracksConnectionAndLastSeen(t *testing.T) {
-	_, h, _ := testServer(t)
+	s, h, db := testServer(t)
 	userID, token := registerTestUser(t, h, "presenceuser")
 	ts := httptest.NewServer(h)
 	defer ts.Close()
@@ -876,14 +876,38 @@ func TestPresenceTracksConnectionAndLastSeen(t *testing.T) {
 	if r := request(t, h, http.MethodGet, path, "", nil); r.Code != http.StatusOK || !bytes.Contains(r.Body.Bytes(), []byte(`"online":true`)) {
 		t.Fatalf("online presence: %d %s", r.Code, r.Body.String())
 	}
+	// Hold a SQLite write lock while the socket closes. The first last-seen
+	// update must fail and a later bounded retry must persist it.
+	locked := db.Begin()
+	if locked.Error != nil {
+		t.Fatal(locked.Error)
+	}
+	defer locked.Rollback()
+	if err := locked.Model(&User{}).Where("id = ?", userID).Update("bio", "held lock").Error; err != nil {
+		t.Fatal(err)
+	}
 	_ = conn.Close()
-	deadline := time.Now().Add(2 * time.Second)
+	removeDeadline := time.Now().Add(2 * time.Second)
+	for s.Hub.online(userID) && time.Now().Before(removeDeadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if s.Hub.online(userID) {
+		t.Fatal("closed socket remained in the local hub")
+	}
+	time.Sleep(50 * time.Millisecond)
+	if err := locked.Rollback().Error; err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
-		r := request(t, h, http.MethodGet, path, "", nil)
-		if r.Code == http.StatusOK && bytes.Contains(r.Body.Bytes(), []byte(`"online":false`)) && !bytes.Contains(r.Body.Bytes(), []byte(`"last_seen_at":null`)) {
-			return
+		var stored User
+		if err := db.Select("last_seen_at").First(&stored, userID).Error; err == nil && stored.LastSeenAt != nil {
+			r := request(t, h, http.MethodGet, path, "", nil)
+			if r.Code == http.StatusOK && bytes.Contains(r.Body.Bytes(), []byte(`"online":false`)) && !bytes.Contains(r.Body.Bytes(), []byte(`"last_seen_at":null`)) {
+				return
+			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("presence did not transition offline with a last_seen_at timestamp")
 }

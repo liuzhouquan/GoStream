@@ -177,7 +177,7 @@ func (s *Server) websocket(c *gin.Context) {
 		stopPresence()
 		if s.Hub.remove(userID, client) {
 			s.clearPresence(userID)
-			_ = s.DB.Model(&User{}).Where("id = ?", userID).Update("last_seen_at", time.Now().UTC()).Error
+			s.recordLastSeen(userID)
 		}
 		s.metrics.wsConnections.Set(float64(s.Hub.count()))
 		_ = conn.Close()
@@ -255,6 +255,26 @@ func (s *Server) websocket(c *gin.Context) {
 			_ = client.send(gin.H{"type": "error", "message": "unknown event type"})
 		}
 	}
+}
+
+// A concurrent SQLite reader can briefly reject the disconnect write. Retry
+// a bounded number of times so the durable last-seen value is not silently
+// lost after the final socket closes.
+func (s *Server) recordLastSeen(userID uint) {
+	seenAt := time.Now().UTC()
+	var err error
+	for attempt := 0; attempt < 5; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+		err = s.DB.WithContext(ctx).Model(&User{}).Where("id = ?", userID).Update("last_seen_at", seenAt).Error
+		cancel()
+		if err == nil {
+			return
+		}
+		if attempt < 4 {
+			time.Sleep(time.Duration(attempt+1) * 20 * time.Millisecond)
+		}
+	}
+	log.Printf("record last-seen for user %d failed: %v", userID, err)
 }
 
 func (s *Server) replayPending(userID uint, deviceID string, client *hubClient) {
