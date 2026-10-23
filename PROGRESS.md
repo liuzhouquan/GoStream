@@ -32,6 +32,7 @@ Last updated: 2026-10-23
 - [x] Add stable direct-message history pages and batch recipient ACK, with older-history loading and displayed-message acknowledgement in the web chat.
 - [x] Persist a browser-profile device ID per account, isolate direct-message ACKs and group read cursors by device, and retain legacy account-level behavior when no device ID is supplied.
 - [x] Register up to 32 message devices per account, replace a device idle for 30 days when full, clean up device read state after 90 idle days, and backfill preexisting receipts/cursors once during upgrade.
+- [x] Page notification inboxes with an ID cursor, load older notifications in the web client, and bound mark-read updates to the newest notification the client received.
 
 ## Stages
 
@@ -45,6 +46,8 @@ Last updated: 2026-10-23
 ## Verification ledger
 
 Commands run through 2026-10-23 using Go 1.27.2:
+
+- On 2026-10-23, notification SQLite tests covered equal-timestamp ID pages, page stability after a new notification, invalid parameters, owner isolation, bounded and legacy mark-read behavior, and database-error responses. The Go 1.27.2 Compose image rebuilt and `/ready` returned 200; a MySQL integration test verified the pagination index and transactional page/read behavior. A browser fixture with 35 notifications displayed 30 then 35 after loading older rows. After inserting one more notice, marking read from the unchanged page left exactly that new notice unread in the UI and API. Fixture accounts, notification rows, and browser device state were removed. After adding the `(user_id, read_at, id DESC)` index, `go test ./...`, `go test -race ./...`, `go vet ./...`, `node --check web/app.js`, Compose config and diff checks passed. The rebuilt API returned `/ready` 200, the MySQL test passed again, and MySQL metadata showed both notification indexes in the documented column order.
 
 - On 2026-10-23, SQLite tests covered the 32-device cap on HTTP and WebSocket, idle eviction, expired receipt/cursor cleanup, direct-message replay after expiry, preservation of another active device, and idempotent backfill. The focused MySQL integration test passed against Compose with fixture rows rolled back, including migration indexes, backfill SQL, registration and cleanup. The initial Compose boot found a MySQL reserved-word error in the migration marker query; changing it to a GORM-quoted field fixed startup. The rebuilt API returned `/ready` 200. `go test ./...`, `go test -race ./...`, `go vet ./...`, `docker compose config --quiet`, `git diff --check`, and the final HTTP `/ready` check all passed after the WebSocket cap assertion.
 

@@ -107,15 +107,15 @@ type Comment struct {
 }
 
 type Notification struct {
-	ID        uint       `json:"id" gorm:"primaryKey"`
-	UserID    uint       `json:"-" gorm:"uniqueIndex:ux_notification_event,priority:1;index:idx_notification_page,priority:1;not null"`
+	ID        uint       `json:"id" gorm:"primaryKey;index:idx_notification_user_id,priority:2,sort:desc;index:idx_notification_unread,priority:3,sort:desc"`
+	UserID    uint       `json:"-" gorm:"uniqueIndex:ux_notification_event,priority:1;index:idx_notification_page,priority:1;index:idx_notification_user_id,priority:1;index:idx_notification_unread,priority:1;not null"`
 	EventKey  string     `json:"-" gorm:"uniqueIndex:ux_notification_event,priority:2;size:100;not null"`
 	Kind      string     `json:"kind" gorm:"size:20;not null"`
 	ActorID   uint       `json:"actor_id"`
 	Actor     User       `json:"actor,omitempty" gorm:"foreignKey:ActorID"`
 	VideoID   uint       `json:"video_id,omitempty"`
 	Text      string     `json:"text" gorm:"size:280"`
-	ReadAt    *time.Time `json:"read_at"`
+	ReadAt    *time.Time `json:"read_at" gorm:"index:idx_notification_unread,priority:2"`
 	CreatedAt time.Time  `json:"created_at" gorm:"index:idx_notification_page,priority:2,sort:desc"`
 }
 

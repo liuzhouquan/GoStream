@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +61,55 @@ func TestMySQLMessageDeviceLifecycleIntegration(t *testing.T) {
 		if err := tx.Model(model).Where("user_id = ? AND device_id = ?", user.ID, testDeviceA).Count(&count).Error; err != nil || count != 0 {
 			t.Fatalf("MySQL device state %T: count=%d err=%v", model, count, err)
 		}
+	}
+}
+
+func TestMySQLNotificationPaginationIntegration(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to run the MySQL integration test")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !db.Migrator().HasIndex(&Notification{}, "idx_notification_user_id") || !db.Migrator().HasIndex(&Notification{}, "idx_notification_unread") {
+		t.Fatal("notification pagination index is missing; start the migrated API first")
+	}
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	defer tx.Rollback()
+	s := NewServer(tx, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	h := s.Router()
+	unique := time.Now().UnixNano()
+	ownerID, token := registerTestUser(t, h, fmt.Sprintf("mn%d", unique))
+	actorID, _ := registerTestUser(t, h, fmt.Sprintf("ma%d", unique))
+	stamp := time.Now().UTC().Truncate(time.Second)
+	var notices [3]Notification
+	for i := range notices {
+		notices[i] = Notification{UserID: ownerID, EventKey: fmt.Sprintf("mysql-notice-%d-%d", unique, i), Kind: "follow", ActorID: actorID, CreatedAt: stamp}
+		if err := tx.Create(&notices[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	first := request(t, h, http.MethodGet, "/api/notifications?limit=2", token, nil)
+	var page struct {
+		Items      []Notification `json:"items"`
+		NextCursor uint           `json:"next_cursor"`
+		HasMore    bool           `json:"has_more"`
+	}
+	if first.Code != http.StatusOK || json.Unmarshal(first.Body.Bytes(), &page) != nil || len(page.Items) != 2 || !page.HasMore || page.Items[0].ID != notices[2].ID || page.Items[1].ID != notices[1].ID {
+		t.Fatalf("MySQL first notification page: %d %s", first.Code, first.Body.String())
+	}
+	second := request(t, h, http.MethodGet, fmt.Sprintf("/api/notifications?limit=2&before_id=%d", page.NextCursor), token, nil)
+	if second.Code != http.StatusOK || json.Unmarshal(second.Body.Bytes(), &page) != nil || len(page.Items) != 1 || page.HasMore || page.Items[0].ID != notices[0].ID {
+		t.Fatalf("MySQL second notification page: %d %s", second.Code, second.Body.String())
+	}
+	read := request(t, h, http.MethodPatch, fmt.Sprintf("/api/notifications/read?up_to_id=%d", notices[1].ID), token, nil)
+	if read.Code != http.StatusOK || !strings.Contains(read.Body.String(), `"read_count":2`) {
+		t.Fatalf("MySQL bounded read: %d %s", read.Code, read.Body.String())
 	}
 }
 
