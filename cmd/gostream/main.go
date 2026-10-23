@@ -37,7 +37,7 @@ func main() {
 			if err := os.MkdirAll("data", 0755); err != nil {
 				log.Fatal(err)
 			}
-			dsn = "data/gostream.db?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+			dsn = sqliteDSN("data/gostream.db")
 		}
 	} else if dsn == "" {
 		log.Fatal("DB_DSN is required for mysql")
@@ -132,4 +132,8 @@ func env(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func sqliteDSN(path string) string {
+	return path + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1"
 }

@@ -15,7 +15,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,12 +24,11 @@ import (
 	"gorm.io/gorm"
 )
 
-var testDatabaseSequence atomic.Uint64
-
 func testServer(t *testing.T) (*Server, *gin.Engine, *gorm.DB) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	db, err := gorm.Open(gormsqlite.Open(fmt.Sprintf("file:gostream-test-%d?mode=memory&cache=shared", testDatabaseSequence.Add(1))), &gorm.Config{})
+	dsn := filepath.Join(t.TempDir(), "test.db") + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1"
+	db, err := gorm.Open(gormsqlite.Open(dsn), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}

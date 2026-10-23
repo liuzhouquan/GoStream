@@ -12,7 +12,7 @@ This repository is under active staged development. See [delivery scope](docs/DE
 - Node.js is not required for the current static web client
 - Docker is optional; Docker Compose runs the API with MySQL and Redis. An `observability` profile adds Prometheus and Grafana.
 
-The default local profile stores data in `./data/gostream.db` using SQLite. It needs no external services. Run:
+The default local profile stores data in `./data/gostream.db` using SQLite with WAL, a five-second busy timeout, and foreign-key enforcement. It needs no external services. Run:
 
 ```sh
 go run ./cmd/gostream
