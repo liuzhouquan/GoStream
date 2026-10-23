@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/liuzhouquan/GoStream/internal/migrations"
 	"github.com/liuzhouquan/GoStream/internal/platform"
 	"github.com/redis/go-redis/v9"
 	gormmysql "gorm.io/driver/mysql"
@@ -54,7 +55,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("connect database: %v", err)
 	}
-	if err = db.AutoMigrate(&platform.User{}, &platform.MediaAsset{}, &platform.UploadSession{}, &platform.UploadChunk{}, &platform.Video{}, &platform.VideoProcessJob{}, &platform.Follow{}, &platform.VideoAction{}, &platform.Comment{}, &platform.Notification{}, &platform.ChatMessage{}, &platform.MessageDeviceAck{}, &platform.MessageDevice{}, &platform.ChatGroup{}, &platform.GroupMember{}, &platform.GroupMessage{}, &platform.GroupRead{}, &platform.GroupDeviceRead{}, &platform.OutboxEvent{}, &platform.SchemaMigration{}); err != nil {
+	if err = migrations.Apply(context.Background(), db); err != nil {
 		log.Fatalf("migrate database: %v", err)
 	}
 	sqlDB, err := db.DB()

@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install the declared Go version
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Confirm the exact Go version
+        shell: bash
+        run: |
+          required="$(awk '$1 == "go" { print "go" $2; exit }' go.mod)"
+          actual="$(go env GOVERSION)"
+          echo "required=$required actual=$actual"
+          test "$actual" = "$required"
+
+      - name: Go tests
+        run: go test ./...
+
+      - name: Go race tests
+        run: go test -race ./...
+
+      - name: Go vet
+        run: go vet ./...
+
+      - name: Build API
+        run: go build -o "$RUNNER_TEMP/gostream" ./cmd/gostream
+
+      - name: Check web client syntax
+        run: node --check web/app.js
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
+  mysql-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root-ci-only
+          MYSQL_DATABASE: gostream_ci
+          MYSQL_USER: gostream
+          MYSQL_PASSWORD: gostream-ci-only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -ugostream -pgostream-ci-only --silent"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+    env:
+      GOSTREAM_TEST_MYSQL_DSN: gostream:gostream-ci-only@tcp(127.0.0.1:3306)/gostream_ci?charset=utf8mb4&parseTime=True&loc=Local
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install the declared Go version
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Migrate a fresh MySQL database with concurrent starters
+        run: go test ./internal/migrations -run '^TestApplyMySQLIntegration$' -count=1
+
+      - name: Run real MySQL integration tests
+        run: go test ./internal/platform -run '^TestMySQL' -count=1

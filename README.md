@@ -24,6 +24,8 @@ Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECR
 
 - Go 1.27.2, Gin, GORM, SQLite for zero-service local development
 - MySQL and Redis Compose profile, verified with real end-to-end requests
+- One-time `schema_v001` migration baseline with MySQL startup locking and adoption of existing GORM databases; frozen SQL upgrades and rollback remain pending
+- CI workflow for exact Go version, tests, race checks, vet, build, web syntax, and Compose validation
 - Optional Redis cache for anonymous timeline/recommend/hot pages and each viewer's following first page; database fallback and bounded staleness
 - Explainable recommendation ranking using interactions, freshness, followed authors, and recently interacted authors
 - JWT access tokens and bcrypt password hashing
