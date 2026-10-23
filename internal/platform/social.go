@@ -326,23 +326,3 @@ func (s *Server) recordView(c *gin.Context) {
 	}
 	c.Status(204)
 }
-
-func (s *Server) search(c *gin.Context) {
-	q := strings.TrimSpace(c.Query("q"))
-	if len(q) < 2 || len(q) > 80 {
-		respondError(c, 400, "q must be 2-80 characters")
-		return
-	}
-	like := "%" + strings.ReplaceAll(strings.ReplaceAll(q, "%", "\\%"), "_", "\\_") + "%"
-	var users []User
-	var videos []Video
-	if err := s.DB.Where("username LIKE ? OR nickname LIKE ?", like, like).Limit(20).Find(&users).Error; err != nil {
-		respondError(c, 500, "could not search users")
-		return
-	}
-	if err := s.DB.Preload("Author").Where("status = ? AND (title LIKE ? OR description LIKE ?)", "published", like, like).Limit(30).Find(&videos).Error; err != nil {
-		respondError(c, 500, "could not search videos")
-		return
-	}
-	c.JSON(200, gin.H{"users": users, "videos": videos})
-}

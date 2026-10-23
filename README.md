@@ -33,6 +33,7 @@ Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECR
 - Creator-page retry controls for transient processing failures and replacement uploads for invalid files
 - Database outbox with transactional notification writes, leased dispatch, retry, and dead-letter state
 - Paged notification inbox with bounded mark-read updates, unread counts, and WebSocket push
+- User and video search with independent ID cursor pages, literal wildcard matching, and playable web results
 - One-level comment threads with separate root/reply cursor pages, lazy loading in the web client, and reply notifications
 - Direct/group WebSocket messaging, paged direct history, batch recipient ACKs, per-device direct read state and group cursors, bounded device registration with idle cleanup, offline replay, and optional Redis cross-instance event relay and presence
 - Multiple WebSocket connections per account (up to eight per API instance), with committed direct/group messages sent to each active device and control replies kept on the originating connection

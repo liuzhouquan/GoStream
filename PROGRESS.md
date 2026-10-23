@@ -34,6 +34,7 @@ Last updated: 2026-10-23
 - [x] Register up to 32 message devices per account, replace a device idle for 30 days when full, clean up device read state after 90 idle days, and backfill preexisting receipts/cursors once during upgrade.
 - [x] Page notification inboxes with an ID cursor, load older notifications in the web client, and bound mark-read updates to the newest notification the client received.
 - [x] Reclaim generated registered media after seven days without video/avatar/unfinished-job references; serialize attachment and cleanup on the media asset row, and index URL reference checks.
+- [x] Page user and video search independently by descending ID, handle literal LIKE wildcard characters on SQLite/MySQL, and show playable video cards with separate older-result controls in the web client.
 
 ## Stages
 
@@ -47,6 +48,8 @@ Last updated: 2026-10-23
 ## Verification ledger
 
 Commands run through 2026-10-23 using Go 1.27.2:
+
+- On 2026-10-23, search now accepts `type=all|users|videos`, `limit=1..50`, and independent `users_before_id`/`videos_before_id` cursors. SQLite tests covered 25-user/25-video multi-page scans, insertion after page one, hidden-video exclusion, literal wildcard characters, UTF-8 queries, authenticated like state, and invalid parameters. A real MySQL transaction test passed literal `_` and `%` matching. In an isolated browser session, controlled 13-video and 13-user fixtures each rendered 12 initial results and one older result after clicking its own load-more button; the video results used playable cards. Fixture rows were deleted and the browser session closed; MySQL counts returned 0/0. After sharing the viewer-action lookup between Feed and search, `go test ./...`, `go test -race ./...`, `go vet ./...`, `node --check web/app.js`, Compose config, and diff checks passed. The final Go 1.27.2 Compose image rebuilt, the MySQL integration test passed again, and `/ready` returned 200. No search throughput measurement is claimed.
 
 - On 2026-10-23, registered-media cleanup SQLite tests covered seven-day age, video/cover/avatar/unfinished-job protection, deleted-video retention, video/avatar replacement, missing files, recent file modification, symlinks, unsafe names, a 101-row keyset scan, repeat runs, database failures, and rejection of a removed URL. `go test ./...`, `go test -race ./...`, and `go vet ./...` passed with Go 1.27.2. The Compose API rebuilt, migrated the media lookup indexes, and returned `/ready` 200. `TestMySQLRegisteredMediaReconciliationIntegration` passed against real Compose MySQL with a rolled-back fixture transaction and temporary files; it verified the indexes, unreferenced deletion and deleted-video retention. A controlled eight-day-old asset was inserted into the live Compose media volume and database; after API restart, the file and row were absent, `/ready` returned 200, and `gostream_media_reconciliation_total{result="asset_removed"}` was 1. The seven-day rule uses asset creation time, and files referenced by deleted video rows remain protected for restore/audit.
 

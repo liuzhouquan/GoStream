@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"strconv"
@@ -21,6 +22,36 @@ type feedItemResponse struct {
 	Video
 	Liked     bool `json:"liked"`
 	Favorited bool `json:"favorited"`
+}
+
+func (s *Server) videoCardsForViewer(ctx context.Context, viewerID uint, videos []Video) ([]feedItemResponse, error) {
+	entries := make([]feedItemResponse, 0, len(videos))
+	for _, video := range videos {
+		entries = append(entries, feedItemResponse{Video: video})
+	}
+	if viewerID == 0 || len(videos) == 0 {
+		return entries, nil
+	}
+	ids := make([]uint, 0, len(videos))
+	for _, video := range videos {
+		ids = append(ids, video.ID)
+	}
+	var actions []VideoAction
+	if err := s.DB.WithContext(ctx).Where("user_id = ? AND video_id IN ?", viewerID, ids).Find(&actions).Error; err != nil {
+		return nil, err
+	}
+	states := make(map[uint]map[string]bool, len(videos))
+	for _, action := range actions {
+		if states[action.VideoID] == nil {
+			states[action.VideoID] = make(map[string]bool)
+		}
+		states[action.VideoID][action.Kind] = true
+	}
+	for i := range entries {
+		entries[i].Liked = states[entries[i].ID]["like"]
+		entries[i].Favorited = states[entries[i].ID]["favorite"]
+	}
+	return entries, nil
 }
 
 func encodeCursor(v feedCursor) string {
@@ -143,32 +174,10 @@ func (s *Server) feed(c *gin.Context) {
 	if more {
 		items = items[:limit]
 	}
-	entries := make([]feedItemResponse, 0, len(items))
-	for _, item := range items {
-		entries = append(entries, feedItemResponse{Video: item})
-	}
-	if raw, ok := c.Get("userID"); ok && len(items) > 0 {
-		viewerID, _ := raw.(uint)
-		ids := make([]uint, 0, len(items))
-		for _, item := range items {
-			ids = append(ids, item.ID)
-		}
-		var actions []VideoAction
-		if err := s.DB.Where("user_id = ? AND video_id IN ?", viewerID, ids).Find(&actions).Error; err != nil {
-			respondError(c, 500, "could not load interaction state")
-			return
-		}
-		states := make(map[uint]map[string]bool)
-		for _, action := range actions {
-			if states[action.VideoID] == nil {
-				states[action.VideoID] = map[string]bool{}
-			}
-			states[action.VideoID][action.Kind] = true
-		}
-		for i := range entries {
-			entries[i].Liked = states[entries[i].ID]["like"]
-			entries[i].Favorited = states[entries[i].ID]["favorite"]
-		}
+	entries, err := s.videoCardsForViewer(c.Request.Context(), uid(c), items)
+	if err != nil {
+		respondError(c, 500, "could not load interaction state")
+		return
 	}
 	next := ""
 	if more && len(items) > 0 {

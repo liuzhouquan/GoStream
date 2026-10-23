@@ -39,6 +39,8 @@ Likes/favorites and follows use database transactions; comments and their denorm
 
 The notification inbox also uses ID keyset pages. The browser keeps the newest ID from its first page and supplies it when marking notifications read. The update is scoped to that user and ID boundary, so a notice assigned a higher ID after the page load remains unread. A legacy request without the boundary still marks all currently unread rows.
 
+Search uses separate descending-ID cursors for users and published videos. A shared `LIKE ... ESCAPE '!'` pattern gives SQLite and MySQL literal matching for `%`, `_`, and `!`. Page size is bounded to 50 per type, and video results include batched viewer interaction flags. The web client loads the two result types independently and renders video cards with playback. Leading-wildcard substring queries scan candidate text rather than using a full-text index; a dedicated search index is future work for larger catalogs.
+
 ## Security and operations
 
 Device-specific read state has its own lifecycle. A user row lock serializes new device registrations across instances; new registrations are capped at 32 IDs per account. At capacity, a new ID can replace the oldest one after 30 idle days. The hourly cleanup removes IDs idle for 90 days and deletes their direct receipts and group cursors in the same transaction. Original direct messages are retained, so a returning expired device may see duplicates rather than losing pending messages. A per-device lookup refreshes last-seen time at most once per minute while it is used.

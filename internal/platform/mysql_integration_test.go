@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,55 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
+
+func TestMySQLSearchLiteralPaginationIntegration(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to run the MySQL integration test")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	defer tx.Rollback()
+	prefix := fmt.Sprintf("s%d", time.Now().UnixNano())
+	user := User{Username: prefix + "_hit", Nickname: "search fixture", PasswordHash: "unused"}
+	other := User{Username: prefix + "xhit", Nickname: "search fixture", PasswordHash: "unused"}
+	for _, row := range []*User{&user, &other} {
+		if err := tx.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	wanted := Video{AuthorID: user.ID, Title: prefix + "% clip", MediaURL: "/media/unused.mp4", Status: "published"}
+	unwanted := Video{AuthorID: user.ID, Title: prefix + "x clip", MediaURL: "/media/unused.mp4", Status: "published"}
+	for _, row := range []*Video{&wanted, &unwanted} {
+		if err := tx.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := NewServer(tx, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	h := s.Router()
+	response := request(t, h, http.MethodGet, "/api/search?q="+url.QueryEscape(prefix+"_"), "", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("MySQL user search: %d %s", response.Code, response.Body.String())
+	}
+	page := readSearchResponse(t, response.Body.Bytes())
+	if len(page.Users) != 1 || page.Users[0].ID != user.ID {
+		t.Fatalf("MySQL literal underscore: %+v", page.Users)
+	}
+	response = request(t, h, http.MethodGet, "/api/search?q="+url.QueryEscape(prefix+"%")+"&type=videos&limit=1", "", nil)
+	if response.Code != http.StatusOK {
+		t.Fatalf("MySQL video search: %d %s", response.Code, response.Body.String())
+	}
+	page = readSearchResponse(t, response.Body.Bytes())
+	if len(page.Videos) != 1 || page.Videos[0].ID != wanted.ID || page.HasMoreVideos {
+		t.Fatalf("MySQL literal percent: %+v", page.Videos)
+	}
+}
 
 func TestMySQLRegisteredMediaReconciliationIntegration(t *testing.T) {
 	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")

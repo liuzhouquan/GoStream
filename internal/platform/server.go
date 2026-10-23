@@ -75,7 +75,7 @@ func (s *Server) Router() *gin.Engine {
 	api.PUT("/uploads/sessions/:id/chunks/:index", s.auth(), s.putUploadChunk)
 	api.POST("/uploads/sessions/:id/complete", s.auth(), s.completeUploadSession)
 	api.GET("/feed", s.optionalAuth(), s.feed)
-	api.GET("/search", s.search)
+	api.GET("/search", s.optionalAuth(), s.search)
 	api.GET("/users/:id", s.getUser)
 	api.GET("/users/:id/presence", s.userPresence)
 	api.GET("/users/:id/videos", s.optionalAuth(), s.userVideos)
