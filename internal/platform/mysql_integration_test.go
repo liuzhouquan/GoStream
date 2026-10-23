@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,82 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
+
+func TestMySQLRegisteredMediaReconciliationIntegration(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to run the MySQL integration test")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, index := range []struct {
+		model any
+		name  string
+	}{
+		{&MediaAsset{}, "idx_media_assets_created_at"},
+		{&Video{}, "idx_videos_media_url"},
+		{&Video{}, "idx_videos_cover_url"},
+		{&User{}, "idx_users_avatar_url"},
+		{&VideoProcessJob{}, "idx_video_process_jobs_source_url"},
+	} {
+		if !db.Migrator().HasIndex(index.model, index.name) {
+			t.Fatalf("media cleanup index %s is missing; start the migrated API first", index.name)
+		}
+	}
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC()
+	old := now.Add(-mediaAssetGrace - time.Hour)
+	user := User{Username: fmt.Sprintf("mysqlasset%d", now.UnixNano()), PasswordHash: "unused-test-credential", Nickname: "asset integration"}
+	if err := tx.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(tx, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	makeAsset := func(n int) (string, string) {
+		t.Helper()
+		name := fmt.Sprintf("%032x.mp4", now.UnixNano()+int64(n))
+		path, url := filepath.Join(s.MediaDir, name), "/media/"+name
+		if err := os.WriteFile(path, []byte("asset"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Create(&MediaAsset{OwnerID: user.ID, URL: url, Kind: "video", Size: 5, CreatedAt: old}).Error; err != nil {
+			t.Fatal(err)
+		}
+		return path, url
+	}
+	unusedPath, unusedURL := makeAsset(1)
+	usedPath, usedURL := makeAsset(2)
+	if err := tx.Create(&Video{AuthorID: user.ID, Title: "kept", MediaURL: usedURL, Status: "deleted"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if removed, err := s.ReconcileUnusedAssets(context.Background(), now); err != nil || removed != 1 {
+		t.Fatalf("MySQL media cleanup: removed=%d err=%v", removed, err)
+	}
+	if _, err := os.Stat(unusedPath); !os.IsNotExist(err) {
+		t.Fatalf("unused file remains: %v", err)
+	}
+	if _, err := os.Stat(usedPath); err != nil {
+		t.Fatalf("referenced file removed: %v", err)
+	}
+	var unused, used int64
+	if err := tx.Model(&MediaAsset{}).Where("url = ?", unusedURL).Count(&unused).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Model(&MediaAsset{}).Where("url = ?", usedURL).Count(&used).Error; err != nil {
+		t.Fatal(err)
+	}
+	if unused != 0 || used != 1 {
+		t.Fatalf("MySQL media rows: unused=%d used=%d", unused, used)
+	}
+}
 
 func TestMySQLMessageDeviceLifecycleIntegration(t *testing.T) {
 	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")

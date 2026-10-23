@@ -157,22 +157,20 @@ func (s *Server) createVideo(c *gin.Context) {
 		respondError(c, 400, "title and media_url are required")
 		return
 	}
-	if !s.ownsMedia(uid(c), in.MediaURL, "video") {
-		respondError(c, 400, "upload a video with this account before publishing")
-		return
-	}
-	if in.CoverURL != "" {
-		if !s.ownsMedia(uid(c), in.CoverURL, "image") {
-			respondError(c, 400, "cover must be an image uploaded by this account")
-			return
-		}
-	}
 	status := "published"
 	if s.ffmpegBin != "" {
 		status = "processing"
 	}
 	v := Video{AuthorID: uid(c), Title: in.Title, Description: in.Description, MediaURL: in.MediaURL, CoverURL: in.CoverURL, Status: status}
 	if err := s.DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockOwnedMedia(tx, uid(c), in.MediaURL, "video"); err != nil {
+			return err
+		}
+		if in.CoverURL != "" {
+			if err := lockOwnedMedia(tx, uid(c), in.CoverURL, "image"); err != nil {
+				return err
+			}
+		}
 		if err := tx.Create(&v).Error; err != nil {
 			return err
 		}
@@ -181,6 +179,10 @@ func (s *Server) createVideo(c *gin.Context) {
 		}
 		return nil
 	}); err != nil {
+		if errors.Is(err, errMediaNotOwned) {
+			respondError(c, 400, "video or cover must be uploaded by this account")
+			return
+		}
 		respondError(c, 500, "could not publish video")
 		return
 	}
@@ -191,9 +193,17 @@ func (s *Server) createVideo(c *gin.Context) {
 	c.JSON(201, v)
 }
 
-func (s *Server) ownsMedia(ownerID uint, url, kind string) bool {
-	var count int64
-	return s.DB.Model(&MediaAsset{}).Where("url = ? AND owner_id = ? AND kind = ?", url, ownerID, kind).Count(&count).Error == nil && count == 1
+var errMediaNotOwned = errors.New("media is not registered to this account")
+
+// All writers of a media URL lock its registration before creating a reference.
+// The asset reaper takes the same lock, so it cannot delete a selected upload.
+func lockOwnedMedia(tx *gorm.DB, ownerID uint, url, kind string) error {
+	var asset MediaAsset
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("url = ? AND owner_id = ? AND kind = ?", url, ownerID, kind).First(&asset).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return errMediaNotOwned
+	}
+	return err
 }
 
 func (s *Server) getVideo(c *gin.Context) {
@@ -283,17 +293,9 @@ func (s *Server) updateVideo(c *gin.Context) {
 		updates["description"] = strings.TrimSpace(*in.Description)
 	}
 	if in.MediaURL != nil {
-		if !s.ownsMedia(uid(c), *in.MediaURL, "video") {
-			respondError(c, 400, "upload a video with this account before using it")
-			return
-		}
 		updates["media_url"] = *in.MediaURL
 	}
 	if in.CoverURL != nil {
-		if *in.CoverURL != "" && !s.ownsMedia(uid(c), *in.CoverURL, "image") {
-			respondError(c, 400, "cover must be an image uploaded by this account")
-			return
-		}
 		updates["cover_url"] = *in.CoverURL
 	}
 	if len(updates) == 0 {
@@ -301,6 +303,16 @@ func (s *Server) updateVideo(c *gin.Context) {
 		return
 	}
 	if err := s.DB.Transaction(func(tx *gorm.DB) error {
+		if in.MediaURL != nil {
+			if err := lockOwnedMedia(tx, uid(c), *in.MediaURL, "video"); err != nil {
+				return err
+			}
+		}
+		if in.CoverURL != nil && *in.CoverURL != "" {
+			if err := lockOwnedMedia(tx, uid(c), *in.CoverURL, "image"); err != nil {
+				return err
+			}
+		}
 		var current Video
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND author_id = ? AND status <> ?", v.ID, uid(c), "deleted").First(&current).Error; err != nil {
 			return err
@@ -325,6 +337,10 @@ func (s *Server) updateVideo(c *gin.Context) {
 		}
 		return nil
 	}); err != nil {
+		if errors.Is(err, errMediaNotOwned) {
+			respondError(c, 400, "video or cover must be uploaded by this account")
+			return
+		}
 		respondError(c, 500, "could not edit video")
 		return
 	}

@@ -7,10 +7,15 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const mediaOrphanGrace = 24 * time.Hour
+const mediaAssetGrace = 7 * 24 * time.Hour
 const mediaReconcileBatch = 100
 
 var generatedMediaName = regexp.MustCompile(`^[0-9a-f]{32}\.(mp4|mov|webm|jpg|jpeg|png|webp)$`)
@@ -132,16 +137,137 @@ func (s *Server) removeUnreferencedMedia(ctx context.Context, batch []orphanCand
 	return removed, nil
 }
 
+// ReconcileUnusedAssets removes old registrations without a current video,
+// avatar, or unfinished processing-job reference. References are
+// checked again under the asset row lock before deleting the registration.
+func (s *Server) ReconcileUnusedAssets(ctx context.Context, now time.Time) (int, error) {
+	cutoff := now.Add(-mediaAssetGrace)
+	var lastID uint
+	removed := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return removed, err
+		}
+		var candidates []MediaAsset
+		err := s.DB.WithContext(ctx).Model(&MediaAsset{}).
+			Select("id", "url", "created_at").
+			Where("id > ? AND created_at < ?", lastID, cutoff).
+			Where("NOT EXISTS (SELECT 1 FROM videos WHERE videos.media_url = media_assets.url OR videos.cover_url = media_assets.url)").
+			Where("NOT EXISTS (SELECT 1 FROM users WHERE users.avatar_url = media_assets.url)").
+			Where("NOT EXISTS (SELECT 1 FROM video_process_jobs WHERE video_process_jobs.source_url = media_assets.url AND done_at IS NULL AND dead_at IS NULL)").
+			Order("id ASC").Limit(mediaReconcileBatch).Find(&candidates).Error
+		if err != nil {
+			return removed, err
+		}
+		if len(candidates) == 0 {
+			return removed, nil
+		}
+		for _, candidate := range candidates {
+			lastID = candidate.ID
+			if err := ctx.Err(); err != nil {
+				return removed, err
+			}
+			name := strings.TrimPrefix(candidate.URL, "/media/")
+			if candidate.URL != "/media/"+name || !generatedMediaName.MatchString(name) {
+				continue
+			}
+			path := filepath.Join(s.MediaDir, name)
+			before, err := os.Lstat(path)
+			if err != nil && !errors.Is(err, os.ErrNotExist) {
+				return removed, err
+			}
+			if err == nil && (!before.Mode().IsRegular() || !before.ModTime().Before(cutoff)) {
+				continue
+			}
+			deleted := false
+			err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+				var locked MediaAsset
+				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, candidate.ID).Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						return nil
+					}
+					return err
+				}
+				if locked.URL != candidate.URL || !locked.CreatedAt.Before(cutoff) {
+					return nil
+				}
+				referenced, err := mediaAssetReferenced(tx, locked.URL)
+				if err != nil || referenced {
+					return err
+				}
+				if err := tx.Delete(&locked).Error; err != nil {
+					return err
+				}
+				deleted = true
+				return nil
+			})
+			if err != nil {
+				return removed, err
+			}
+			if !deleted {
+				continue
+			}
+			removed++
+			if before == nil {
+				continue
+			}
+			after, err := os.Lstat(path)
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return removed, err
+			}
+			if !after.Mode().IsRegular() || !os.SameFile(before, after) || after.Size() != before.Size() || !after.ModTime().Equal(before.ModTime()) {
+				continue // The next orphan pass can inspect a changed file safely.
+			}
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return removed, err
+			}
+		}
+	}
+}
+
+func mediaAssetReferenced(tx *gorm.DB, url string) (bool, error) {
+	checks := []struct {
+		model any
+		where string
+		args  []any
+	}{
+		{&Video{}, "media_url = ? OR cover_url = ?", []any{url, url}},
+		{&User{}, "avatar_url = ?", []any{url}},
+		{&VideoProcessJob{}, "source_url = ? AND done_at IS NULL AND dead_at IS NULL", []any{url}},
+	}
+	for _, check := range checks {
+		var count int64
+		if err := tx.Model(check.model).Where(check.where, check.args...).Count(&count).Error; err != nil {
+			return false, err
+		}
+		if count != 0 {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 func (s *Server) RunMediaReconciliation(ctx context.Context) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
 	for {
-		removed, err := s.ReconcileOrphanMedia(ctx, time.Now().UTC())
+		now := time.Now().UTC()
+		removed, err := s.ReconcileOrphanMedia(ctx, now)
 		if err != nil && !errors.Is(err, context.Canceled) {
 			log.Printf("media reconciliation failed: %v", err)
 			s.metrics.mediaReconcile.WithLabelValues("error").Inc()
 		} else if err == nil {
 			s.metrics.mediaReconcile.WithLabelValues("removed").Add(float64(removed))
+		}
+		assetsRemoved, assetErr := s.ReconcileUnusedAssets(ctx, now)
+		if assetErr != nil && !errors.Is(assetErr, context.Canceled) {
+			log.Printf("registered media reconciliation failed: %v", assetErr)
+			s.metrics.mediaReconcile.WithLabelValues("asset_error").Inc()
+		} else if assetErr == nil {
+			s.metrics.mediaReconcile.WithLabelValues("asset_removed").Add(float64(assetsRemoved))
 		}
 		select {
 		case <-ctx.Done():

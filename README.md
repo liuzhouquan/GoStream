@@ -29,7 +29,7 @@ Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECR
 - JWT access tokens and bcrypt password hashing
 - Local media storage, single-file and 4 MiB resumable chunk uploads, media ownership checks, and file integrity checks
 - Durable FFmpeg processing jobs in Compose: source video limits, leased retries, H.264 MP4 output with AAC for audio inputs, generated JPEG cover, and persisted output duration/dimensions
-- Author-visible processing failure reasons and hourly cleanup of old generated files left without database references
+- Author-visible processing failure reasons and hourly cleanup of old unregistered files and unreferenced assets registered over seven days ago
 - Creator-page retry controls for transient processing failures and replacement uploads for invalid files
 - Database outbox with transactional notification writes, leased dispatch, retry, and dead-letter state
 - Paged notification inbox with bounded mark-read updates, unread counts, and WebSocket push

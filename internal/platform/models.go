@@ -8,7 +8,7 @@ type User struct {
 	PasswordHash string     `json:"-" gorm:"not null"`
 	Nickname     string     `json:"nickname" gorm:"size:48;not null"`
 	Bio          string     `json:"bio" gorm:"size:280"`
-	AvatarURL    string     `json:"avatar_url" gorm:"size:512"`
+	AvatarURL    string     `json:"avatar_url" gorm:"size:512;index"`
 	LastSeenAt   *time.Time `json:"last_seen_at,omitempty"`
 	CreatedAt    time.Time  `json:"created_at"`
 }
@@ -19,8 +19,8 @@ type Video struct {
 	Author          User      `json:"author,omitempty" gorm:"foreignKey:AuthorID"`
 	Title           string    `json:"title" gorm:"size:120;not null"`
 	Description     string    `json:"description" gorm:"size:2000"`
-	MediaURL        string    `json:"media_url" gorm:"size:512;not null"`
-	CoverURL        string    `json:"cover_url" gorm:"size:512"`
+	MediaURL        string    `json:"media_url" gorm:"size:512;index;not null"`
+	CoverURL        string    `json:"cover_url" gorm:"size:512;index"`
 	Status          string    `json:"status" gorm:"size:16;index:idx_video_feed,priority:1;not null;default:published"`
 	LikeCount       int64     `json:"like_count"`
 	CommentCount    int64     `json:"comment_count"`
@@ -37,7 +37,7 @@ type Video struct {
 type VideoProcessJob struct {
 	ID          uint       `gorm:"primaryKey"`
 	VideoID     uint       `gorm:"index;not null"`
-	SourceURL   string     `gorm:"size:512;not null"`
+	SourceURL   string     `gorm:"size:512;index;not null"`
 	Attempts    int        `gorm:"not null;default:0"`
 	AvailableAt time.Time  `gorm:"index;not null"`
 	LeaseUntil  *time.Time `gorm:"index"`
@@ -50,12 +50,12 @@ type VideoProcessJob struct {
 
 // MediaAsset records an uploaded file and the account allowed to publish it.
 type MediaAsset struct {
-	ID        uint   `gorm:"primaryKey"`
-	OwnerID   uint   `gorm:"index;not null"`
-	URL       string `gorm:"size:512;uniqueIndex;not null"`
-	Kind      string `gorm:"size:16;not null"`
-	Size      int64  `gorm:"not null"`
-	CreatedAt time.Time
+	ID        uint      `gorm:"primaryKey"`
+	OwnerID   uint      `gorm:"index;not null"`
+	URL       string    `gorm:"size:512;uniqueIndex;not null"`
+	Kind      string    `gorm:"size:16;not null"`
+	Size      int64     `gorm:"not null"`
+	CreatedAt time.Time `gorm:"index"`
 }
 
 type UploadSession struct {

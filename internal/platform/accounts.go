@@ -1,12 +1,14 @@
 package platform
 
 import (
+	"errors"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,32}$`)
@@ -110,17 +112,24 @@ func (s *Server) updateMe(c *gin.Context) {
 		updates["bio"] = strings.TrimSpace(*in.Bio)
 	}
 	if in.AvatarURL != nil {
-		if *in.AvatarURL != "" && !s.ownsMedia(uid(c), *in.AvatarURL, "image") {
-			respondError(c, 400, "avatar must be an image uploaded by this account")
-			return
-		}
 		updates["avatar_url"] = *in.AvatarURL
 	}
 	if len(updates) == 0 {
 		respondError(c, 400, "no profile fields supplied")
 		return
 	}
-	if err := s.DB.Model(&User{}).Where("id = ?", uid(c)).Updates(updates).Error; err != nil {
+	if err := s.DB.Transaction(func(tx *gorm.DB) error {
+		if in.AvatarURL != nil && *in.AvatarURL != "" {
+			if err := lockOwnedMedia(tx, uid(c), *in.AvatarURL, "image"); err != nil {
+				return err
+			}
+		}
+		return tx.Model(&User{}).Where("id = ?", uid(c)).Updates(updates).Error
+	}); err != nil {
+		if errors.Is(err, errMediaNotOwned) {
+			respondError(c, 400, "avatar must be an image uploaded by this account")
+			return
+		}
 		respondError(c, 500, "could not update profile")
 		return
 	}
