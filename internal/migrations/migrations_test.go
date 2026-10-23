@@ -103,6 +103,41 @@ func TestApplyRejectsNewerSchemaAfterBaseline(t *testing.T) {
 	}
 }
 
+func TestApplyRetriesAfterInterruptedBaseline(t *testing.T) {
+	db := migrationTestDB(t)
+	// SQLite tables and indexes share a name namespace. This blocks the Feed
+	// index after earlier tables have been created, without writing v001.
+	if err := db.Exec("CREATE TABLE idx_video_feed (id integer)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(context.Background(), db); err == nil {
+		t.Fatal("expected the first baseline attempt to fail")
+	}
+	var count int64
+	if err := db.Model(&platform.SchemaMigration{}).Where(&platform.SchemaMigration{Key: baselineKey}).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("failed baseline marker: count=%d err=%v", count, err)
+	}
+	user := platform.User{Username: "survives-interrupted-baseline", Nickname: "Existing", PasswordHash: "test"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("DROP TABLE idx_video_feed").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(context.Background(), db); err != nil {
+		t.Fatalf("retry baseline: %v", err)
+	}
+	if !db.Migrator().HasIndex(&platform.Video{}, "idx_video_feed") {
+		t.Fatal("retry did not create the Feed index")
+	}
+	if err := db.Model(&platform.User{}).Where("id = ?", user.ID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("existing user after retry: count=%d err=%v", count, err)
+	}
+	if err := db.Model(&platform.SchemaMigration{}).Where(&platform.SchemaMigration{Key: baselineKey}).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("baseline marker after retry: count=%d err=%v", count, err)
+	}
+}
+
 // Set GOSTREAM_TEST_MYSQL_DSN to a dedicated empty database. This test creates
 // the schema and is intentionally skipped by the default local suite.
 func TestApplyMySQLIntegration(t *testing.T) {
@@ -165,8 +200,16 @@ func TestApplyMySQLLegacyIntegration(t *testing.T) {
 	if err := db.Create(&platform.SchemaMigration{Key: "message_devices_v1", AppliedAt: time.Now().UTC()}).Error; err != nil {
 		t.Fatal(err)
 	}
+	// Approximate an interrupted additive migration: earlier schema and data
+	// exist, but one index and the v001 marker are absent.
+	if err := db.Migrator().DropIndex(&platform.Video{}, "idx_video_feed"); err != nil {
+		t.Fatal(err)
+	}
 	if err := Apply(context.Background(), db); err != nil {
 		t.Fatal(err)
+	}
+	if !db.Migrator().HasIndex(&platform.Video{}, "idx_video_feed") {
+		t.Fatal("legacy MySQL Feed index was not restored")
 	}
 	var count int64
 	if err := db.Model(&platform.User{}).Where("id = ?", user.ID).Count(&count).Error; err != nil || count != 1 {
@@ -174,5 +217,11 @@ func TestApplyMySQLLegacyIntegration(t *testing.T) {
 	}
 	if err := db.Model(&platform.SchemaMigration{}).Count(&count).Error; err != nil || count != 2 {
 		t.Fatalf("legacy MySQL markers: count=%d err=%v", count, err)
+	}
+	if err := Apply(context.Background(), db); err != nil {
+		t.Fatalf("repeat legacy migration: %v", err)
+	}
+	if err := db.Model(&platform.SchemaMigration{}).Count(&count).Error; err != nil || count != 2 {
+		t.Fatalf("legacy MySQL markers after repeat: count=%d err=%v", count, err)
 	}
 }

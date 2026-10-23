@@ -1,6 +1,6 @@
 # GoStream development progress
 
-Last updated: 2026-10-23
+Last updated: 2026-10-24
 
 The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs/DELIVERY_SCOPE.md); the test matrix and pass criteria are in [`docs/TEST_STANDARD.md`](docs/TEST_STANDARD.md). Checked items below record individual features or local verification; they do not mean the whole project has met those release gates.
 
@@ -41,6 +41,7 @@ The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs
 - [x] Record a one-time `schema_v001` migration baseline, adopt previous AutoMigrate databases without deleting rows, and serialize concurrent MySQL starts. This baseline still derives from current GORM models and is not the final frozen SQL migration system.
 - [x] Retry the last WebSocket disconnect's `last_seen_at` write after transient database errors; reproduce SQLite lock contention in a regression test.
 - [x] Use driver-supported WAL, five-second busy timeout, and foreign-key options in the local SQLite DSN; verify their effective PRAGMA values and run WebSocket tests against a disposable file with the same settings.
+- [x] Cover an interrupted v001 baseline retry in SQLite, and add a separate legacy MySQL database to CI for existing-data adoption, missing-index recovery, and repeated application.
 
 ## Stages
 
@@ -53,7 +54,9 @@ The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs
 
 ## Verification ledger
 
-Commands run through 2026-10-23 using Go 1.27.2:
+Commands run through 2026-10-24 using Go 1.27.2:
+
+- On 2026-10-24, `/usr/local/go/bin/go version` again returned `go1.27.2`. `TestApplyRetriesAfterInterruptedBaseline` passed on SQLite: an index-name collision stopped the first migration after partial DDL, no v001 marker was written, and after removing the blocker a retry restored the index and preserved an inserted user. The expanded `TestApplyMySQLLegacyIntegration` passed against MySQL 8.4 in a dedicated temporary schema: it adopted an existing user and device marker, restored a deliberately removed Feed index, and kept exactly two markers after repeated `Apply`. The temporary schema was dropped. CI now provisions a second isolated MySQL database for this test; its remote result is pending. Frozen SQL upgrades and a backup/restore drill remain outstanding.
 
 - The first GitHub CI run for `ab79e73` passed the fresh MySQL migration and all `TestMySQL*` integration tests, but its quality job exposed `TestPresenceTracksConnectionAndLastSeen`: the disconnect write failed once with `database table is locked: users` under SQLite, and the old handler ignored that error. The handler now retries the last-seen update with bounded waits and logs permanent failure. The test deliberately holds a SQLite write lock through socket close, then verifies persistence and public presence after release. Local focused runs passed 20 times normally and 10 times with `-race`; full `go test -count=1 ./...`, full `go test -race -count=1 ./...`, vet, and API build then passed. The later `3726b2c` CI run passed, as recorded below.
 

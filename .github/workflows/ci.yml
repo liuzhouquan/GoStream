@@ -69,6 +69,7 @@ jobs:
           --health-retries=20
     env:
       GOSTREAM_TEST_MYSQL_DSN: gostream:gostream-ci-only@tcp(127.0.0.1:3306)/gostream_ci?charset=utf8mb4&parseTime=True&loc=Local
+      GOSTREAM_TEST_MYSQL_LEGACY_DSN: gostream:gostream-ci-only@tcp(127.0.0.1:3306)/gostream_ci_legacy?charset=utf8mb4&parseTime=True&loc=Local
     steps:
       - name: Check out source
         uses: actions/checkout@v7
@@ -81,6 +82,16 @@ jobs:
 
       - name: Migrate a fresh MySQL database with concurrent starters
         run: go test ./internal/migrations -run '^TestApplyMySQLIntegration$' -count=1
+
+      - name: Create an isolated prior-schema database
+        run: |
+          docker exec -i "${{ job.services.mysql.id }}" sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot' <<'SQL'
+          CREATE DATABASE gostream_ci_legacy;
+          GRANT ALL PRIVILEGES ON gostream_ci_legacy.* TO 'gostream'@'%';
+          SQL
+
+      - name: Test prior-schema adoption and interrupted migration recovery
+        run: go test ./internal/migrations -run '^TestApplyMySQLLegacyIntegration$' -count=1
 
       - name: Run real MySQL integration tests
         run: go test ./internal/platform -run '^TestMySQL' -count=1
