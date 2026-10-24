@@ -422,6 +422,53 @@ func TestMySQLV002UpgradeIntegration(t *testing.T) {
 	}
 }
 
+// The recovery script restores a real mysqldump, removes the v002 index and
+// marker, and then invokes this test against only that disposable restore DB.
+func TestMySQLRecoveryDrillIntegration(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_RECOVERY_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_RECOVERY_DSN through mysql_recovery.sh")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count int64
+	if err := db.Model(&platform.SchemaMigration{}).Where("`key` = ?", baselineKey).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("restored v001 marker: count=%d err=%v", count, err)
+	}
+	if err := db.Model(&platform.SchemaMigration{}).Where("`key` = ?", upgradeV002Key).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("v002 marker before forward migration: count=%d err=%v", count, err)
+	}
+	if db.Migrator().HasIndex(&platform.OutboxEvent{}, "idx_outbox_dispatch") {
+		t.Fatal("v002 index still exists before forward migration")
+	}
+	for range 2 {
+		if err := Apply(context.Background(), db); err != nil {
+			t.Fatalf("apply v002 after rollback: %v", err)
+		}
+	}
+	if err := db.Model(&platform.SchemaMigration{}).Where("`key` = ?", upgradeV002Key).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("v002 marker after repeated forward migration: count=%d err=%v", count, err)
+	}
+	columns, err := mysqlIndexColumns(db, "outbox_events", "idx_outbox_dispatch")
+	if err != nil || !reflect.DeepEqual(columns, []string{"published_at", "dead_at", "available_at", "id"}) {
+		t.Fatalf("restored v002 index columns: %v err=%v", columns, err)
+	}
+	for _, check := range []struct {
+		query string
+		args  []any
+	}{
+		{"SELECT count(*) FROM users WHERE username = ? AND password_hash = ?", []any{"recovery-user", "fixture-hash"}},
+		{"SELECT count(*) FROM videos v JOIN users u ON u.id = v.author_id WHERE u.username = ? AND v.title = ?", []any{"recovery-user", "Recovery video"}},
+		{"SELECT count(*) FROM outbox_events WHERE event_key = ? AND payload = ?", []any{"recovery-event", "{}"}},
+	} {
+		if err := db.Raw(check.query, check.args...).Scan(&count).Error; err != nil || count != 1 {
+			t.Fatalf("restored data after forward migration: query=%q count=%d err=%v", check.query, count, err)
+		}
+	}
+}
+
 // Run after the fresh and legacy integration tests have prepared their two
 // disposable databases. This compares the frozen DDL with the former GORM
 // baseline at the database metadata level, independent of statement order.

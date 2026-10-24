@@ -24,7 +24,7 @@ docker compose config --quiet
 
 运行环境需要在记录中注明：Git commit、Go 版本、操作系统/CPU/内存、容器镜像版本、MySQL/Redis/RabbitMQ/MinIO 配置、数据库规模、是否启用 FFmpeg，以及具体命令。CI 最终至少执行 Go 测试、vet、构建和前端语法检查；race、真实组件集成测试和浏览器验收可以在单独任务中执行，但发布前必须有对应结果。
 
-当前已有 opt-in MySQL 测试位于 `internal/platform/mysql_integration_test.go`，并依赖 `GOSTREAM_TEST_MYSQL_DSN`。CI 的 MySQL 任务先在全新服务库执行固定 SQL 的 v001/v002 安装，再用第二个隔离库检查已有数据采用、缺失索引恢复、从 v001 升级到 v002 及重复运行，并比较两个库的列、索引和外键元数据，最后执行全部 `TestMySQL*` 平台测试。SQLite 迁移测试对照当前 GORM 模型、模拟 v001/v002 建索引失败后重试并拒绝缺列旧库。现有 `tests/integration/media_smoke.py`、`media_failure_smoke.py` 和 `tests/load` 提供部分测试能力；下文要求的 RabbitMQ、MinIO、完整混合负载和故障注入脚本尚待开发。
+当前已有 opt-in MySQL 测试位于 `internal/platform/mysql_integration_test.go`，并依赖 `GOSTREAM_TEST_MYSQL_DSN`。CI 的 MySQL 任务先在全新服务库执行固定 SQL 的 v001/v002 安装，再用第二个隔离库检查已有数据采用、缺失索引恢复、从 v001 升级到 v002 及重复运行，并比较两个库的列、索引和外键元数据。`tests/integration/mysql_recovery.sh` 另建两个临时库，执行真实 MySQL 逻辑备份、异库恢复、v002 回滚和重新升级，随后执行全部 `TestMySQL*` 平台测试。SQLite 迁移测试对照当前 GORM 模型、模拟 v001/v002 建索引失败后重试并拒绝缺列旧库。现有 `tests/integration/media_smoke.py`、`media_failure_smoke.py` 和 `tests/load` 提供部分测试能力；下文要求的 RabbitMQ、MinIO、完整混合负载和故障注入脚本尚待开发。
 
 ## 功能验收矩阵
 
@@ -39,7 +39,7 @@ docker compose config --quiet
 | A07 IM | 两实例间单聊/群聊、成员权限、同一 `client_id` 重试、每设备 ACK、离线重放、超过 100 条的历史补页都正确；Redis 中断后重连能补齐；相同会话历史按服务端 ID 排序，重复推送可去重 | 两浏览器配置 + 两 API 实例 + 真实 MySQL/Redis 故障场景 | 部分通过：局部多实例与浏览器测试已有，故障和长期回执清理待验 |
 | A08 通知与搜索 | 关注/点赞/评论/私信通知按权限显示，分页和有界已读不吞掉新通知；搜索用户与已发布视频支持独立分页和转义字符，隐藏视频不出现 | 真实 MySQL + 浏览器分页测试 + 查询计划记录 | 部分通过：功能已验证，较大数据量查询计划待补 |
 | A09 Web 全流程 | 两个独立浏览器账号完成注册、续传发布、Feed、互动、主页、搜索、通知、单聊和群聊；刷新/重启后状态一致；手机宽度下主要操作可用 | 最终 Compose 版本的浏览器记录，附账号/数据清理说明 | 部分通过：现有功能分批验证，完整最终配置待验 |
-| A10 数据升级与运维 | 新库安装、从当前 schema 升级、重复运行迁移、失败恢复均有结果；CI 通过；Prometheus 指标可解释；备份与恢复操作有记录 | 版本化迁移测试 + CI 运行记录 + 恢复演练 | 部分通过：v001 固定 SQL、v002 升级与中断重试已有测试；回滚和备份恢复演练待完成 |
+| A10 数据升级与运维 | 新库安装、从当前 schema 升级、重复运行迁移、失败恢复均有结果；CI 通过；Prometheus 指标可解释；备份与恢复操作有记录 | 版本化迁移测试 + CI 运行记录 + 恢复演练 | 部分通过：v001/v002 升级及隔离 MySQL 库的备份、恢复、v002 回滚已验证；仍需完整部署的媒体数据恢复和最终 CI 记录 |
 | A11 安全边界 | 上传文件名和路径不能越界；会话、私信、群、未发布视频和管理操作都有身份/所有权检查；密码不明文存储，公开响应不泄露内部错误或 JWT | 自动化负例 + 最终浏览器/API 复验 | 部分通过：现有负例覆盖一部分路径 |
 | A12 文档契约 | README 能从空环境启动最终配置；API 参数、错误、鉴权、WebSocket 帧及数据库迁移说明与代码一致；机器可读 API 契约经过校验；学习和面试指南只列已实现内容 | 文档链接/示例核对 + OpenAPI 校验 + 最终代码审阅 | 部分通过：当前有人工维护的 API/架构/学习文档，机器可读契约未提供 |
 

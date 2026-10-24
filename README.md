@@ -24,7 +24,7 @@ Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECR
 
 - Go 1.27.2, Gin, GORM, SQLite for zero-service local development
 - MySQL and Redis Compose profile, verified with real end-to-end requests
-- Frozen SQLite/MySQL `schema_v001` SQL and an explicit v002 outbox index upgrade, with MySQL startup locking and existing-database adoption; backup/restore and rollback drills remain pending
+- Frozen SQLite/MySQL `schema_v001` SQL and an explicit v002 outbox index upgrade, with MySQL startup locking and existing-database adoption; an isolated MySQL backup/restore and v002 rollback drill is in `tests/integration/mysql_recovery.sh`
 - CI workflow for exact Go version, tests, race checks, vet, build, web syntax, and Compose validation
 - Optional Redis cache for anonymous timeline/recommend/hot pages and each viewer's following first page; database fallback and bounded staleness
 - Explainable recommendation ranking using interactions, freshness, followed authors, and recently interacted authors

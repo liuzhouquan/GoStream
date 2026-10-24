@@ -99,5 +99,10 @@ jobs:
       - name: Compare frozen and previous MySQL schema metadata
         run: go test ./internal/migrations -run '^TestMySQLMigratedSchemaMatchesLegacyModels$' -count=1
 
+      - name: Rehearse MySQL backup restore and v002 rollback
+        env:
+          GOSTREAM_RECOVERY_DSN_PREFIX: gostream:gostream-ci-only@tcp(127.0.0.1:3306)/
+        run: bash tests/integration/mysql_recovery.sh "${{ job.services.mysql.id }}"
+
       - name: Run real MySQL integration tests
         run: go test ./internal/platform -run '^TestMySQL' -count=1
