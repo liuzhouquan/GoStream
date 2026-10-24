@@ -172,6 +172,11 @@ jobs:
           --mysql-dsn 'gostream:gostream-media-ci-only@tcp(127.0.0.1:3306)/gostream_media_ci?charset=utf8mb4&parseTime=True&loc=Local'
           --mysql-container "${{ job.services.mysql.id }}"
 
+      - name: Test MySQL and MinIO upload validation, permissions and chunk repair
+        env:
+          GOSTREAM_TEST_MINIO_MYSQL_DSN: gostream:gostream-media-ci-only@tcp(127.0.0.1:3306)/gostream_media_ci?charset=utf8mb4&parseTime=True&loc=Local
+        run: go test ./internal/platform -run '^TestMinIOMediaValidationAndRecovery$' -count=1 -v
+
       - name: Stop isolated MinIO
         if: always()
         run: docker rm -f gostream-ci-minio || true

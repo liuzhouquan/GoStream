@@ -17,6 +17,8 @@ API integration tests use temporary SQLite databases. The suite covers registrat
 
 `mysql_integration_test.go` is opt-in because it needs a migrated MySQL database with no existing published videos. Set `GOSTREAM_TEST_MYSQL_DSN` to that isolated database's DSN, then run `go test ./internal/platform -run '^TestMySQLRecommendationIntegration$' -count=1`. It inserts authors, a viewer, follows, interactions and videos inside one transaction, checks three recommendation cursor pages, and rolls back. This test passed against the Compose MySQL 8.4 instance on 2026-10-21 before demo media rows were added; the `users` and `videos` tables were empty afterward. The test now fails early with a clear message if published rows already exist.
 
+The object-backed chunk retry path now reads and hashes an existing object before returning success. First-time uploads do not incur this extra object read. The new real MySQL/MinIO fault test proves same-size corruption is repaired, but it is a correctness test; retry latency and bandwidth have not been benchmarked.
+
 ## Measured in-process Feed baseline
 
 On 2026-10-20, `BenchmarkTimelineFeed1000` ran on Linux/amd64 under WSL with Go 1.27.2 and an AMD Ryzen 7 5800H. The benchmark seeds 1,000 published videos in a SQLite in-memory database and issues complete `GET /api/feed?scene=timeline&limit=20` handler calls. Command:

@@ -37,7 +37,19 @@ func (s *Server) putObjectChunk(c *gin.Context, session UploadSession, index int
 		respondError(c, 503, "media storage unavailable")
 		return
 	}
-	if err != nil || info.Size != expected {
+	needsUpload := err != nil || info.Size != expected
+	if !needsUpload {
+		checkErr := verifyObject(c.Request.Context(), s.objectMedia, key, expected, hash)
+		switch {
+		case checkErr == nil:
+		case errors.Is(checkErr, errObjectContentMismatch), objectMissing(checkErr):
+			needsUpload = true
+		default:
+			respondError(c, 503, "media storage unavailable")
+			return
+		}
+	}
+	if needsUpload {
 		if err := s.objectMedia.putBytes(c.Request.Context(), key, data); err != nil {
 			respondError(c, 503, "media storage unavailable")
 			return

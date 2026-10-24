@@ -3,8 +3,11 @@ package platform
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"os"
@@ -22,6 +25,8 @@ type objectMediaStore struct {
 	client *minio.Client
 	bucket string
 }
+
+var errObjectContentMismatch = errors.New("object content differs")
 
 func NewMinIOMediaStore(ctx context.Context, endpoint, accessKey, secretKey, bucket string, secure bool) (*objectMediaStore, error) {
 	return openMinIOMediaStore(ctx, endpoint, accessKey, secretKey, bucket, secure, true)
@@ -90,6 +95,25 @@ func (m *objectMediaStore) get(ctx context.Context, key string) (*minio.Object, 
 
 func (m *objectMediaStore) stat(ctx context.Context, key string) (minio.ObjectInfo, error) {
 	return m.client.StatObject(ctx, m.bucket, key, minio.StatObjectOptions{})
+}
+
+// verifyObject reads the full object because a matching size or ETag alone
+// cannot establish that an interrupted upload stored the expected bytes.
+func verifyObject(ctx context.Context, store *objectMediaStore, key string, expectedSize int64, expectedHash string) error {
+	object, err := store.get(ctx, key)
+	if err != nil {
+		return err
+	}
+	defer object.Close()
+	hash := sha256.New()
+	size, err := io.Copy(hash, object)
+	if err != nil {
+		return err
+	}
+	if size != expectedSize || hex.EncodeToString(hash.Sum(nil)) != expectedHash {
+		return fmt.Errorf("%w: size=%d expected=%d", errObjectContentMismatch, size, expectedSize)
+	}
+	return nil
 }
 
 func (m *objectMediaStore) remove(ctx context.Context, key string) error {

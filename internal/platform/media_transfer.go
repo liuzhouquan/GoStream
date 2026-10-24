@@ -366,20 +366,3 @@ func hashRegularFile(path string) (string, int64, error) {
 	}
 	return hex.EncodeToString(hash.Sum(nil)), size, nil
 }
-
-func verifyObject(ctx context.Context, store *objectMediaStore, key string, expectedSize int64, expectedHash string) error {
-	object, err := store.get(ctx, key)
-	if err != nil {
-		return err
-	}
-	defer object.Close()
-	hash := sha256.New()
-	size, err := io.Copy(hash, object)
-	if err != nil {
-		return err
-	}
-	if size != expectedSize || hex.EncodeToString(hash.Sum(nil)) != expectedHash {
-		return fmt.Errorf("object content differs: size=%d expected=%d", size, expectedSize)
-	}
-	return nil
-}
