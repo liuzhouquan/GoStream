@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/minio/minio-go/v7"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -25,11 +26,15 @@ type orphanCandidate struct {
 	url     string
 	modTime time.Time
 	size    int64
+	etag    string
 }
 
 // ReconcileOrphanMedia removes old generated files that no database row references.
 // A 24-hour grace period excludes uploads and transcodes still being committed.
 func (s *Server) ReconcileOrphanMedia(ctx context.Context, now time.Time) (int, error) {
+	if s.objectMedia != nil {
+		return s.reconcileOrphanObjects(ctx, now)
+	}
 	entries, err := os.ReadDir(s.MediaDir)
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, nil
@@ -115,6 +120,23 @@ func (s *Server) removeUnreferencedMedia(ctx context.Context, batch []orphanCand
 		if referenced[candidate.url] {
 			continue
 		}
+		if s.objectMedia != nil {
+			info, err := s.objectMedia.stat(ctx, "media/"+candidate.name)
+			if objectMissing(err) {
+				continue
+			}
+			if err != nil {
+				return removed, err
+			}
+			if info.ETag != candidate.etag || info.Size != candidate.size || !info.LastModified.Before(cutoff) {
+				continue
+			}
+			if err := s.objectMedia.remove(ctx, "media/"+candidate.name); err != nil {
+				return removed, err
+			}
+			removed++
+			continue
+		}
 		path := filepath.Join(s.MediaDir, candidate.name)
 		info, err := os.Lstat(path)
 		if errors.Is(err, os.ErrNotExist) {
@@ -137,10 +159,46 @@ func (s *Server) removeUnreferencedMedia(ctx context.Context, batch []orphanCand
 	return removed, nil
 }
 
+func (s *Server) reconcileOrphanObjects(ctx context.Context, now time.Time) (int, error) {
+	listCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cutoff := now.Add(-mediaOrphanGrace)
+	removed := 0
+	batch := make([]orphanCandidate, 0, mediaReconcileBatch)
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		count, err := s.removeUnreferencedMedia(ctx, batch, cutoff)
+		removed += count
+		batch = batch[:0]
+		return err
+	}
+	for object := range s.objectMedia.client.ListObjects(listCtx, s.objectMedia.bucket, minio.ListObjectsOptions{Prefix: "media/", Recursive: true}) {
+		if object.Err != nil {
+			return removed, object.Err
+		}
+		name := strings.TrimPrefix(object.Key, "media/")
+		if object.Key != "media/"+name || !generatedMediaName.MatchString(name) || !object.LastModified.Before(cutoff) {
+			continue
+		}
+		batch = append(batch, orphanCandidate{name: name, url: "/media/" + name, modTime: object.LastModified, size: object.Size, etag: object.ETag})
+		if len(batch) == mediaReconcileBatch {
+			if err := flush(); err != nil {
+				return removed, err
+			}
+		}
+	}
+	return removed, flush()
+}
+
 // ReconcileUnusedAssets removes old registrations without a current video,
 // avatar, or unfinished processing-job reference. References are
 // checked again under the asset row lock before deleting the registration.
 func (s *Server) ReconcileUnusedAssets(ctx context.Context, now time.Time) (int, error) {
+	if s.objectMedia != nil {
+		return s.reconcileUnusedObjectAssets(ctx, now)
+	}
 	cutoff := now.Add(-mediaAssetGrace)
 	var lastID uint
 	removed := 0
@@ -222,6 +280,92 @@ func (s *Server) ReconcileUnusedAssets(ctx context.Context, now time.Time) (int,
 				continue // The next orphan pass can inspect a changed file safely.
 			}
 			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return removed, err
+			}
+		}
+	}
+}
+
+func (s *Server) reconcileUnusedObjectAssets(ctx context.Context, now time.Time) (int, error) {
+	cutoff := now.Add(-mediaAssetGrace)
+	var lastID uint
+	removed := 0
+	for {
+		if err := ctx.Err(); err != nil {
+			return removed, err
+		}
+		var candidates []MediaAsset
+		err := s.DB.WithContext(ctx).Model(&MediaAsset{}).
+			Select("id", "url", "created_at").
+			Where("id > ? AND created_at < ?", lastID, cutoff).
+			Where("NOT EXISTS (SELECT 1 FROM videos WHERE videos.media_url = media_assets.url OR videos.cover_url = media_assets.url)").
+			Where("NOT EXISTS (SELECT 1 FROM users WHERE users.avatar_url = media_assets.url)").
+			Where("NOT EXISTS (SELECT 1 FROM video_process_jobs WHERE video_process_jobs.source_url = media_assets.url AND done_at IS NULL AND dead_at IS NULL)").
+			Order("id ASC").Limit(mediaReconcileBatch).Find(&candidates).Error
+		if err != nil {
+			return removed, err
+		}
+		if len(candidates) == 0 {
+			return removed, nil
+		}
+		for _, candidate := range candidates {
+			lastID = candidate.ID
+			name := strings.TrimPrefix(candidate.URL, "/media/")
+			if candidate.URL != "/media/"+name || !generatedMediaName.MatchString(name) {
+				continue
+			}
+			key := "media/" + name
+			before, err := s.objectMedia.stat(ctx, key)
+			missing := objectMissing(err)
+			if err != nil && !missing {
+				return removed, err
+			}
+			if !missing && !before.LastModified.Before(cutoff) {
+				continue
+			}
+			deleted := false
+			err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+				var locked MediaAsset
+				if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&locked, candidate.ID).Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						return nil
+					}
+					return err
+				}
+				if locked.URL != candidate.URL || !locked.CreatedAt.Before(cutoff) {
+					return nil
+				}
+				referenced, err := mediaAssetReferenced(tx, locked.URL)
+				if err != nil || referenced {
+					return err
+				}
+				if err := tx.Delete(&locked).Error; err != nil {
+					return err
+				}
+				deleted = true
+				return nil
+			})
+			if err != nil {
+				return removed, err
+			}
+			if !deleted {
+				continue
+			}
+			removed++
+			if missing {
+				continue
+			}
+			after, err := s.objectMedia.stat(ctx, key)
+			if objectMissing(err) {
+				continue
+			}
+			if err != nil {
+				return removed, err
+			}
+			if after.ETag != before.ETag || after.Size != before.Size || !after.LastModified.Equal(before.LastModified) {
+				continue // A changed object is handled by a later orphan pass.
+			}
+			if err := s.objectMedia.remove(ctx, key); err != nil {
 				return removed, err
 			}
 		}

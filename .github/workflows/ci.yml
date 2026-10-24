@@ -47,7 +47,10 @@ jobs:
         run: node --check web/app.js
 
       - name: Validate Compose configuration
-        run: docker compose config --quiet
+        run: |
+          docker compose config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.object.yml config --quiet
+          docker compose -f docker-compose.yml -f docker-compose.object.yml -f tests/integration/object-test.compose.yml config --quiet
 
   mysql-integration:
     runs-on: ubuntu-24.04
@@ -106,3 +109,41 @@ jobs:
 
       - name: Run real MySQL integration tests
         run: go test ./internal/platform -run '^TestMySQL' -count=1
+
+  minio-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      GOSTREAM_TEST_MINIO_ENDPOINT: 127.0.0.1:19000
+      GOSTREAM_TEST_MINIO_ACCESS_KEY: gostream-ci
+      GOSTREAM_TEST_MINIO_SECRET_KEY: gostream-ci-test-only-secret
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install the declared Go version
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build pinned MinIO source and start an isolated server
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.object.yml build minio
+          docker run -d --rm --name gostream-ci-minio -p 127.0.0.1:19000:9000 \
+            -e MINIO_ROOT_USER="$GOSTREAM_TEST_MINIO_ACCESS_KEY" \
+            -e MINIO_ROOT_PASSWORD="$GOSTREAM_TEST_MINIO_SECRET_KEY" \
+            gostream-minio:source-7aac2a2c5b7c server /data --address :9000
+          for attempt in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:19000/minio/health/live >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          docker logs gostream-ci-minio
+          exit 1
+
+      - name: Test real MinIO uploads and object cleanup across two API instances
+        run: go test ./internal/platform -run '^TestMinIOMediaAcrossInstances$' -count=1 -v
+
+      - name: Stop isolated MinIO
+        if: always()
+        run: docker rm -f gostream-ci-minio || true

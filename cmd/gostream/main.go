@@ -64,6 +64,20 @@ func main() {
 	}
 	defer sqlDB.Close()
 	server := platform.NewServer(db, secret, mediaDir)
+	switch mediaStore := env("MEDIA_STORE", "local"); mediaStore {
+	case "local":
+	case "minio":
+		secure := env("MINIO_SECURE", "false") == "true"
+		storeCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		store, err := platform.NewMinIOMediaStore(storeCtx, os.Getenv("MINIO_ENDPOINT"), os.Getenv("MINIO_ACCESS_KEY"), os.Getenv("MINIO_SECRET_KEY"), os.Getenv("MINIO_BUCKET"), secure)
+		cancel()
+		if err != nil {
+			log.Fatalf("initialize media storage: %v", err)
+		}
+		server.UseObjectMedia(store)
+	default:
+		log.Fatalf("unsupported MEDIA_STORE %q", mediaStore)
+	}
 	if err := server.BackfillMessageDevices(context.Background()); err != nil {
 		log.Fatalf("backfill message devices: %v", err)
 	}

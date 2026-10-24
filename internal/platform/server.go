@@ -16,16 +16,17 @@ import (
 )
 
 type Server struct {
-	DB         *gorm.DB
-	Secret     []byte
-	MediaDir   string
-	Hub        *Hub
-	metrics    *serverMetrics
-	cache      *redisFeedCache
-	realtime   *realtimeBridge
-	ffmpegBin  string
-	ffprobeBin string
-	upgrader   websocket.Upgrader
+	DB          *gorm.DB
+	Secret      []byte
+	MediaDir    string
+	objectMedia *objectMediaStore
+	Hub         *Hub
+	metrics     *serverMetrics
+	cache       *redisFeedCache
+	realtime    *realtimeBridge
+	ffmpegBin   string
+	ffprobeBin  string
+	upgrader    websocket.Upgrader
 }
 
 func NewServer(db *gorm.DB, secret, mediaDir string) *Server {
@@ -50,7 +51,11 @@ func (s *Server) Router() *gin.Engine {
 		// Query strings can contain credentials in older clients; never log them.
 		return fmt.Sprintf("%s %s %d %s\n", p.Method, p.Request.URL.Path, p.StatusCode, p.Latency)
 	}), gin.Recovery(), securityHeaders(), cors(), s.metrics.middleware())
-	r.Static("/media", s.MediaDir)
+	if s.objectMedia != nil {
+		r.GET("/media/:name", s.serveObjectMedia)
+	} else {
+		r.Static("/media", s.MediaDir)
+	}
 	r.StaticFile("/", "web/index.html")
 	r.StaticFile("/app.js", "web/app.js")
 	r.StaticFile("/styles.css", "web/styles.css")

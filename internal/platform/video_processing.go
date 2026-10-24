@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -118,18 +119,23 @@ func (s *Server) processVideoJob(ctx context.Context, job VideoProcessJob) error
 	if !strings.HasPrefix(job.SourceURL, "/media/") || name == "" || name != filepath.Base(name) {
 		return errors.New("invalid media source path")
 	}
-	source := filepath.Join(s.MediaDir, name)
-	if _, err := os.Stat(source); err != nil {
-		return fmt.Errorf("source media unavailable: %w", err)
-	}
-	if _, err := probeVideo(ctx, s.ffprobeBin, source); err != nil {
-		return fmt.Errorf("inspect source media: %w", err)
-	}
 	workDir, err := os.MkdirTemp(filepath.Dir(s.MediaDir), ".gostream-process-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(workDir)
+	source := filepath.Join(s.MediaDir, name)
+	if s.objectMedia != nil {
+		source = filepath.Join(workDir, "source"+filepath.Ext(name))
+		if err := s.downloadObjectFile(ctx, "media/"+name, source); err != nil {
+			return fmt.Errorf("source media unavailable: %w", err)
+		}
+	} else if _, err := os.Stat(source); err != nil {
+		return fmt.Errorf("source media unavailable: %w", err)
+	}
+	if _, err := probeVideo(ctx, s.ffprobeBin, source); err != nil {
+		return fmt.Errorf("inspect source media: %w", err)
+	}
 	output := filepath.Join(workDir, "video.mp4")
 	thumbnail := filepath.Join(workDir, "cover.jpg")
 	commandCtx, cancel := context.WithTimeout(ctx, 4*time.Minute)
@@ -166,18 +172,34 @@ func (s *Server) processVideoJob(ctx context.Context, job VideoProcessJob) error
 	}
 	videoPath := filepath.Join(s.MediaDir, videoName)
 	coverPath := filepath.Join(s.MediaDir, coverName)
-	if err := os.Rename(output, videoPath); err != nil {
+	if s.objectMedia != nil {
+		if err := s.objectMedia.putFile(ctx, "media/"+videoName, output); err != nil {
+			return err
+		}
+	} else if err := os.Rename(output, videoPath); err != nil {
 		return err
 	}
 	defer func() {
 		if videoPath != "" {
-			_ = os.Remove(videoPath)
+			if s.objectMedia != nil {
+				s.objectMedia.removeBestEffort("media/" + videoName)
+			} else {
+				_ = os.Remove(videoPath)
+			}
 		}
 		if coverPath != "" {
-			_ = os.Remove(coverPath)
+			if s.objectMedia != nil {
+				s.objectMedia.removeBestEffort("media/" + coverName)
+			} else {
+				_ = os.Remove(coverPath)
+			}
 		}
 	}()
-	if err := os.Rename(thumbnail, coverPath); err != nil {
+	if s.objectMedia != nil {
+		if err := s.objectMedia.putFile(ctx, "media/"+coverName, thumbnail); err != nil {
+			return err
+		}
+	} else if err := os.Rename(thumbnail, coverPath); err != nil {
 		return err
 	}
 	published, coverUsed, err := s.completeVideoJob(job, "/media/"+videoName, "/media/"+coverName, videoInfo.Size(), coverInfo.Size(), metadata)
@@ -192,6 +214,24 @@ func (s *Server) processVideoJob(ctx context.Context, job VideoProcessJob) error
 		s.invalidateFeed(context.Background())
 	}
 	return nil
+}
+
+func (s *Server) downloadObjectFile(ctx context.Context, key, path string) error {
+	object, err := s.objectMedia.get(ctx, key)
+	if err != nil {
+		return err
+	}
+	defer object.Close()
+	dst, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(dst, object)
+	closeErr := dst.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
 func runFFmpeg(ctx context.Context, binary string, args ...string) error {

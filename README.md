@@ -10,7 +10,7 @@ This repository is under active staged development. See [delivery scope](docs/DE
 
 - Go 1.27.2 (the project toolchain declared in `go.mod`)
 - Node.js is not required for the current static web client
-- Docker is optional; Docker Compose runs the API with MySQL and Redis. An `observability` profile adds Prometheus and Grafana.
+- Docker is optional; Docker Compose runs the API with MySQL and Redis. An `observability` profile adds Prometheus and Grafana. The object-storage overlay adds a private MinIO bucket.
 
 The default local profile stores data in `./data/gostream.db` using SQLite with WAL, a five-second busy timeout, and foreign-key enforcement. It needs no external services. Run:
 
@@ -19,6 +19,16 @@ go run ./cmd/gostream
 ```
 
 Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECRET`, `MEDIA_DIR`, and optionally `REDIS_ADDR` with environment variables. Set a unique `JWT_SECRET` outside local development. Pending chunks live beside the media directory at `<MEDIA_DIR>.chunks`. Set `FFMPEG_BIN` to an installed FFmpeg executable to enable asynchronous MP4 transcoding and JPEG cover generation; `FFPROBE_BIN` optionally selects the ffprobe executable. With processing enabled, source videos are limited to 10 minutes and 3840×2160 pixels total, with neither side above 4096 pixels. Without FFmpeg, uploaded videos publish without transcoding or probed metadata. Compose installs FFmpeg and enables the worker. The MySQL/Redis Compose profile starts with `docker compose up --build`; use `docker compose --profile observability up --build` for Prometheus on port 9090 and Grafana on port 3000. Set `GRAFANA_ADMIN_PASSWORD` for the latter.
+
+To run the MySQL/Redis/API stack with MinIO, use a fresh Compose project so existing local-media URLs do not point at objects that have not been imported:
+
+```sh
+docker compose -p gostream-object -f docker-compose.yml -f docker-compose.object.yml up -d --build
+```
+
+The web client stays at <http://localhost:8080>; the MinIO console is at <http://localhost:9001>. The overlay builds a pinned MinIO community server from source, so its first build takes longer. Set `MINIO_ROOT_USER` and `MINIO_ROOT_PASSWORD` before using the stack outside a disposable local environment. `MEDIA_STORE=minio` makes API replicas share one private bucket for uploaded chunks, original videos, transcoded MP4 files, and JPEG covers. `GET /media/:name` streams objects through the API and supports HTTP Range requests. The default `MEDIA_STORE=local` remains available for single-instance development. Switching an existing local database to MinIO requires copying its referenced media files into the bucket first; the current project has no automatic migration command. `/ready` checks the database, so it can stay healthy while MinIO is unavailable; object requests then fail and can be retried. See [media design](docs/TECHNICAL_DESIGN.md) and [object tests](docs/TEST_STANDARD.md).
+
+The normal and object overlays both bind API port 8080; stop the normal stack before starting the object stack, or use the isolated two-replica ports in [the test procedure](docs/TEST_STANDARD.md).
 
 ## Current design
 
@@ -29,7 +39,7 @@ Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECR
 - Optional Redis cache for anonymous timeline/recommend/hot pages and each viewer's following first page; database fallback and bounded staleness
 - Explainable recommendation ranking using interactions, freshness, followed authors, and recently interacted authors
 - JWT access tokens and bcrypt password hashing
-- Local media storage, single-file and 4 MiB resumable chunk uploads, media ownership checks, and file integrity checks
+- Local or MinIO media storage, single-file and 4 MiB resumable chunk uploads, media ownership checks, and file integrity checks
 - Durable FFmpeg processing jobs in Compose: source video limits, leased retries, H.264 MP4 output with AAC for audio inputs, generated JPEG cover, and persisted output duration/dimensions
 - Author-visible processing failure reasons and hourly cleanup of old unregistered files and unreferenced assets registered over seven days ago
 - Creator-page retry controls for transient processing failures and replacement uploads for invalid files
@@ -41,7 +51,7 @@ Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECR
 - Multiple WebSocket connections per account (up to eight per API instance), with committed direct/group messages sent to each active device and control replies kept on the originating connection
 - `/health`, database-backed `/ready`, `/metrics`, and optional `PPROF_ADDR`
 - SQLite is persistent and real; it is not a mock database
-- RabbitMQ, MinIO, and durable cross-instance group push are later stages
+- RabbitMQ broker integration and durable cross-instance group push are later stages
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/API.md](docs/API.md), [docs/DATABASE.md](docs/DATABASE.md), [docs/TECHNICAL_DESIGN.md](docs/TECHNICAL_DESIGN.md), [docs/LEARNING_GUIDE.md](docs/LEARNING_GUIDE.md), and [docs/INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md).
 
@@ -50,3 +60,5 @@ Performance and verification status is recorded in [docs/PERFORMANCE.md](docs/PE
 ## License
 
 GoStream is licensed under the MIT License; see [LICENSE](LICENSE).
+
+The optional MinIO deployment builds the MinIO server from its pinned upstream source under AGPL-3.0. The Go MinIO client dependency is Apache-2.0. Their licenses and notices are separate from GoStream's MIT license; consult those components before redistributing a combined deployment image.

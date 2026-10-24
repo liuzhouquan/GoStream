@@ -1,0 +1,11 @@
+# Isolated ports and separate API local filesystems for two-replica testing.
+# Build the images with the base and object Compose files first.
+services:
+  mysql:
+    ports: !override ["127.0.0.1:13307:3306"]
+  api:
+    image: gostream-api:latest
+    ports: !override ["127.0.0.1:18080-18081:8080"]
+    volumes: !override []
+  minio:
+    ports: !override ["127.0.0.1:29000:9000", "127.0.0.1:29001:9001"]

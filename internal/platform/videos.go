@@ -115,6 +115,10 @@ func (s *Server) upload(c *gin.Context) {
 		return
 	}
 	name := hex.EncodeToString(nonce[:]) + ext
+	if s.objectMedia != nil {
+		s.uploadObjectFile(c, io.MultiReader(bytes.NewReader(header[:nHeader]), f), h.Size, name, ext, kind)
+		return
+	}
 	dst, err := os.OpenFile(filepath.Join(s.MediaDir, name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0644)
 	if err != nil {
 		respondError(c, 500, "media storage unavailable")
@@ -139,6 +143,37 @@ func (s *Server) upload(c *gin.Context) {
 		return
 	}
 	c.JSON(201, gin.H{"url": "/media/" + name, "size": n, "filename": name})
+}
+
+func (s *Server) uploadObjectFile(c *gin.Context, source io.Reader, size int64, name, ext, kind string) {
+	tmp, err := os.CreateTemp("", "gostream-upload-*")
+	if err != nil {
+		respondError(c, 500, "media storage unavailable")
+		return
+	}
+	defer os.Remove(tmp.Name())
+	n, copyErr := io.Copy(tmp, source)
+	closeErr := tmp.Close()
+	if copyErr != nil || closeErr != nil || n != size {
+		respondError(c, 500, "upload failed")
+		return
+	}
+	if kind == "image" && !validImageFile(tmp.Name(), ext) {
+		respondError(c, 400, "invalid image file")
+		return
+	}
+	key := "media/" + name
+	if err := s.objectMedia.putFile(c.Request.Context(), key, tmp.Name()); err != nil {
+		respondError(c, 503, "media storage unavailable")
+		return
+	}
+	asset := MediaAsset{OwnerID: uid(c), URL: "/media/" + name, Kind: kind, Size: n}
+	if err := s.DB.WithContext(c.Request.Context()).Create(&asset).Error; err != nil {
+		s.objectMedia.removeBestEffort(key)
+		respondError(c, 500, "could not register media")
+		return
+	}
+	c.JSON(201, gin.H{"url": asset.URL, "size": n, "filename": name})
 }
 
 func (s *Server) createVideo(c *gin.Context) {

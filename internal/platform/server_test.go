@@ -479,6 +479,40 @@ func TestExpiredUploadCleanupRemovesPartialFiles(t *testing.T) {
 	}
 }
 
+func TestExpiredUploadCleanupWaitsForCompletionLease(t *testing.T) {
+	s, h, db := testServer(t)
+	_, token := registerTestUser(t, h, "leasedresumer")
+	created := request(t, h, http.MethodPost, "/api/uploads/sessions", token, map[string]any{"filename": "clip.mp4", "size": len(sampleMP4)})
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create session: %d %s", created.Code, created.Body.String())
+	}
+	var session UploadSession
+	if err := json.Unmarshal(created.Body.Bytes(), &session); err != nil {
+		t.Fatal(err)
+	}
+	if res := putTestChunk(h, token, session.ID, 0, sampleMP4); res.Code != http.StatusOK {
+		t.Fatalf("upload chunk: %d %s", res.Code, res.Body.String())
+	}
+	now := time.Now().UTC()
+	if err := db.Model(&UploadSession{}).Where("id = ?", session.ID).Updates(map[string]any{
+		"status": "completing", "expires_at": now.Add(-time.Minute), "lease_until": now.Add(time.Minute),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if cleaned, err := s.CleanupExpiredUploads(context.Background()); err != nil || cleaned != 0 {
+		t.Fatalf("active completion lease was cleaned: count=%d err=%v", cleaned, err)
+	}
+	if _, err := os.Stat(filepath.Join(s.uploadDir(session.ID), "000.part")); err != nil {
+		t.Fatalf("leased chunk removed: %v", err)
+	}
+	if err := db.Model(&UploadSession{}).Where("id = ?", session.ID).Update("lease_until", now.Add(-time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+	if cleaned, err := s.CleanupExpiredUploads(context.Background()); err != nil || cleaned != 1 {
+		t.Fatalf("expired completion lease not cleaned: count=%d err=%v", cleaned, err)
+	}
+}
+
 func TestInteractionTransitionsKeepCountAndNotificationConsistent(t *testing.T) {
 	_, h, db := testServer(t)
 	authorID, _ := registerTestUser(t, h, "countauthor")
