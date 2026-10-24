@@ -6,3 +6,4 @@ data/
 __pycache__/
 *.pyc
 coverage.out
+docs/LOCAL_STUDY_GUIDE.md

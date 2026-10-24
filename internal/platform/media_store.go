@@ -24,6 +24,16 @@ type objectMediaStore struct {
 }
 
 func NewMinIOMediaStore(ctx context.Context, endpoint, accessKey, secretKey, bucket string, secure bool) (*objectMediaStore, error) {
+	return openMinIOMediaStore(ctx, endpoint, accessKey, secretKey, bucket, secure, true)
+}
+
+// OpenExistingMinIOMediaStore refuses to create a bucket on a backup command.
+// This catches a mistyped bucket name before producing an empty backup.
+func OpenExistingMinIOMediaStore(ctx context.Context, endpoint, accessKey, secretKey, bucket string, secure bool) (*objectMediaStore, error) {
+	return openMinIOMediaStore(ctx, endpoint, accessKey, secretKey, bucket, secure, false)
+}
+
+func openMinIOMediaStore(ctx context.Context, endpoint, accessKey, secretKey, bucket string, secure, create bool) (*objectMediaStore, error) {
 	if endpoint == "" || accessKey == "" || secretKey == "" || bucket == "" {
 		return nil, errors.New("MinIO endpoint, credentials, and bucket are required")
 	}
@@ -36,6 +46,9 @@ func NewMinIOMediaStore(ctx context.Context, endpoint, accessKey, secretKey, buc
 		return nil, fmt.Errorf("inspect MinIO bucket: %w", err)
 	}
 	if !exists {
+		if !create {
+			return nil, fmt.Errorf("MinIO bucket %q does not exist", bucket)
+		}
 		if err := client.MakeBucket(ctx, bucket, minio.MakeBucketOptions{}); err != nil {
 			response := minio.ToErrorResponse(err)
 			if response.Code != "BucketAlreadyOwnedByYou" {

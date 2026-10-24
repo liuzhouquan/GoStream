@@ -113,6 +113,21 @@ jobs:
   minio-integration:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root-media-ci-only
+          MYSQL_DATABASE: gostream_media_ci
+          MYSQL_USER: gostream
+          MYSQL_PASSWORD: gostream-media-ci-only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -ugostream -pgostream-media-ci-only --silent"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
     env:
       GOSTREAM_TEST_MINIO_ENDPOINT: 127.0.0.1:19000
       GOSTREAM_TEST_MINIO_ACCESS_KEY: gostream-ci
@@ -143,6 +158,19 @@ jobs:
 
       - name: Test real MinIO uploads and object cleanup across two API instances
         run: go test ./internal/platform -run '^TestMinIOMediaAcrossInstances$' -count=1 -v
+
+      - name: Test media import and object backup restore on real MinIO
+        run: go test ./internal/platform -run '^TestMinIOMediaTransfer$' -count=1 -v
+
+      - name: Rehearse MySQL and MinIO media recovery together
+        run: >-
+          python3 tests/integration/media_transfer_smoke.py
+          --go-bin go
+          --minio-endpoint "$GOSTREAM_TEST_MINIO_ENDPOINT"
+          --access-key "$GOSTREAM_TEST_MINIO_ACCESS_KEY"
+          --secret-key "$GOSTREAM_TEST_MINIO_SECRET_KEY"
+          --mysql-dsn 'gostream:gostream-media-ci-only@tcp(127.0.0.1:3306)/gostream_media_ci?charset=utf8mb4&parseTime=True&loc=Local'
+          --mysql-container "${{ job.services.mysql.id }}"
 
       - name: Stop isolated MinIO
         if: always()
