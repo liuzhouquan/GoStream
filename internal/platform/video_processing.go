@@ -170,15 +170,16 @@ func (s *Server) processVideoJob(ctx context.Context, job VideoProcessJob) error
 	if err != nil {
 		return err
 	}
+	return s.finishProcessedVideoJob(ctx, job, output, thumbnail, videoName, coverName, videoInfo.Size(), coverInfo.Size(), metadata)
+}
+
+func (s *Server) finishProcessedVideoJob(ctx context.Context, job VideoProcessJob, output, thumbnail, videoName, coverName string, videoSize, coverSize int64, metadata videoMetadata) error {
 	videoPath := filepath.Join(s.MediaDir, videoName)
 	coverPath := filepath.Join(s.MediaDir, coverName)
-	if s.objectMedia != nil {
-		if err := s.objectMedia.putFile(ctx, "media/"+videoName, output); err != nil {
-			return err
-		}
-	} else if err := os.Rename(output, videoPath); err != nil {
-		return err
-	}
+	// PutObject can commit bytes and still return an error if its response is
+	// lost. Register cleanup before the first write so that the normal error
+	// path attempts to remove an unregistered object immediately. The orphan
+	// reaper remains the fallback when storage is unavailable during cleanup.
 	defer func() {
 		if videoPath != "" {
 			if s.objectMedia != nil {
@@ -196,13 +197,20 @@ func (s *Server) processVideoJob(ctx context.Context, job VideoProcessJob) error
 		}
 	}()
 	if s.objectMedia != nil {
+		if err := s.objectMedia.putFile(ctx, "media/"+videoName, output); err != nil {
+			return err
+		}
+	} else if err := os.Rename(output, videoPath); err != nil {
+		return err
+	}
+	if s.objectMedia != nil {
 		if err := s.objectMedia.putFile(ctx, "media/"+coverName, thumbnail); err != nil {
 			return err
 		}
 	} else if err := os.Rename(thumbnail, coverPath); err != nil {
 		return err
 	}
-	published, coverUsed, err := s.completeVideoJob(job, "/media/"+videoName, "/media/"+coverName, videoInfo.Size(), coverInfo.Size(), metadata)
+	published, coverUsed, err := s.completeVideoJob(job, "/media/"+videoName, "/media/"+coverName, videoSize, coverSize, metadata)
 	if err != nil {
 		return err
 	}

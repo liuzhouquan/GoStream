@@ -62,3 +62,5 @@ Performance and verification status is recorded in [docs/PERFORMANCE.md](docs/PE
 GoStream is licensed under the MIT License; see [LICENSE](LICENSE).
 
 The optional MinIO deployment builds the MinIO server from its pinned upstream source under AGPL-3.0. The Go MinIO client dependency is Apache-2.0. Their licenses and notices are separate from GoStream's MIT license; consult those components before redistributing a combined deployment image.
+
+Image validation uses `golang.org/x/image` under BSD-3-Clause. Its [license notice](third_party_licenses/golang.org-x-image-LICENSE) is also copied into the API image.

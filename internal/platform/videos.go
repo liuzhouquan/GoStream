@@ -3,6 +3,7 @@ package platform
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"image"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/image/webp"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -48,22 +50,61 @@ func mediaKind(ext string, header []byte) string {
 }
 
 func validImageFile(path, ext string) bool {
-	if ext == ".webp" {
-		return true
-	} // WebP has a checked signature; no stdlib decoder is available.
 	f, err := os.Open(path)
 	if err != nil {
 		return false
 	}
 	defer f.Close()
-	config, format, err := image.DecodeConfig(f)
+	var config image.Config
+	var format string
+	if ext == ".webp" {
+		info, err := f.Stat()
+		if err != nil || info.Size() < 12 {
+			return false
+		}
+		var header [12]byte
+		if _, err := io.ReadFull(f, header[:]); err != nil || string(header[:4]) != "RIFF" || string(header[8:]) != "WEBP" ||
+			uint64(binary.LittleEndian.Uint32(header[4:8]))+8 != uint64(info.Size()) {
+			return false
+		}
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return false
+		}
+		config, err = webp.DecodeConfig(f)
+		format = "webp"
+	} else {
+		config, format, err = image.DecodeConfig(f)
+	}
 	if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 8192 || config.Height > 8192 {
 		return false
 	}
-	if ext == ".png" {
-		return format == "png"
+	switch ext {
+	case ".png":
+		if format != "png" {
+			return false
+		}
+	case ".jpg", ".jpeg":
+		if format != "jpeg" {
+			return false
+		}
+	case ".webp":
+	default:
+		return false
 	}
-	return format == "jpeg"
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return false
+	}
+	var decoded image.Image
+	if ext == ".webp" {
+		decoded, err = webp.Decode(f)
+	} else {
+		var decodedFormat string
+		decoded, decodedFormat, err = image.Decode(f)
+		if decodedFormat != format {
+			return false
+		}
+	}
+	return err == nil && decoded.Bounds().Dx() == config.Width && decoded.Bounds().Dy() == config.Height
 }
 
 func (s *Server) upload(c *gin.Context) {

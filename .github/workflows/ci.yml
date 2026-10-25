@@ -177,6 +177,14 @@ jobs:
           GOSTREAM_TEST_MINIO_MYSQL_DSN: gostream:gostream-media-ci-only@tcp(127.0.0.1:3306)/gostream_media_ci?charset=utf8mb4&parseTime=True&loc=Local
         run: go test ./internal/platform -run '^TestMinIOMediaValidationAndRecovery$' -count=1 -v
 
+      - name: Reject truncated images in direct and resumable MinIO uploads
+        run: go test ./internal/platform -run '^TestMinIOImagePayloadValidation$' -count=1 -v
+
+      - name: Test output PUT response loss and durable retry on MySQL and MinIO
+        env:
+          GOSTREAM_TEST_MINIO_MYSQL_DSN: gostream:gostream-media-ci-only@tcp(127.0.0.1:3306)/gostream_media_ci?charset=utf8mb4&parseTime=True&loc=Local
+        run: go test ./internal/platform -run '^TestMinIOProcessedOutputLostResponse$' -count=1 -v
+
       - name: Stop isolated MinIO
         if: always()
         run: docker rm -f gostream-ci-minio || true

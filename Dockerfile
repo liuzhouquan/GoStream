@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -r
 COPY --from=build /out/gostream /usr/local/bin/gostream
 COPY --from=build /out/gostream-media /usr/local/bin/gostream-media
 COPY web ./web
+COPY third_party_licenses ./third_party_licenses
 RUN mkdir -p /app/data/media
 ENV ADDR=:8080 MEDIA_DIR=/app/data/media DB_DRIVER=mysql
 EXPOSE 8080

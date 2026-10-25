@@ -24,7 +24,7 @@ docker compose config --quiet
 
 运行环境需要在记录中注明：Git commit、Go 版本、操作系统/CPU/内存、容器镜像版本、MySQL/Redis/RabbitMQ/MinIO 配置、数据库规模、是否启用 FFmpeg，以及具体命令。CI 最终至少执行 Go 测试、vet、构建和前端语法检查；race、真实组件集成测试和浏览器验收可以在单独任务中执行，但发布前必须有对应结果。
 
-当前已有 opt-in MySQL 测试位于 `internal/platform/mysql_integration_test.go`，并依赖 `GOSTREAM_TEST_MYSQL_DSN`。CI 的 MySQL 任务先在全新服务库执行固定 SQL 的 v001/v002 安装，再用第二个隔离库检查已有数据采用、缺失索引恢复、从 v001 升级到 v002 及重复运行，并比较两个库的列、索引和外键元数据。`tests/integration/mysql_recovery.sh` 另建两个临时库，执行真实 MySQL 逻辑备份、异库恢复、v002 回滚和重新升级，随后执行全部 `TestMySQL*` 平台测试。SQLite 迁移测试对照当前 GORM 模型、模拟 v001/v002 建索引失败后重试并拒绝缺列旧库。现有 `tests/integration/media_smoke.py`、`media_failure_smoke.py`、`minio_smoke.py`、`minio_outage_smoke.py`、`minio_processing_outage_smoke.py` 和 `tests/load` 提供部分测试能力。`TestMinIOMediaAcrossInstances` 使用隔离桶验证双实例文件/分片、Range、完成重试和垃圾回收；`TestMinIOMediaTransfer` 验证最终媒体与有效续传分片导入、清单备份、恢复、重复运行和损坏/冲突拒绝。`TestMinIOMediaValidationAndRecovery` 在真实 MinIO 上用两套 API 路由覆盖匿名/越权、会话超限、分片长度与索引、冲突哈希、同大小损坏对象的重试修复、缺失对象恢复、重复完成及错误整文件哈希；配置 `GOSTREAM_TEST_MINIO_MYSQL_DSN` 时使用已迁移的隔离 MySQL，CI 在联合恢复演练后执行此组合。CI 的真实 MinIO 任务还运行 SQL 与对象联合恢复演练，并在新数据库和新桶完成切换前的上传会话。RabbitMQ、完整混合负载以及输出上传中断、更多视频格式与权限负例等故障矩阵仍待开发。
+当前已有 opt-in MySQL 测试位于 `internal/platform/mysql_integration_test.go`，并依赖 `GOSTREAM_TEST_MYSQL_DSN`。CI 的 MySQL 任务先在全新服务库执行固定 SQL 的 v001/v002 安装，再用第二个隔离库检查已有数据采用、缺失索引恢复、从 v001 升级到 v002 及重复运行，并比较两个库的列、索引和外键元数据。`tests/integration/mysql_recovery.sh` 另建两个临时库，执行真实 MySQL 逻辑备份、异库恢复、v002 回滚和重新升级，随后执行全部 `TestMySQL*` 平台测试。SQLite 迁移测试对照当前 GORM 模型、模拟 v001/v002 建索引失败后重试并拒绝缺列旧库。现有 `tests/integration/media_smoke.py`、`media_failure_smoke.py`、`minio_smoke.py`、`minio_outage_smoke.py`、`minio_processing_outage_smoke.py` 和 `tests/load` 提供部分测试能力。`TestMinIOMediaAcrossInstances` 使用隔离桶验证双实例文件/分片、Range、完成重试和垃圾回收；`TestMinIOMediaTransfer` 验证最终媒体与有效续传分片导入、清单备份、恢复、重复运行和损坏/冲突拒绝。`TestMinIOMediaValidationAndRecovery` 在真实 MinIO 上用两套 API 路由覆盖匿名/越权、会话超限、分片长度与索引、冲突哈希、同大小损坏对象的重试修复、缺失对象恢复、重复完成及错误整文件哈希；配置 `GOSTREAM_TEST_MINIO_MYSQL_DSN` 时使用已迁移的隔离 MySQL，CI 在联合恢复演练后执行此组合。CI 的真实 MinIO 任务还运行 SQL 与对象联合恢复演练，并在新数据库和新桶完成切换前的上传会话。RabbitMQ、完整混合负载、存储完全中断及更多视频编解码格式与权限负例仍待开发。
 
 MinIO 测试使用独立 Compose 项目和端口，不应对正在演示的 `gostream` 项目运行 `down -v`：
 
@@ -40,13 +40,15 @@ docker compose -p gostream-object -f docker-compose.yml -f docker-compose.object
 
 `minio_smoke.py` 要求真实 MP4 大于 4 MiB，用两个 API 端口分别发送分片并核对 MySQL 发布态、视频/封面内容、HTTP Range 和 Feed。两个停机脚本均在 `finally` 中启动隔离 MinIO，但仍应在结束后检查容器健康。处理任务停机脚本核对失败尝试期间视频不进入公共 Feed，恢复后完成第二次尝试并发布。Opt-in Go 测试可设置 `GOSTREAM_TEST_MINIO_ENDPOINT`、`GOSTREAM_TEST_MINIO_ACCESS_KEY`、`GOSTREAM_TEST_MINIO_SECRET_KEY` 后执行 `go test ./internal/platform -run '^TestMinIOMediaAcrossInstances$' -count=1`；它创建并删除随机桶。新增的故障矩阵测试同样创建独立桶；MySQL 模式会在隔离数据库留下测试用户和会话，测试结束时应销毁该项目的专用卷。
 
+`TestImageUploadsRejectTruncatedPayloads` 在本地模式检查 JPEG、PNG、WebP 的完整与截断文件、直传与分片完成，以及 WebP 头像所有权。设置上述三个 MinIO 环境变量后运行 `go test ./internal/platform -run '^TestMinIOImagePayloadValidation$' -count=1` 可重复同一矩阵并使用随机对象桶。`TestMinIOProcessedOutputLostResponse` 用代理让真实 MinIO 成功写入 MP4/封面对象，却向 worker 返回 503；两次失败后核对对象清理、未发布状态和未登记资产，第三次任务尝试核对发布与对象字节。设置 `GOSTREAM_TEST_MINIO_MYSQL_DSN` 可改用已经迁移的隔离 MySQL。该测试直接提供已生成的输出字节来定位对象上传阶段；真实 FFmpeg 转码另由 `minio_smoke.py` 验证。
+
 ## 功能验收矩阵
 
 | 编号 | 最终必须验证的结果 | 最低证据 | 当前判断 |
 | --- | --- | --- | --- |
 | A01 启动与持久化 | 空库一键启动后 `/health`、`/ready`、`/metrics` 可访问；重启 API 后账号、视频、互动和消息仍在；依赖故障时 `/ready` 的语义与文档一致 | Compose、真实 MySQL/Redis/RabbitMQ/MinIO、重启记录 | 部分通过：MinIO 覆盖配置可启动，RabbitMQ 与全组件持久化恢复仍待验 |
 | A02 身份与权限 | 注册、登录、JWT 过期/伪造、资料和头像修改、关注与取消；未登录者和其他用户不能修改私有资源；重复关注结果一致 | API 单元/集成测试 + 两账号浏览器操作 | 部分通过：主路径已有，最终部署权限矩阵待复验 |
-| A03 视频与对象 | 文件和分片上传能在断点后续传；同一会话可跨两 API 实例完成；错块、错哈希、越权、超限均拒绝；FFmpeg 成功后视频/封面可从 MinIO 读取，失败后不进入公共 Feed；重试、删除、孤儿清理无误删 | 真实 MySQL/MinIO/FFmpeg + 视频探测 + 故障测试 | 部分通过：真实 MinIO 双实例续传、FFmpeg、Range、对象清理及停机后上传恢复已验；离线旧媒体导入及隔离 SQL/对象恢复已验；分片与资产负例已在真实 MySQL/MinIO 上验证；输出上传中断、更多格式/权限场景与较大规模恢复成本待验 |
+| A03 视频与对象 | 文件和分片上传能在断点后续传；同一会话可跨两 API 实例完成；错块、错哈希、越权、超限均拒绝；FFmpeg 成功后视频/封面可从 MinIO 读取，失败后不进入公共 Feed；重试、删除、孤儿清理无误删 | 真实 MySQL/MinIO/FFmpeg + 视频探测 + 故障测试 | 部分通过：真实 MinIO 双实例续传、FFmpeg、Range、对象清理及停机后上传恢复已验；离线旧媒体导入及隔离 SQL/对象恢复已验；分片与资产负例已在真实 MySQL/MinIO 上验证；输出 PUT 成功响应丢失及 JPEG/PNG/WebP 截断文件已验；存储完全中断、更多视频格式/权限场景与较大规模恢复成本待验 |
 | A04 Feed | 时间线、关注、热榜、推荐均正确分页；相同时间戳与新插入记录不造成稳定数据集中的漏项/重复；普通作者推送、高粉作者拉取可配置且结果一致；Redis 中断可回退数据库 | 单元测试 + 真实 MySQL/Redis 双实例 + 压测 | 部分通过：SQL 拉取、规则推荐和首页缓存已有，混合推拉未实现 |
 | A05 互动与计数 | 并发重复点赞/收藏、取消及关注只有一次状态转换；计数与明细一致且非负；评论回复层级、权限和通知正确；播放计数策略明确 | 真实 MySQL 并发集成测试，结束后核对表和计数 | 部分通过：事务与局部测试已有，最终并发矩阵待验 |
 | A06 异步事件 | 业务事务失败不留待发事件；提交成功后 broker 停机也不丢事件；发布确认后重复投递不产生重复通知；消费者重启、失败重试和死信可恢复 | 真实 MySQL/RabbitMQ 故障注入 + outbox/消费者状态核对 | 未验证：当前只有数据库 outbox worker |
