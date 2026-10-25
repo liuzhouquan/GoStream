@@ -49,6 +49,8 @@ func mediaKind(ext string, header []byte) string {
 	return ""
 }
 
+const maxImagePixels int64 = 16_000_000
+
 func validImageFile(path, ext string) bool {
 	f, err := os.Open(path)
 	if err != nil {
@@ -75,7 +77,8 @@ func validImageFile(path, ext string) bool {
 	} else {
 		config, format, err = image.DecodeConfig(f)
 	}
-	if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 8192 || config.Height > 8192 {
+	if err != nil || config.Width < 1 || config.Height < 1 || config.Width > 8192 || config.Height > 8192 ||
+		int64(config.Width)*int64(config.Height) > maxImagePixels {
 		return false
 	}
 	switch ext {

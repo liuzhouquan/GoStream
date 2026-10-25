@@ -5,8 +5,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
@@ -145,5 +147,36 @@ func testImageUploadsRejectTruncatedPayloads(t *testing.T, h http.Handler, db *g
 	}
 	if r := request(t, h, http.MethodPatch, "/api/users/me", ownerToken, map[string]string{"avatar_url": webpURL}); r.Code != http.StatusOK {
 		t.Fatalf("owner WebP avatar rejected: %d %s", r.Code, r.Body.String())
+	}
+}
+
+func TestImagePixelBudgetRejectsLargeHeader(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, img); err != nil {
+		t.Fatal(err)
+	}
+	data := bytes.Clone(encoded.Bytes())
+	// Keep a valid PNG header and CRC, but advertise 20 million pixels.
+	// DecodeConfig must accept the header so this checks the pre-decode bound.
+	binary.BigEndian.PutUint32(data[16:20], 5000)
+	binary.BigEndian.PutUint32(data[20:24], 4000)
+	binary.BigEndian.PutUint32(data[29:33], crc32.ChecksumIEEE(data[12:29]))
+	config, format, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil || format != "png" || config.Width != 5000 || config.Height != 4000 {
+		t.Fatalf("large PNG fixture header: %+v %q %v", config, format, err)
+	}
+	server, h, db := testServer(t)
+	_, token := registerTestUser(t, h, "large_image_owner")
+	if r := uploadTestMedia(t, h, token, "large.png", data); r.Code != http.StatusBadRequest {
+		t.Fatalf("large image accepted: %d %s", r.Code, r.Body.String())
+	}
+	var count int64
+	if err := db.Model(&MediaAsset{}).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("large image registered: %d %v", count, err)
+	}
+	entries, err := os.ReadDir(server.MediaDir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("large image left local media: %d %v", len(entries), err)
 	}
 }
