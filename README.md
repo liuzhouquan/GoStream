@@ -37,7 +37,7 @@ The normal and object overlays both bind API port 8080; stop the normal stack be
 - Frozen SQLite/MySQL `schema_v001` SQL, v002 outbox index upgrade, and v003 durable Feed fanout/inbox upgrade, with MySQL startup locking and existing-database adoption; an isolated MySQL backup/restore and v002 rollback drill is in `tests/integration/mysql_recovery.sh`
 - CI workflow for exact Go version, tests, race checks, vet, build, web syntax, and Compose validation
 - Optional Redis cache for anonymous timeline/recommend/hot pages and each viewer's following first page; database fallback and bounded staleness
-- Following Feed push/pull index with durable 128-follower batches for ordinary authors and direct reads for higher-follower authors; configure `FEED_FANOUT_MAX_FOLLOWERS` (default `1000`, `0` for SQL-only comparison). [Design and current limits](docs/FEED_HYBRID.md)
+- Following Feed push/pull index with durable 128-follower batches for ordinary authors and direct reads for higher-follower authors; configure `FEED_FANOUT_MAX_FOLLOWERS` (`0` SQL-only default, `1000` to enable the current hybrid strategy). [Design and measured limits](docs/FEED_HYBRID.md)
 - Explainable recommendation ranking using interactions, freshness, followed authors, and recently interacted authors
 - JWT access tokens and bcrypt password hashing
 - Local or MinIO media storage, single-file and 4 MiB resumable chunk uploads, media ownership checks, file integrity checks, and an offline media import/backup/restore tool
@@ -56,7 +56,7 @@ The normal and object overlays both bind API port 8080; stop the normal stack be
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/API.md](docs/API.md), [docs/DATABASE.md](docs/DATABASE.md), [docs/TECHNICAL_DESIGN.md](docs/TECHNICAL_DESIGN.md), [docs/LEARNING_GUIDE.md](docs/LEARNING_GUIDE.md), and [docs/INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md).
 
-Performance and verification status is recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md). An in-process benchmark, a local HTTP driver with authenticated request support, and three-run MySQL/Redis Compose comparisons for anonymous recommendation and authenticated following pages are included. k6 and multi-host load testing remain pending.
+Performance and verification status is recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md). An in-process benchmark, a local HTTP driver with authenticated request support, three-run MySQL/Redis cache comparisons, and an isolated 2,000-user hybrid Feed comparison are included. The hybrid read path regressed against SQL-only for the measured low-follow-count viewer; it remains an optimization target. k6 and multi-host load testing remain pending.
 
 ## License
 

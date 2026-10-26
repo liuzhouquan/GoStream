@@ -2,7 +2,7 @@
 
 ## Functional verification
 
-The 2026-10-26 hybrid following Feed change has correctness evidence from SQLite and a disposable MySQL 8.4 database, including the same-timestamp merge. There is no measured fanout P95 gain, write-amplification result, or 60-second drain result yet. Earlier following-Feed numbers below describe the SQL join plus Redis first-page cache and are not a hybrid before/after comparison. The A04 dataset and repeated cold/warm, ordinary/high-follower, and mixed read/write runs remain to be performed.
+The 2026-10-26 hybrid following Feed change has correctness evidence from SQLite and a disposable MySQL 8.4 database, including the same-timestamp merge. The isolated 2,000-user Feed comparison below found a read regression for the current hybrid path. Earlier following-Feed numbers below describe the SQL join plus Redis first-page cache and are not a hybrid before/after comparison. Cold-cache, mixed read/write, two-instance failure and backlog drain tests remain open.
 
 The offline media recovery drill on 2026-10-24 used Go 1.27.2, isolated MySQL 8.4 and source-built MinIO. It copied one 24-byte signature-only media fixture and one 4 MiB resumable chunk, then restored a 22,367-byte MySQL dump and both objects into a new database and bucket; the object-mode API returned the original URL bytes and Feed row and uploaded the remaining 24-byte chunk before completing the old upload session. Each file was checked against the manifest's SHA-256, and the SQL migration markers and destination bytes were checked. This is a correctness drill with a small fixture, not a throughput, RTO or RPO measurement. A larger corpus and timed recovery remain to be run before making capacity claims. The command and exact result are in [`PROGRESS.md`](../PROGRESS.md); the operational sequence is in [`MEDIA_OPERATIONS.md`](MEDIA_OPERATIONS.md).
 
@@ -66,6 +66,37 @@ BASE_URL=http://127.0.0.1:8080 SCENE=timeline VUS=10 DURATION=30s k6 run tests/l
 ```
 
 Repeat with `SCENE=following`, `recommend`, and `hot` after preparing suitable users and videos. Record CPU, memory, SQLite/MySQL settings, data size, host, Go version, k6 version, request rate, P50/P95/P99, and error rate. Use the output to determine whether query indexes, SQL plans, connection pools, Redis caching, or the current hybrid fanout should be redesigned.
+
+## Hybrid following Feed: isolated MySQL comparison, 2026-10-26
+
+The new `tests/load/seed -scenario hybrid` mode requires an empty database, applies numbered migrations, and creates deterministic accounts, follows, videos, completed ordinary-author jobs and their inbox rows. It materializes the index directly, so setup time does **not** measure worker throughput. Reproduce in a separate schema; never point this mode at the demo database:
+
+```sh
+go run ./tests/load/seed -driver mysql -dsn '<isolated MySQL DSN with parseTime=True&loc=UTC>' \
+  -scenario hybrid -users 2000 -authors 100 -videos 20000 \
+  -follows-per-user 2 -celebrity-followers 1500 -fanout-max-followers 1000
+go build -o /tmp/gostream-feed-load-api ./cmd/gostream
+# Start the same binary against that schema, with REDIS_ADDR and FFMPEG_BIN empty.
+# Run first with FEED_FANOUT_MAX_FOLLOWERS=0, then restart it with 1000.
+# Log in as load-u-000100 / load-fixture-password and save access_token privately.
+go run ./tests/load/http -url 'http://127.0.0.1:18086/api/feed?scene=following&limit=20' \
+  -token-file /tmp/gostream-feed-load-token -requests 3000 -concurrency 10
+```
+
+The measured run used WSL2 Linux 6.18.33.2 on an AMD Ryzen 7 5800H (16 logical CPUs), 13 GiB RAM, Go 1.27.2 and MySQL 8.4.11 in Docker with a 128 MiB InnoDB buffer pool. The schema contained 2,000 users, 5,299 follows, 20,000 seeded videos, 19,800 completed ordinary-author jobs, 760,000 inbox rows, and one high-follower author with 1,499 followers. A real API publication added one ordinary-author video, job and 38 inbox rows before the final controlled comparison: the final counts were 20,001 videos, 19,801 completed jobs and 760,038 inbox rows. `information_schema` reported about 145.7 MB of table data and indexes before that publication. The viewer followed two ordinary authors and the high-follower author. Both API variants used the same final binary and database, no Redis page cache, no FFmpeg, sequential process restarts, identical file redirection for request logs, 20 warmups per run, and 3,000 GETs at concurrency 10 per measured run. The first 20 video IDs and the next cursor page's 20 IDs matched exactly.
+
+| Variant | Run | Success | Requests/s | P50 | P95 | P99 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| SQL-only pull | 1 | 3000/3000 | 542.1 | 17.648 ms | 26.602 ms | 34.152 ms |
+| SQL-only pull | 2 | 3000/3000 | 540.4 | 17.993 ms | 26.875 ms | 32.149 ms |
+| SQL-only pull | 3 | 3000/3000 | 552.3 | 17.731 ms | 25.700 ms | 31.568 ms |
+| Hybrid push/pull | 1 | 3000/3000 | 346.0 | 27.849 ms | 40.035 ms | 47.476 ms |
+| Hybrid push/pull | 2 | 3000/3000 | 379.2 | 25.398 ms | 37.355 ms | 44.987 ms |
+| Hybrid push/pull | 3 | 3000/3000 | 389.6 | 24.444 ms | 35.865 ms | 53.853 ms |
+
+The median P95 was 26.602 ms for SQL-only and 37.355 ms for hybrid, about 40% worse for hybrid in this fixture. Median throughput was 542.1 versus 379.2 requests/s. A single 3,000-request cursor-page run was also slower with hybrid: 38.461 ms P95 and 363.3 requests/s versus 23.439 ms and 587.4 requests/s for SQL-only. MySQL `EXPLAIN` showed the pull branch reading three followed authors (estimated 200 videos per author) and sorting, while the push branch additionally read the viewer's inbox index and joined videos/follows. Since this viewer follows only two ordinary authors, the extra branch cost exceeds the saved work. This is a negative result, not a performance claim for the new path. The runs are sequential, local loopback and warm, with other demo containers on the same WSL2 host; CPU, memory and mixed-write effects were not isolated. The threshold needs workload-based tuning or a cheaper pull branch before A04 can pass.
+
+For one ordinary-author API publication using a real one-second MP4 with FFmpeg disabled, the job reached `done_at` in 2.201 seconds as observed by 200 ms database polling; it used two worker claims and inserted 38 inbox rows for 38 current followers. This checks one small backlog and the 60-second goal for that one case. It does not prove 60-second drain under concurrent publication, restart, or two API instances. The worker now exposes `gostream_feed_fanout_batches_total{result=...}`, `gostream_feed_fanout_completion_seconds` and a 30-second-sampled `gostream_feed_fanout_pending_jobs` gauge; the completion counter/histogram are covered by a unit test.
 
 ## Local HTTP results
 

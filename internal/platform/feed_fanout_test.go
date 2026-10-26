@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -131,7 +132,7 @@ func TestHybridFollowingPublicationAndRelationshipChanges(t *testing.T) {
 }
 
 func TestFeedFanoutBatchResumeAndIdempotency(t *testing.T) {
-	s, _, db := testServer(t)
+	s, h, db := testServer(t)
 	s.UseFeedFanout(200)
 	author := User{Username: "batch_author", Nickname: "Batch", PasswordHash: "test"}
 	if err := db.Create(&author).Error; err != nil {
@@ -193,5 +194,10 @@ func TestFeedFanoutBatchResumeAndIdempotency(t *testing.T) {
 	var job FeedFanoutJob
 	if err := db.Where("video_id = ?", video.ID).First(&job).Error; err != nil || job.DoneAt == nil {
 		t.Fatalf("job not complete: %+v err=%v", job, err)
+	}
+	metrics := request(t, h, http.MethodGet, "/metrics", "", nil)
+	if metrics.Code != http.StatusOK || !strings.Contains(metrics.Body.String(), "gostream_feed_fanout_batches_total{result=\"completed\"} 1") ||
+		!strings.Contains(metrics.Body.String(), "gostream_feed_fanout_completion_seconds_count 1") {
+		t.Fatalf("fanout completion metrics missing: status=%d body=%s", metrics.Code, metrics.Body.String())
 	}
 }

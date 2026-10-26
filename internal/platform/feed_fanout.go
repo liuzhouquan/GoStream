@@ -12,7 +12,7 @@ import (
 
 const feedFanoutBatchSize = 128
 
-// Zero keeps every author on the pull path. The default is 1000 followers.
+// Zero keeps every author on the SQL pull path and is the current default.
 func (s *Server) UseFeedFanout(maxFollowers int) { s.fanoutMaxFollowers = maxFollowers }
 
 // The job is inserted in the same transaction that makes the video public.
@@ -54,7 +54,9 @@ func (s *Server) ProcessFeedFanoutOnce(ctx context.Context) (bool, error) {
 		}
 		candidate.LeaseUntil = &leaseUntil
 		candidate.Attempts++
-		if err := s.processFeedFanoutBatch(ctx, candidate); err != nil {
+		completed, err := s.processFeedFanoutBatch(ctx, candidate)
+		if err != nil {
+			s.metrics.feedFanout.WithLabelValues("error").Inc()
 			delay := time.Duration(1<<min(candidate.Attempts, 6)) * time.Second
 			message := err.Error()
 			if len(message) > 500 {
@@ -65,13 +67,22 @@ func (s *Server) ProcessFeedFanoutOnce(ctx context.Context) (bool, error) {
 				Updates(map[string]any{"lease_until": nil, "available_at": time.Now().UTC().Add(delay), "last_error": message}).Error
 			return true, err
 		}
+		if completed {
+			s.metrics.feedFanout.WithLabelValues("completed").Inc()
+			if !candidate.CreatedAt.IsZero() {
+				s.metrics.feedFanoutAge.Observe(time.Since(candidate.CreatedAt).Seconds())
+			}
+		} else {
+			s.metrics.feedFanout.WithLabelValues("batch").Inc()
+		}
 		return true, nil
 	}
 	return false, nil
 }
 
-func (s *Server) processFeedFanoutBatch(ctx context.Context, job FeedFanoutJob) error {
-	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+func (s *Server) processFeedFanoutBatch(ctx context.Context, job FeedFanoutJob) (bool, error) {
+	completed := false
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var followers []Follow
 		if err := tx.Select("follower_id").Where("followee_id = ? AND follower_id > ?", job.AuthorID, job.LastFollowerID).
 			Order("follower_id ASC").Limit(feedFanoutBatchSize).Find(&followers).Error; err != nil {
@@ -80,6 +91,7 @@ func (s *Server) processFeedFanoutBatch(ctx context.Context, job FeedFanoutJob) 
 		updates := map[string]any{"lease_until": nil, "last_error": ""}
 		if len(followers) == 0 {
 			updates["done_at"] = time.Now().UTC()
+			completed = true
 		} else {
 			var video Video
 			if err := tx.Select("created_at").Where("id = ?", job.VideoID).First(&video).Error; err != nil {
@@ -105,12 +117,23 @@ func (s *Server) processFeedFanoutBatch(ctx context.Context, job FeedFanoutJob) 
 		}
 		return nil
 	})
+	return completed && err == nil, err
 }
 
 func (s *Server) RunFeedFanout(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
+	lastPendingSample := time.Time{}
 	for ctx.Err() == nil {
+		if time.Since(lastPendingSample) >= 30*time.Second {
+			var pending int64
+			if err := s.DB.WithContext(ctx).Model(&FeedFanoutJob{}).Where("done_at IS NULL").Count(&pending).Error; err == nil {
+				s.metrics.feedFanoutJobs.Set(float64(pending))
+			} else if ctx.Err() == nil {
+				log.Printf("feed fanout pending count: %v", err)
+			}
+			lastPendingSample = time.Now()
+		}
 		worked, err := s.ProcessFeedFanoutOnce(ctx)
 		if err != nil && ctx.Err() == nil {
 			log.Printf("feed fanout: %v", err)

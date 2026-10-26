@@ -65,7 +65,7 @@ func main() {
 	}
 	defer sqlDB.Close()
 	server := platform.NewServer(db, secret, mediaDir)
-	fanoutMaxFollowers, err := strconv.Atoi(env("FEED_FANOUT_MAX_FOLLOWERS", "1000"))
+	fanoutMaxFollowers, err := strconv.Atoi(env("FEED_FANOUT_MAX_FOLLOWERS", "0"))
 	if err != nil || fanoutMaxFollowers < 0 || fanoutMaxFollowers > 100000 {
 		log.Fatal("FEED_FANOUT_MAX_FOLLOWERS must be an integer from 0 to 100000")
 	}
