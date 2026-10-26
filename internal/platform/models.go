@@ -22,7 +22,6 @@ type Video struct {
 	MediaURL        string    `json:"media_url" gorm:"size:512;index;not null"`
 	CoverURL        string    `json:"cover_url" gorm:"size:512;index"`
 	Status          string    `json:"status" gorm:"size:16;index:idx_video_feed,priority:1;index:idx_video_feed_pull,priority:1;not null;default:published"`
-	FeedPull        bool      `json:"-" gorm:"index:idx_video_feed_pull,priority:2;not null;default:true"`
 	LikeCount       int64     `json:"like_count"`
 	CommentCount    int64     `json:"comment_count"`
 	FavoriteCount   int64     `json:"favorite_count"`
@@ -32,6 +31,7 @@ type Video struct {
 	Height          int       `json:"height" gorm:"not null;default:0"`
 	ProcessingError string    `json:"processing_error,omitempty" gorm:"-"`
 	CreatedAt       time.Time `json:"created_at" gorm:"index:idx_video_feed,priority:2,sort:desc;index:idx_video_author,priority:2,sort:desc;index:idx_video_feed_pull,priority:3,sort:desc"`
+	FeedPull        bool      `json:"-" gorm:"index:idx_video_feed_pull,priority:2;not null;default:true"`
 }
 
 // VideoProcessJob survives restarts and lets another instance reclaim an expired lease.

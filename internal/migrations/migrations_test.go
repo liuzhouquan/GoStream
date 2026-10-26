@@ -66,7 +66,7 @@ func TestFrozenV001SQLiteMatchesCurrentModels(t *testing.T) {
 	for _, name := range []string{"feed_fanout_jobs", "feed_inboxes", "idx_feed_fanout_jobs_video_id", "idx_feed_fanout_dispatch", "ux_feed_inbox", "idx_feed_inbox_user", "idx_video_feed_pull"} {
 		delete(right, name)
 	}
-	right["videos"] = strings.Replace(right["videos"], "`feed_pull` numeric NOT NULL DEFAULT true,", "", 1)
+	right["videos"] = strings.Replace(right["videos"], ",`feed_pull` numeric NOT NULL DEFAULT true", "", 1)
 	if !reflect.DeepEqual(left, right) {
 		for name, ddl := range right {
 			if left[name] != ddl {
