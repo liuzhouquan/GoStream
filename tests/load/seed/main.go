@@ -22,9 +22,10 @@ func main() {
 	scenario := flag.String("scenario", "single-author", "fixture shape: single-author or hybrid")
 	users := flag.Int("users", 2000, "hybrid fixture user count")
 	authors := flag.Int("authors", 100, "hybrid fixture author count, including one high-follower author")
-	followsPerUser := flag.Int("follows-per-user", 2, "ordinary authors followed by each hybrid viewer")
+	followsPerUser := flag.Int("follows-per-user", 5, "ordinary authors followed by each hybrid viewer")
 	celebrityFollowers := flag.Int("celebrity-followers", 1500, "users following the hybrid high-follower author")
 	fanoutMaxFollowers := flag.Int("fanout-max-followers", 1000, "ordinary author threshold used to classify hybrid fixtures")
+	likes := flag.Int("likes", 50000, "hybrid fixture like rows, spread across videos with matching counters")
 	flag.Parse()
 	if *videos < 1 || *videos > 100000 {
 		log.Fatal("videos must be 1-100000")
@@ -43,7 +44,7 @@ func main() {
 		log.Fatal(err)
 	}
 	if *scenario == "hybrid" {
-		if err := seedHybrid(db, hybridOptions{users: *users, authors: *authors, videos: *videos, followsPerUser: *followsPerUser, celebrityFollowers: *celebrityFollowers, fanoutMaxFollowers: *fanoutMaxFollowers}); err != nil {
+		if err := seedHybrid(db, hybridOptions{users: *users, authors: *authors, videos: *videos, followsPerUser: *followsPerUser, celebrityFollowers: *celebrityFollowers, fanoutMaxFollowers: *fanoutMaxFollowers, likes: *likes}); err != nil {
 			log.Fatal(err)
 		}
 		return
@@ -73,7 +74,7 @@ func main() {
 }
 
 type hybridOptions struct {
-	users, authors, videos, followsPerUser, celebrityFollowers, fanoutMaxFollowers int
+	users, authors, videos, followsPerUser, celebrityFollowers, fanoutMaxFollowers, likes int
 }
 
 // seedHybrid writes only to an empty, isolated database. It materializes the
@@ -83,7 +84,8 @@ func seedHybrid(db *gorm.DB, opts hybridOptions) error {
 	if opts.users < 3 || opts.users > 10000 || opts.authors < 2 || opts.authors >= opts.users ||
 		opts.videos < 1 || opts.videos > 100000 || opts.followsPerUser < 1 || opts.followsPerUser > opts.authors-1 ||
 		opts.celebrityFollowers <= opts.authors || opts.celebrityFollowers > opts.users || opts.fanoutMaxFollowers < 1 ||
-		opts.celebrityFollowers-1 <= opts.fanoutMaxFollowers {
+		opts.celebrityFollowers-1 <= opts.fanoutMaxFollowers || opts.likes < 0 || opts.likes > 50*opts.videos ||
+		(opts.likes > 0 && opts.users < 50) {
 		return fmt.Errorf("invalid hybrid shape: require 2 <= authors < users, 1 <= ordinary follows < authors, and the first viewer to follow a high-follower author")
 	}
 	tables, err := db.Migrator().GetTables()
@@ -146,6 +148,13 @@ func seedHybrid(db *gorm.DB, opts hybridOptions) error {
 	if err := db.CreateInBatches(&follows, 500).Error; err != nil {
 		return fmt.Errorf("insert follows: %w", err)
 	}
+	likeGroups := (opts.likes + 49) / 50
+	likesByVideo := make(map[int]int64, likeGroups)
+	for group := 0; group < likeGroups; group++ {
+		videoIndex := group * opts.videos / likeGroups
+		likesByVideo[videoIndex] = int64(min(50, opts.likes-group*50))
+	}
+	videoIDs := make([]uint, opts.videos)
 	const videoBatch = 100
 	inboxRows := 0
 	jobRows := 0
@@ -154,10 +163,24 @@ func seedHybrid(db *gorm.DB, opts hybridOptions) error {
 		batch := make([]platform.Video, count)
 		for j := range batch {
 			i := offset + j
-			batch[j] = platform.Video{AuthorID: accounts[i%opts.authors].ID, Title: fmt.Sprintf("load video %06d", i), MediaURL: "/media/load-fixture.mp4", Status: "published", CreatedAt: now.Add(-time.Duration(opts.videos-i) * time.Second)}
+			batch[j] = platform.Video{AuthorID: accounts[i%opts.authors].ID, Title: fmt.Sprintf("load video %06d", i), MediaURL: "/media/load-fixture.mp4", Status: "published", FeedPull: accounts[i%opts.authors].ID == celebrityID, LikeCount: likesByVideo[i], CreatedAt: now.Add(-time.Duration(opts.videos-i) * time.Second)}
 		}
 		if err := db.CreateInBatches(&batch, videoBatch).Error; err != nil {
 			return fmt.Errorf("insert videos at offset %d: %w", offset, err)
+		}
+		// GORM treats a false bool as the default on INSERT, so explicitly mark
+		// completed ordinary-author rows after their IDs have been assigned.
+		ordinaryIDs := make([]uint, 0, len(batch))
+		for _, video := range batch {
+			if video.AuthorID != celebrityID {
+				ordinaryIDs = append(ordinaryIDs, video.ID)
+			}
+		}
+		if err := db.Model(&platform.Video{}).Where("id IN ?", ordinaryIDs).Update("feed_pull", false).Error; err != nil {
+			return fmt.Errorf("mark completed ordinary videos at offset %d: %w", offset, err)
+		}
+		for j, video := range batch {
+			videoIDs[offset+j] = video.ID
 		}
 		jobs := make([]platform.FeedFanoutJob, 0, count)
 		inboxes := make([]platform.FeedInbox, 0, count*opts.followsPerUser*opts.users/opts.authors)
@@ -184,7 +207,20 @@ func seedHybrid(db *gorm.DB, opts hybridOptions) error {
 		jobRows += len(jobs)
 		inboxRows += len(inboxes)
 	}
-	fmt.Printf("hybrid fixture users=%d authors=%d follows=%d videos=%d completed_jobs=%d inbox_rows=%d high_author_followers=%d threshold=%d\n", opts.users, opts.authors, len(follows), opts.videos, jobRows, inboxRows, len(followers[celebrityID]), opts.fanoutMaxFollowers)
+	for offset := 0; offset < opts.likes; offset += 500 {
+		batch := make([]platform.VideoAction, min(500, opts.likes-offset))
+		for j := range batch {
+			i := offset + j
+			group := i / 50
+			videoIndex := group * opts.videos / likeGroups
+			userIndex := (group*53 + i%50) % opts.users
+			batch[j] = platform.VideoAction{UserID: accounts[userIndex].ID, VideoID: videoIDs[videoIndex], Kind: "like", CreatedAt: now.Add(-time.Duration(opts.likes-i) * time.Millisecond)}
+		}
+		if err := db.CreateInBatches(&batch, 500).Error; err != nil {
+			return fmt.Errorf("insert likes at offset %d: %w", offset, err)
+		}
+	}
+	fmt.Printf("hybrid fixture users=%d authors=%d follows=%d videos=%d likes=%d completed_jobs=%d inbox_rows=%d high_author_followers=%d threshold=%d\n", opts.users, opts.authors, len(follows), opts.videos, opts.likes, jobRows, inboxRows, len(followers[celebrityID]), opts.fanoutMaxFollowers)
 	fmt.Printf("viewer username=%s password=load-fixture-password; use only in this isolated database\n", accounts[opts.authors].Username)
 	return nil
 }

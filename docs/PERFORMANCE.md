@@ -2,7 +2,7 @@
 
 ## Functional verification
 
-The 2026-10-26 hybrid following Feed change has correctness evidence from SQLite and a disposable MySQL 8.4 database, including the same-timestamp merge. The isolated 2,000-user Feed comparison below found a read regression for the current hybrid path. Earlier following-Feed numbers below describe the SQL join plus Redis first-page cache and are not a hybrid before/after comparison. Cold-cache, mixed read/write, two-instance failure and backlog drain tests remain open.
+The 2026-10-26 hybrid following Feed changes have correctness evidence from SQLite and disposable MySQL 8.4 databases, including same-timestamp merging and v004 backfill. The original v003 comparison below found a read regression. A later complete-size fixture and indexed v004 query improved the result, but still missed the 20% P95 goal. Earlier following-Feed numbers below describe the SQL join plus Redis first-page cache and are not a hybrid before/after comparison. Cold-cache, mixed read/write, two-instance failure and backlog drain tests remain open.
 
 The offline media recovery drill on 2026-10-24 used Go 1.27.2, isolated MySQL 8.4 and source-built MinIO. It copied one 24-byte signature-only media fixture and one 4 MiB resumable chunk, then restored a 22,367-byte MySQL dump and both objects into a new database and bucket; the object-mode API returned the original URL bytes and Feed row and uploaded the remaining 24-byte chunk before completing the old upload session. Each file was checked against the manifest's SHA-256, and the SQL migration markers and destination bytes were checked. This is a correctness drill with a small fixture, not a throughput, RTO or RPO measurement. A larger corpus and timed recovery remain to be run before making capacity claims. The command and exact result are in [`PROGRESS.md`](../PROGRESS.md); the operational sequence is in [`MEDIA_OPERATIONS.md`](MEDIA_OPERATIONS.md).
 
@@ -97,6 +97,38 @@ The measured run used WSL2 Linux 6.18.33.2 on an AMD Ryzen 7 5800H (16 logical C
 The median P95 was 26.602 ms for SQL-only and 37.355 ms for hybrid, about 40% worse for hybrid in this fixture. Median throughput was 542.1 versus 379.2 requests/s. A single 3,000-request cursor-page run was also slower with hybrid: 38.461 ms P95 and 363.3 requests/s versus 23.439 ms and 587.4 requests/s for SQL-only. MySQL `EXPLAIN` showed the pull branch reading three followed authors (estimated 200 videos per author) and sorting, while the push branch additionally read the viewer's inbox index and joined videos/follows. Since this viewer follows only two ordinary authors, the extra branch cost exceeds the saved work. This is a negative result, not a performance claim for the new path. The runs are sequential, local loopback and warm, with other demo containers on the same WSL2 host; CPU, memory and mixed-write effects were not isolated. The threshold needs workload-based tuning or a cheaper pull branch before A04 can pass.
 
 For one ordinary-author API publication using a real one-second MP4 with FFmpeg disabled, the job reached `done_at` in 2.201 seconds as observed by 200 ms database polling; it used two worker claims and inserted 38 inbox rows for 38 current followers. This checks one small backlog and the 60-second goal for that one case. It does not prove 60-second drain under concurrent publication, restart, or two API instances. The worker now exposes `gostream_feed_fanout_batches_total{result=...}`, `gostream_feed_fanout_completion_seconds` and a 30-second-sampled `gostream_feed_fanout_pending_jobs` gauge; the completion counter/histogram are covered by a unit test.
+
+## Indexed hybrid following Feed: complete-size fixture, 2026-10-26
+
+A second isolated MySQL 8.4 schema used `tests/load/seed -scenario hybrid -users 2000 -authors 100 -videos 20000 -follows-per-user 5 -celebrity-followers 1500 -fanout-max-followers 1000 -likes 50000`. It contained exactly 2,000 users, 20,000 published videos, 10,999 follows, 50,000 like rows with matching counters, 19,800 completed ordinary-author jobs, 1,900,000 inbox rows, and a high-follower author with 1,499 followers. The fixture materializes completed jobs, so these measurements exclude fanout write cost. After v004 migration, 19,800 videos had `feed_pull=0` and 200 had `feed_pull=1`. The same Go 1.27.2 API binary, isolated database, JWT secret, no Redis cache and no FFmpeg were used in both modes. The host was the same WSL2/Ryzen 7 5800H system and MySQL container as the earlier comparison. The first page and its cursor were identical in SQL-only and indexed hybrid modes for the mixed viewer; the second hybrid page contained 20 rows.
+
+To reproduce, create an empty isolated MySQL schema, pass its DSN to `go run ./tests/load/seed -driver mysql -dsn '<isolated DSN>'` with the flags above, and build `go build -o /tmp/gostream-feed-api ./cmd/gostream` plus `go build -o /tmp/gostream-feed-driver ./tests/load/http`. Start that API on `127.0.0.1:18086` with the same DSN and secret, `REDIS_ADDR=`, `FFMPEG_BIN=`, and first `FEED_FANOUT_MAX_FOLLOWERS=0`; stop and restart it with `1000` for each alternating run. Save a JWT for `load-u-000100` or `load-u-001500` from `/api/sessions` to a private token file, then run:
+
+```sh
+/tmp/gostream-feed-driver -url 'http://127.0.0.1:18086/api/feed?scene=following&limit=20' \
+  -token-file /tmp/gostream-feed-token -requests 3000 -concurrency 10
+```
+
+Before adding the v004 pull index, the one-query hybrid implementation had three 3,000-request P95 results of 31.692, 30.520 and 30.424 ms, versus SQL-only results of 34.275, 36.243 and 34.193 ms on the same full fixture. This reversed the original v003 regression but missed the 20% goal. MySQL `EXPLAIN ANALYZE` showed its pull branch still inspecting 1,200 followed-author videos and testing fanout jobs, taking about 11.1 ms in one warm execution.
+
+The v004 measurement below used a prebuilt HTTP driver, 20 warmups per run, 3,000 requests at concurrency 10, process restart between variants, and alternating SQL-only (`FEED_FANOUT_MAX_FOLLOWERS=0`) and hybrid (`1000`) runs. Both variants logged to `/dev/null`. Each run completed 3,000/3,000 requests without an HTTP error. The mixed viewer `load-u-000100` followed five ordinary authors plus the high-follower author; `load-u-001500` followed only five ordinary authors. Times are client-side loopback latencies.
+
+| Viewer | Variant | Run | Requests/s | P50 | P95 | P99 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Mixed | SQL-only | 1 | 509.5 | 19.000 ms | 26.006 ms | 30.113 ms |
+| Mixed | Hybrid | 1 | 595.8 | 16.372 ms | 23.771 ms | 28.024 ms |
+| Mixed | SQL-only | 2 | 498.9 | 19.284 ms | 26.776 ms | 31.974 ms |
+| Mixed | Hybrid | 2 | 604.7 | 15.974 ms | 23.837 ms | 27.896 ms |
+| Mixed | SQL-only | 3 | 482.0 | 19.882 ms | 28.785 ms | 36.844 ms |
+| Mixed | Hybrid | 3 | 499.5 | 19.425 ms | 28.679 ms | 33.794 ms |
+| Ordinary only | SQL-only | 1 | 537.2 | 17.917 ms | 25.199 ms | 30.622 ms |
+| Ordinary only | Hybrid | 1 | 580.2 | 16.792 ms | 24.428 ms | 28.276 ms |
+| Ordinary only | SQL-only | 2 | 543.5 | 17.811 ms | 24.879 ms | 28.531 ms |
+| Ordinary only | Hybrid | 2 | 570.5 | 17.160 ms | 24.280 ms | 27.973 ms |
+| Ordinary only | SQL-only | 3 | 499.5 | 19.392 ms | 27.980 ms | 33.626 ms |
+| Ordinary only | Hybrid | 3 | 594.1 | 16.457 ms | 23.787 ms | 28.262 ms |
+
+The mixed viewer's median P95 fell from 26.776 to 23.837 ms (11.0%); the ordinary-only viewer's median fell from 25.199 to 24.280 ms (3.6%). One warm `EXPLAIN ANALYZE` of the indexed hybrid query took about 0.5 ms overall, with the pull branch using `idx_video_feed_pull` for 21 rows. The earlier query took about 11.4 ms overall in its single execution. Those SQL timings are diagnostic samples, not client latency percentiles. Host and request latency varied between runs; these results do not establish the 20% A04 target. The driver gives 20 request warmups, not the 30-second warmup/60-second run required by the acceptance plan. Deep pages, 20-way concurrency, CPU/memory during load, mixed writes, publication cost, two-instance failure and 60-second backlog drain still need measurement.
 
 ## Local HTTP results
 

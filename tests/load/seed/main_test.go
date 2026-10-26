@@ -18,15 +18,23 @@ func TestHybridFixtureExercisesBothFeedBranches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	opts := hybridOptions{users: 100, authors: 10, videos: 120, followsPerUser: 2, celebrityFollowers: 70, fanoutMaxFollowers: 50}
+	opts := hybridOptions{users: 100, authors: 10, videos: 120, followsPerUser: 2, celebrityFollowers: 70, fanoutMaxFollowers: 50, likes: 1000}
 	if err := seedHybrid(db, opts); err != nil {
 		t.Fatal(err)
 	}
-	for table, want := range map[string]int64{"users": 100, "videos": 120, "feed_fanout_jobs": 108} {
+	for table, want := range map[string]int64{"users": 100, "videos": 120, "feed_fanout_jobs": 108, "video_actions": 1000} {
 		var got int64
 		if err := db.Table(table).Count(&got).Error; err != nil || got != want {
 			t.Fatalf("%s: count=%d want=%d err=%v", table, got, want, err)
 		}
+	}
+	var pullCount int64
+	if err := db.Model(&platform.Video{}).Where("feed_pull = ?", true).Count(&pullCount).Error; err != nil || pullCount != 12 {
+		t.Fatalf("pull indexed videos=%d want=12 err=%v", pullCount, err)
+	}
+	var likeCount int64
+	if err := db.Model(&platform.Video{}).Select("COALESCE(SUM(like_count), 0)").Scan(&likeCount).Error; err != nil || likeCount != 1000 {
+		t.Fatalf("video like counts=%d want=1000 err=%v", likeCount, err)
 	}
 	var inboxCount int64
 	if err := db.Model(&platform.FeedInbox{}).Count(&inboxCount).Error; err != nil || inboxCount == 0 {

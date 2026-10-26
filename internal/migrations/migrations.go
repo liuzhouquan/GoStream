@@ -19,6 +19,7 @@ import (
 const baselineKey = "schema_v001"
 const upgradeV002Key = "schema_v002"
 const upgradeV003Key = "schema_v003"
+const upgradeV004Key = "schema_v004"
 const mysqlLockName = "gostream_schema_migrations"
 
 // These are immutable snapshots of the schema before the first explicit
@@ -47,6 +48,12 @@ var sqliteV003 string
 
 //go:embed sql/v003_mysql.sql
 var mysqlV003 string
+
+//go:embed sql/v004_sqlite.sql
+var sqliteV004 string
+
+//go:embed sql/v004_mysql.sql
+var mysqlV004 string
 
 var mysqlIndexStatement = regexp.MustCompile("^CREATE (?:UNIQUE )?INDEX `([^`]+)` ON `([^`]+)` ")
 var sqliteIndexStatement = regexp.MustCompile("^CREATE (?:UNIQUE )?INDEX IF NOT EXISTS `([^`]+)` ON `([^`]+)`\\(")
@@ -77,6 +84,7 @@ func apply(ctx context.Context, db *gorm.DB) error {
 	baselineApplied := false
 	upgradeApplied := false
 	v003Applied := false
+	v004Applied := false
 	for _, record := range records {
 		switch record.Key {
 		case baselineKey:
@@ -85,6 +93,8 @@ func apply(ctx context.Context, db *gorm.DB) error {
 			upgradeApplied = true
 		case upgradeV003Key:
 			v003Applied = true
+		case upgradeV004Key:
+			v004Applied = true
 		default:
 			if strings.HasPrefix(record.Key, "schema_v") {
 				return fmt.Errorf("unsupported schema version %q; start a compatible GoStream binary", record.Key)
@@ -96,6 +106,9 @@ func apply(ctx context.Context, db *gorm.DB) error {
 	}
 	if v003Applied && !upgradeApplied {
 		return errors.New("schema_v003 is recorded without schema_v002")
+	}
+	if v004Applied && !v003Applied {
+		return errors.New("schema_v004 is recorded without schema_v003")
 	}
 	if !baselineApplied {
 		if err := applyV001(db, script); err != nil {
@@ -120,6 +133,62 @@ func apply(ctx context.Context, db *gorm.DB) error {
 		if err := db.Create(&platform.SchemaMigration{Key: upgradeV003Key, AppliedAt: time.Now().UTC()}).Error; err != nil {
 			return fmt.Errorf("record %s: %w", upgradeV003Key, err)
 		}
+	}
+	if !v004Applied {
+		if err := applyV004(db); err != nil {
+			return fmt.Errorf("apply %s: %w", upgradeV004Key, err)
+		}
+		if err := db.Create(&platform.SchemaMigration{Key: upgradeV004Key, AppliedAt: time.Now().UTC()}).Error; err != nil {
+			return fmt.Errorf("record %s: %w", upgradeV004Key, err)
+		}
+	}
+	return nil
+}
+
+// Completed jobs already have durable inbox rows. This idempotent backfill is
+// safe to retry after an interrupted DDL migration.
+func applyV004(db *gorm.DB) error {
+	script := sqliteV004
+	if db.Dialector.Name() == "mysql" {
+		script = mysqlV004
+	}
+	statements := splitSQL(script)
+	if len(statements) != 2 {
+		return errors.New("invalid v004 SQL snapshot")
+	}
+	if !db.Migrator().HasColumn(&platform.Video{}, "FeedPull") {
+		if err := db.Exec(statements[0]).Error; err != nil {
+			return err
+		}
+	}
+	if err := db.Exec("UPDATE videos SET feed_pull = ? WHERE id IN (SELECT video_id FROM feed_fanout_jobs WHERE done_at IS NOT NULL)", false).Error; err != nil {
+		return err
+	}
+	var columns []string
+	var err error
+	if db.Dialector.Name() == "mysql" {
+		columns, err = mysqlIndexColumns(db, "videos", "idx_video_feed_pull")
+	} else {
+		columns, err = sqliteIndexColumns(db, "idx_video_feed_pull")
+	}
+	if err != nil {
+		return err
+	}
+	if len(columns) == 0 {
+		if err := db.Exec(statements[1]).Error; err != nil {
+			return err
+		}
+		if db.Dialector.Name() == "mysql" {
+			columns, err = mysqlIndexColumns(db, "videos", "idx_video_feed_pull")
+		} else {
+			columns, err = sqliteIndexColumns(db, "idx_video_feed_pull")
+		}
+		if err != nil {
+			return err
+		}
+	}
+	if !slices.Equal(columns, []string{"status", "feed_pull", "created_at", "id"}) {
+		return fmt.Errorf("v004 index idx_video_feed_pull columns differ: %v", columns)
 	}
 	return nil
 }

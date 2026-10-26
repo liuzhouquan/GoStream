@@ -121,8 +121,8 @@ def restore_mysql_snapshot(args, root):
                 "sh", restored_database,
             ], stdin=dump, check=True)
         markers = mysql_query(args.mysql_container, restored_database,
-                              "SELECT COUNT(*) FROM schema_migrations WHERE `key` IN ('schema_v001', 'schema_v002');\n")
-        if markers != "2":
+                              "SELECT COUNT(*) FROM schema_migrations WHERE `key` IN ('schema_v001', 'schema_v002', 'schema_v003', 'schema_v004');\n")
+        if markers != "4":
             raise RuntimeError(f"restored migration markers mismatch: {markers}")
         dump_bytes = dump_path.read_bytes()
         return (match.group(1) + restored_database + match.group(3), restored_database,

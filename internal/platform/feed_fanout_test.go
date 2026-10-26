@@ -57,7 +57,7 @@ func TestHybridFollowingPublicationAndRelationshipChanges(t *testing.T) {
 	highAuthor, highToken := registerTestUser(t, h, "hybrid_high")
 	viewer, viewerToken := registerTestUser(t, h, "hybrid_viewer")
 	_, extraToken := registerTestUser(t, h, "hybrid_extra")
-	_, lateToken := registerTestUser(t, h, "hybrid_late")
+	lateID, lateToken := registerTestUser(t, h, "hybrid_late")
 	old := Video{AuthorID: lowAuthor, Title: "old", MediaURL: "/media/hybrid-old.mp4", Status: "published", CreatedAt: time.Now().UTC().Add(-time.Hour)}
 	if err := db.Create(&old).Error; err != nil {
 		t.Fatal(err)
@@ -113,12 +113,21 @@ func TestHybridFollowingPublicationAndRelationshipChanges(t *testing.T) {
 	if err := db.First(&job, job.ID).Error; err != nil || job.DoneAt == nil {
 		t.Fatalf("fanout did not complete: %+v err=%v", job, err)
 	}
+	var completedVideo Video
+	if err := db.First(&completedVideo, low.ID).Error; err != nil || completedVideo.FeedPull {
+		t.Fatalf("completed fanout must leave pull index: %+v err=%v", completedVideo, err)
+	}
 	after := collectFollowingIDs(t, h, viewerToken)
 	if !reflect.DeepEqual(before, after) {
 		t.Fatalf("feed changed across fanout: before=%v after=%v", before, after)
 	}
 	if res := request(t, h, http.MethodPut, fmt.Sprintf("/api/users/me/following/%d", lowAuthor), lateToken, nil); res.Code != http.StatusOK {
 		t.Fatalf("late follow: %d %s", res.Code, res.Body.String())
+	}
+	// A follower added during a batch may be in both the inbox and the
+	// late-follow pull branch. UNION must return that video once.
+	if err := db.Create(&FeedInbox{UserID: lateID, VideoID: low.ID, CreatedAt: low.CreatedAt}).Error; err != nil {
+		t.Fatal(err)
 	}
 	if got := collectFollowingIDs(t, h, lateToken); !reflect.DeepEqual(got, []uint{low.ID, old.ID}) {
 		t.Fatalf("late follower lost older published videos: %v", got)

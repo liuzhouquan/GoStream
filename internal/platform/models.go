@@ -14,14 +14,15 @@ type User struct {
 }
 
 type Video struct {
-	ID              uint      `json:"id" gorm:"primaryKey"`
+	ID              uint      `json:"id" gorm:"primaryKey;index:idx_video_feed_pull,priority:4,sort:desc"`
 	AuthorID        uint      `json:"author_id" gorm:"index:idx_video_author,priority:1;not null"`
 	Author          User      `json:"author,omitempty" gorm:"foreignKey:AuthorID"`
 	Title           string    `json:"title" gorm:"size:120;not null"`
 	Description     string    `json:"description" gorm:"size:2000"`
 	MediaURL        string    `json:"media_url" gorm:"size:512;index;not null"`
 	CoverURL        string    `json:"cover_url" gorm:"size:512;index"`
-	Status          string    `json:"status" gorm:"size:16;index:idx_video_feed,priority:1;not null;default:published"`
+	Status          string    `json:"status" gorm:"size:16;index:idx_video_feed,priority:1;index:idx_video_feed_pull,priority:1;not null;default:published"`
+	FeedPull        bool      `json:"-" gorm:"index:idx_video_feed_pull,priority:2;not null;default:true"`
 	LikeCount       int64     `json:"like_count"`
 	CommentCount    int64     `json:"comment_count"`
 	FavoriteCount   int64     `json:"favorite_count"`
@@ -30,7 +31,7 @@ type Video struct {
 	Width           int       `json:"width" gorm:"not null;default:0"`
 	Height          int       `json:"height" gorm:"not null;default:0"`
 	ProcessingError string    `json:"processing_error,omitempty" gorm:"-"`
-	CreatedAt       time.Time `json:"created_at" gorm:"index:idx_video_feed,priority:2,sort:desc;index:idx_video_author,priority:2,sort:desc"`
+	CreatedAt       time.Time `json:"created_at" gorm:"index:idx_video_feed,priority:2,sort:desc;index:idx_video_author,priority:2,sort:desc;index:idx_video_feed_pull,priority:3,sort:desc"`
 }
 
 // VideoProcessJob survives restarts and lets another instance reclaim an expired lease.

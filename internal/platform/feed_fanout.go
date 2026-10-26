@@ -91,6 +91,11 @@ func (s *Server) processFeedFanoutBatch(ctx context.Context, job FeedFanoutJob) 
 		updates := map[string]any{"lease_until": nil, "last_error": ""}
 		if len(followers) == 0 {
 			updates["done_at"] = time.Now().UTC()
+			// The inbox and this marker become visible together. Late follows
+			// still read older videos through the separate pull branch.
+			if err := tx.Model(&Video{}).Where("id = ?", job.VideoID).Update("feed_pull", false).Error; err != nil {
+				return err
+			}
 			completed = true
 		} else {
 			var video Video
