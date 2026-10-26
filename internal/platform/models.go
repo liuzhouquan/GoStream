@@ -87,6 +87,28 @@ type Follow struct {
 	CreatedAt  time.Time `gorm:"index:idx_following,priority:2,sort:desc"`
 }
 
+// A completed job means the inbox has covered every follower present during
+// its scan. New follows still read older videos from the author outbox.
+type FeedFanoutJob struct {
+	ID             uint       `gorm:"primaryKey;index:idx_feed_fanout_dispatch,priority:4"`
+	VideoID        uint       `gorm:"uniqueIndex;not null"`
+	AuthorID       uint       `gorm:"not null"`
+	LastFollowerID uint       `gorm:"not null;default:0"`
+	Attempts       int        `gorm:"not null;default:0"`
+	AvailableAt    time.Time  `gorm:"not null;index:idx_feed_fanout_dispatch,priority:2"`
+	LeaseUntil     *time.Time `gorm:"index:idx_feed_fanout_dispatch,priority:3"`
+	DoneAt         *time.Time `gorm:"index:idx_feed_fanout_dispatch,priority:1"`
+	LastError      string     `gorm:"size:500"`
+	CreatedAt      time.Time
+}
+
+type FeedInbox struct {
+	ID        uint      `gorm:"primaryKey"`
+	UserID    uint      `gorm:"uniqueIndex:ux_feed_inbox,priority:1;index:idx_feed_inbox_user,priority:1;not null"`
+	VideoID   uint      `gorm:"uniqueIndex:ux_feed_inbox,priority:2;index:idx_feed_inbox_user,priority:3,sort:desc;not null"`
+	CreatedAt time.Time `gorm:"index:idx_feed_inbox_user,priority:2,sort:desc;not null"`
+}
+
 type VideoAction struct {
 	ID        uint   `gorm:"primaryKey;index:idx_action_recent,priority:2,sort:desc"`
 	UserID    uint   `gorm:"uniqueIndex:ux_action,priority:1;index:idx_action_recent,priority:1;not null"`

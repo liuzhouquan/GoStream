@@ -93,7 +93,11 @@ func TestVideoProcessingStateRetriesAndPrivacy(t *testing.T) {
 func TestVideoProcessingCompletionPublishesAtomically(t *testing.T) {
 	s, h, db := testServer(t)
 	s.UseFFmpeg("ffmpeg-test-only")
-	_, token := registerTestUser(t, h, "processor_success")
+	authorID, token := registerTestUser(t, h, "processor_success")
+	_, viewerToken := registerTestUser(t, h, "processor_viewer")
+	if res := request(t, h, http.MethodPut, fmt.Sprintf("/api/users/me/following/%d", authorID), viewerToken, nil); res.Code != http.StatusOK {
+		t.Fatalf("follow processing author: %d %s", res.Code, res.Body.String())
+	}
 	upload := uploadTestMedia(t, h, token, "clip.mp4", sampleMP4)
 	var asset struct {
 		URL string `json:"url"`
@@ -110,6 +114,10 @@ func TestVideoProcessingCompletionPublishesAtomically(t *testing.T) {
 	if err != nil || job == nil {
 		t.Fatalf("claim: %+v %v", job, err)
 	}
+	var fanoutCount int64
+	if err := db.Model(&FeedFanoutJob{}).Where("video_id = ?", video.ID).Count(&fanoutCount).Error; err != nil || fanoutCount != 0 {
+		t.Fatalf("processing video queued fanout early: count=%d err=%v", fanoutCount, err)
+	}
 	published, coverUsed, err := s.completeVideoJob(*job, "/media/processed-test.mp4", "/media/cover-test.jpg", 200, 20, videoMetadata{DurationMS: 1000, Width: 160, Height: 90})
 	if err != nil || !published || !coverUsed {
 		t.Fatalf("complete: published=%v cover=%v err=%v", published, coverUsed, err)
@@ -119,6 +127,12 @@ func TestVideoProcessingCompletionPublishesAtomically(t *testing.T) {
 	}
 	if got := request(t, h, http.MethodGet, "/api/feed", "", nil); !jsonContainsVideo(got.Body.Bytes(), video.ID) {
 		t.Fatal("processed video missing from public feed")
+	}
+	if err := db.Model(&FeedFanoutJob{}).Where("video_id = ?", video.ID).Count(&fanoutCount).Error; err != nil || fanoutCount != 1 {
+		t.Fatalf("published video has no fanout job: count=%d err=%v", fanoutCount, err)
+	}
+	if got := request(t, h, http.MethodGet, "/api/feed?scene=following", viewerToken, nil); !jsonContainsVideo(got.Body.Bytes(), video.ID) {
+		t.Fatal("unfinished fanout hid processed video from follower")
 	}
 	var count int64
 	if err := db.Model(&MediaAsset{}).Where("url IN ?", []string{video.MediaURL, video.CoverURL}).Count(&count).Error; err != nil || count != 2 {

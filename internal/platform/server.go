@@ -16,21 +16,22 @@ import (
 )
 
 type Server struct {
-	DB          *gorm.DB
-	Secret      []byte
-	MediaDir    string
-	objectMedia *objectMediaStore
-	Hub         *Hub
-	metrics     *serverMetrics
-	cache       *redisFeedCache
-	realtime    *realtimeBridge
-	ffmpegBin   string
-	ffprobeBin  string
-	upgrader    websocket.Upgrader
+	DB                 *gorm.DB
+	Secret             []byte
+	MediaDir           string
+	objectMedia        *objectMediaStore
+	Hub                *Hub
+	metrics            *serverMetrics
+	cache              *redisFeedCache
+	realtime           *realtimeBridge
+	ffmpegBin          string
+	ffprobeBin         string
+	fanoutMaxFollowers int
+	upgrader           websocket.Upgrader
 }
 
 func NewServer(db *gorm.DB, secret, mediaDir string) *Server {
-	return &Server{DB: db, Secret: []byte(secret), MediaDir: mediaDir, Hub: NewHub(), metrics: newServerMetrics(), upgrader: websocket.Upgrader{
+	return &Server{DB: db, Secret: []byte(secret), MediaDir: mediaDir, Hub: NewHub(), metrics: newServerMetrics(), fanoutMaxFollowers: 1000, upgrader: websocket.Upgrader{
 		ReadBufferSize: 4096, WriteBufferSize: 4096,
 		Subprotocols: []string{"gostream"},
 		CheckOrigin: func(r *http.Request) bool {

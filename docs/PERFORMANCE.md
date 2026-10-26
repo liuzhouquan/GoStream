@@ -2,6 +2,8 @@
 
 ## Functional verification
 
+The 2026-10-26 hybrid following Feed change has correctness evidence from SQLite and a disposable MySQL 8.4 database, including the same-timestamp merge. There is no measured fanout P95 gain, write-amplification result, or 60-second drain result yet. Earlier following-Feed numbers below describe the SQL join plus Redis first-page cache and are not a hybrid before/after comparison. The A04 dataset and repeated cold/warm, ordinary/high-follower, and mixed read/write runs remain to be performed.
+
 The offline media recovery drill on 2026-10-24 used Go 1.27.2, isolated MySQL 8.4 and source-built MinIO. It copied one 24-byte signature-only media fixture and one 4 MiB resumable chunk, then restored a 22,367-byte MySQL dump and both objects into a new database and bucket; the object-mode API returned the original URL bytes and Feed row and uploaded the remaining 24-byte chunk before completing the old upload session. Each file was checked against the manifest's SHA-256, and the SQL migration markers and destination bytes were checked. This is a correctness drill with a small fixture, not a throughput, RTO or RPO measurement. A larger corpus and timed recovery remain to be run before making capacity claims. The command and exact result are in [`PROGRESS.md`](../PROGRESS.md); the operational sequence is in [`MEDIA_OPERATIONS.md`](MEDIA_OPERATIONS.md).
 
 Run the local suite with the Go version in `go.mod`:
@@ -63,7 +65,7 @@ A k6 script is also available for a later container/MySQL run:
 BASE_URL=http://127.0.0.1:8080 SCENE=timeline VUS=10 DURATION=30s k6 run tests/load/feed.js
 ```
 
-Repeat with `SCENE=following`, `recommend`, and `hot` after preparing suitable users and videos. Record CPU, memory, SQLite/MySQL settings, data size, host, Go version, k6 version, request rate, P50/P95/P99, and error rate. Use the output to determine whether query indexes, SQL plans, connection pools, Redis caching, or hybrid fanout are warranted.
+Repeat with `SCENE=following`, `recommend`, and `hot` after preparing suitable users and videos. Record CPU, memory, SQLite/MySQL settings, data size, host, Go version, k6 version, request rate, P50/P95/P99, and error rate. Use the output to determine whether query indexes, SQL plans, connection pools, Redis caching, or the current hybrid fanout should be redesigned.
 
 ## Local HTTP results
 

@@ -34,9 +34,10 @@ The normal and object overlays both bind API port 8080; stop the normal stack be
 
 - Go 1.27.2, Gin, GORM, SQLite for zero-service local development
 - MySQL and Redis Compose profile, verified with real end-to-end requests
-- Frozen SQLite/MySQL `schema_v001` SQL and an explicit v002 outbox index upgrade, with MySQL startup locking and existing-database adoption; an isolated MySQL backup/restore and v002 rollback drill is in `tests/integration/mysql_recovery.sh`
+- Frozen SQLite/MySQL `schema_v001` SQL, v002 outbox index upgrade, and v003 durable Feed fanout/inbox upgrade, with MySQL startup locking and existing-database adoption; an isolated MySQL backup/restore and v002 rollback drill is in `tests/integration/mysql_recovery.sh`
 - CI workflow for exact Go version, tests, race checks, vet, build, web syntax, and Compose validation
 - Optional Redis cache for anonymous timeline/recommend/hot pages and each viewer's following first page; database fallback and bounded staleness
+- Following Feed push/pull index with durable 128-follower batches for ordinary authors and direct reads for higher-follower authors; configure `FEED_FANOUT_MAX_FOLLOWERS` (default `1000`, `0` for SQL-only comparison). [Design and current limits](docs/FEED_HYBRID.md)
 - Explainable recommendation ranking using interactions, freshness, followed authors, and recently interacted authors
 - JWT access tokens and bcrypt password hashing
 - Local or MinIO media storage, single-file and 4 MiB resumable chunk uploads, media ownership checks, file integrity checks, and an offline media import/backup/restore tool

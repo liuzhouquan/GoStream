@@ -63,6 +63,9 @@ func TestFrozenV001SQLiteMatchesCurrentModels(t *testing.T) {
 	}
 	left := sqliteSchemaDDL(t, frozen)
 	right := sqliteSchemaDDL(t, models)
+	for _, name := range []string{"feed_fanout_jobs", "feed_inboxes", "idx_feed_fanout_jobs_video_id", "idx_feed_fanout_dispatch", "ux_feed_inbox", "idx_feed_inbox_user"} {
+		delete(right, name)
+	}
 	if !reflect.DeepEqual(left, right) {
 		for name, ddl := range right {
 			if left[name] != ddl {
@@ -135,7 +138,7 @@ func TestApplyAdoptsExistingAutoMigrateDatabase(t *testing.T) {
 	if err := db.Model(&platform.User{}).Where("id = ?", user.ID).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("existing user: count=%d err=%v", count, err)
 	}
-	if err := db.Model(&platform.SchemaMigration{}).Count(&count).Error; err != nil || count != 3 {
+	if err := db.Model(&platform.SchemaMigration{}).Count(&count).Error; err != nil || count != 4 {
 		t.Fatalf("migration markers: count=%d err=%v", count, err)
 	}
 }
@@ -161,7 +164,7 @@ func TestApplyRejectsNewerSchemaAfterBaseline(t *testing.T) {
 	if err := Apply(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&platform.SchemaMigration{Key: "schema_v003", AppliedAt: time.Now().UTC()}).Error; err != nil {
+	if err := db.Create(&platform.SchemaMigration{Key: "schema_v004", AppliedAt: time.Now().UTC()}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := Apply(context.Background(), db); err == nil || !strings.Contains(err.Error(), "unsupported schema version") {
@@ -224,6 +227,9 @@ func TestApplyRejectsWrongV002Index(t *testing.T) {
 	if err := db.Exec("CREATE INDEX idx_outbox_dispatch ON outbox_events(id)").Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Where("`key` = ?", upgradeV003Key).Delete(&platform.SchemaMigration{}).Error; err != nil {
+		t.Fatal(err)
+	}
 	if err := db.Where("`key` = ?", upgradeV002Key).Delete(&platform.SchemaMigration{}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -249,6 +255,66 @@ func TestApplyRejectsV002WithoutV001(t *testing.T) {
 	}
 	if db.Migrator().HasTable(&platform.User{}) {
 		t.Fatal("invalid marker order changed the user schema")
+	}
+}
+
+func TestApplyRetriesInterruptedV003WithoutLosingRows(t *testing.T) {
+	db := migrationTestDB(t)
+	if err := Apply(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	user := platform.User{Username: "before-v003-retry", Nickname: "Existing", PasswordHash: "test"}
+	if err := db.Create(&user).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("`key` = ?", upgradeV003Key).Delete(&platform.SchemaMigration{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("DROP INDEX idx_feed_inbox_user").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("CREATE TABLE idx_feed_inbox_user (id integer)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(context.Background(), db); err == nil {
+		t.Fatal("expected blocked v003 index to fail")
+	}
+	var count int64
+	if err := db.Model(&platform.SchemaMigration{}).Where("`key` = ?", upgradeV003Key).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("failed v003 was marked: count=%d err=%v", count, err)
+	}
+	if err := db.Exec("DROP TABLE idx_feed_inbox_user").Error; err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := Apply(context.Background(), db); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.Model(&platform.User{}).Where("id = ?", user.ID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("v003 retry lost user: count=%d err=%v", count, err)
+	}
+	if err := db.Model(&platform.SchemaMigration{}).Where("`key` = ?", upgradeV003Key).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("v003 marker: count=%d err=%v", count, err)
+	}
+}
+
+func TestApplyRejectsNonUniqueV003InboxIndex(t *testing.T) {
+	db := migrationTestDB(t)
+	if err := Apply(context.Background(), db); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("`key` = ?", upgradeV003Key).Delete(&platform.SchemaMigration{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("DROP INDEX ux_feed_inbox").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("CREATE INDEX ux_feed_inbox ON feed_inboxes(user_id, video_id)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(context.Background(), db); err == nil || !strings.Contains(err.Error(), "must be unique") {
+		t.Fatalf("expected unique index rejection, got %v", err)
 	}
 }
 
@@ -327,6 +393,9 @@ func TestApplyMySQLIntegration(t *testing.T) {
 	if err := db.Model(&platform.SchemaMigration{}).Where(&platform.SchemaMigration{Key: upgradeV002Key}).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("v002 marker after concurrent starts: count=%d err=%v", count, err)
 	}
+	if err := db.Model(&platform.SchemaMigration{}).Where(&platform.SchemaMigration{Key: upgradeV003Key}).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("v003 marker after concurrent starts: count=%d err=%v", count, err)
+	}
 	if !db.Migrator().HasIndex(&platform.OutboxEvent{}, "idx_outbox_dispatch") {
 		t.Fatal("v002 did not create the outbox index")
 	}
@@ -370,13 +439,13 @@ func TestApplyMySQLLegacyIntegration(t *testing.T) {
 	if err := db.Model(&platform.User{}).Where("id = ?", user.ID).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("legacy MySQL user after migration: count=%d err=%v", count, err)
 	}
-	if err := db.Model(&platform.SchemaMigration{}).Count(&count).Error; err != nil || count != 3 {
+	if err := db.Model(&platform.SchemaMigration{}).Count(&count).Error; err != nil || count != 4 {
 		t.Fatalf("legacy MySQL markers: count=%d err=%v", count, err)
 	}
 	if err := Apply(context.Background(), db); err != nil {
 		t.Fatalf("repeat legacy migration: %v", err)
 	}
-	if err := db.Model(&platform.SchemaMigration{}).Count(&count).Error; err != nil || count != 3 {
+	if err := db.Model(&platform.SchemaMigration{}).Count(&count).Error; err != nil || count != 4 {
 		t.Fatalf("legacy MySQL markers after repeat: count=%d err=%v", count, err)
 	}
 }
@@ -397,6 +466,12 @@ func TestMySQLV002UpgradeIntegration(t *testing.T) {
 		t.Fatalf("requires a prepared v001 database: count=%d err=%v", count, err)
 	}
 	if err := db.Migrator().DropIndex(&platform.OutboxEvent{}, "idx_outbox_dispatch"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Where("`key` = ?", upgradeV003Key).Delete(&platform.SchemaMigration{}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Migrator().DropTable(&platform.FeedInbox{}, &platform.FeedFanoutJob{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Where("`key` = ?", upgradeV002Key).Delete(&platform.SchemaMigration{}).Error; err != nil {

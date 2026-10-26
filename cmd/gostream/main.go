@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -64,6 +65,11 @@ func main() {
 	}
 	defer sqlDB.Close()
 	server := platform.NewServer(db, secret, mediaDir)
+	fanoutMaxFollowers, err := strconv.Atoi(env("FEED_FANOUT_MAX_FOLLOWERS", "1000"))
+	if err != nil || fanoutMaxFollowers < 0 || fanoutMaxFollowers > 100000 {
+		log.Fatal("FEED_FANOUT_MAX_FOLLOWERS must be an integer from 0 to 100000")
+	}
+	server.UseFeedFanout(fanoutMaxFollowers)
 	switch mediaStore := env("MEDIA_STORE", "local"); mediaStore {
 	case "local":
 	case "minio":
@@ -128,6 +134,7 @@ func main() {
 	go server.RunMessageDeviceCleanup(ctx)
 	go server.RunMediaReconciliation(ctx)
 	go server.RunVideoProcessing(ctx)
+	go server.RunFeedFanout(ctx)
 	go server.RunRealtimeBridge(ctx)
 	select {
 	case err = <-serveErr:

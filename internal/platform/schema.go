@@ -11,5 +11,6 @@ func MigrateSchema(db *gorm.DB) error {
 		&ChatMessage{}, &MessageDeviceAck{}, &MessageDevice{}, &ChatGroup{},
 		&GroupMember{}, &GroupMessage{}, &GroupRead{}, &GroupDeviceRead{},
 		&OutboxEvent{}, &SchemaMigration{},
+		&FeedFanoutJob{}, &FeedInbox{},
 	)
 }

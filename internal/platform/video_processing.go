@@ -298,6 +298,9 @@ func (s *Server) completeVideoJob(job VideoProcessJob, videoURL, coverURL string
 		if updated.RowsAffected != 1 {
 			return errors.New("video source changed during processing")
 		}
+		if err := s.enqueueFeedFanout(tx, video); err != nil {
+			return err
+		}
 		published = true
 		return nil
 	})

@@ -16,6 +16,15 @@ type feedCursor struct {
 	Score   int64  `json:"s"`
 	Anchor  int64  `json:"a,omitempty"`
 	Scene   string `json:"v,omitempty"`
+	Zone    int    `json:"z,omitempty"`
+}
+
+func (c feedCursor) createdTime() time.Time {
+	stamp := time.Unix(0, c.Created).UTC()
+	if c.Zone != 0 {
+		return stamp.In(time.FixedZone("", c.Zone))
+	}
+	return stamp
 }
 
 type feedItemResponse struct {
@@ -103,6 +112,10 @@ func (s *Server) feed(c *gin.Context) {
 		respondError(c, 400, "cursor belongs to another feed scene")
 		return
 	}
+	if cur.Zone < -14*3600 || cur.Zone > 14*3600 {
+		respondError(c, 400, "invalid cursor time zone")
+		return
+	}
 	if scene == "recommend" && cur.ID > 0 {
 		anchor := time.Unix(0, cur.Anchor).UTC()
 		if cur.Scene != "recommend" || cur.Anchor <= 0 || anchor.Before(time.Now().UTC().Add(-24*time.Hour)) || anchor.After(time.Now().UTC().Add(time.Minute)) {
@@ -131,8 +144,9 @@ func (s *Server) feed(c *gin.Context) {
 		}
 	}
 	q := s.DB.Model(&Video{}).Preload("Author").Where("videos.status = ?", "published")
-	cursorTime := time.Unix(0, cur.Created).UTC()
+	cursorTime := cur.createdTime()
 	var recommendation *recommendRanking
+	var items []Video
 	switch scene {
 	case "timeline":
 		if cur.ID > 0 {
@@ -140,11 +154,15 @@ func (s *Server) feed(c *gin.Context) {
 		}
 		q = q.Order("videos.created_at DESC").Order("videos.id DESC")
 	case "following":
-		q = q.Joins("JOIN follows ON follows.followee_id = videos.author_id AND follows.follower_id = ?", uid(c))
-		if cur.ID > 0 {
-			q = q.Where("videos.created_at < ? OR (videos.created_at = ? AND videos.id < ?)", cursorTime, cursorTime, cur.ID)
+		if s.fanoutMaxFollowers > 0 {
+			items, err = s.followingVideos(c.Request.Context(), uid(c), cur, limit)
+		} else {
+			q = q.Joins("JOIN follows ON follows.followee_id = videos.author_id AND follows.follower_id = ?", uid(c))
+			if cur.ID > 0 {
+				q = q.Where("videos.created_at < ? OR (videos.created_at = ? AND videos.id < ?)", cursorTime, cursorTime, cur.ID)
+			}
+			q = q.Order("videos.created_at DESC").Order("videos.id DESC")
 		}
-		q = q.Order("videos.created_at DESC").Order("videos.id DESC")
 	case "recommend":
 		anchor := time.Now().UTC()
 		if cur.Anchor > 0 {
@@ -165,8 +183,10 @@ func (s *Server) feed(c *gin.Context) {
 		respondError(c, 400, "scene must be timeline, following, recommend, or hot")
 		return
 	}
-	var items []Video
-	if q.Limit(limit+1).Find(&items).Error != nil {
+	if err == nil && !(scene == "following" && s.fanoutMaxFollowers > 0) {
+		err = q.Limit(limit + 1).Find(&items).Error
+	}
+	if err != nil {
 		respondError(c, 500, "could not load feed")
 		return
 	}
@@ -192,7 +212,8 @@ func (s *Server) feed(c *gin.Context) {
 			}
 			anchor = recommendation.anchor.UnixNano()
 		}
-		next = encodeCursor(feedCursor{Created: last.CreatedAt.UnixNano(), ID: last.ID, Score: score, Anchor: anchor, Scene: scene})
+		_, zone := last.CreatedAt.Zone()
+		next = encodeCursor(feedCursor{Created: last.CreatedAt.UnixNano(), ID: last.ID, Score: score, Anchor: anchor, Scene: scene, Zone: zone})
 	}
 	response := gin.H{"scene": scene, "items": entries, "next_cursor": next, "has_more": more}
 	if cacheVersion != "" {

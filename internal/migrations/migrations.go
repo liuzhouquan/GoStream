@@ -18,6 +18,7 @@ import (
 
 const baselineKey = "schema_v001"
 const upgradeV002Key = "schema_v002"
+const upgradeV003Key = "schema_v003"
 const mysqlLockName = "gostream_schema_migrations"
 
 // These are immutable snapshots of the schema before the first explicit
@@ -40,6 +41,12 @@ var sqliteV002 string
 
 //go:embed sql/v002_mysql.sql
 var mysqlV002 string
+
+//go:embed sql/v003_sqlite.sql
+var sqliteV003 string
+
+//go:embed sql/v003_mysql.sql
+var mysqlV003 string
 
 var mysqlIndexStatement = regexp.MustCompile("^CREATE (?:UNIQUE )?INDEX `([^`]+)` ON `([^`]+)` ")
 var sqliteIndexStatement = regexp.MustCompile("^CREATE (?:UNIQUE )?INDEX IF NOT EXISTS `([^`]+)` ON `([^`]+)`\\(")
@@ -69,12 +76,15 @@ func apply(ctx context.Context, db *gorm.DB) error {
 	}
 	baselineApplied := false
 	upgradeApplied := false
+	v003Applied := false
 	for _, record := range records {
 		switch record.Key {
 		case baselineKey:
 			baselineApplied = true
 		case upgradeV002Key:
 			upgradeApplied = true
+		case upgradeV003Key:
+			v003Applied = true
 		default:
 			if strings.HasPrefix(record.Key, "schema_v") {
 				return fmt.Errorf("unsupported schema version %q; start a compatible GoStream binary", record.Key)
@@ -83,6 +93,9 @@ func apply(ctx context.Context, db *gorm.DB) error {
 	}
 	if upgradeApplied && !baselineApplied {
 		return errors.New("schema_v002 is recorded without schema_v001")
+	}
+	if v003Applied && !upgradeApplied {
+		return errors.New("schema_v003 is recorded without schema_v002")
 	}
 	if !baselineApplied {
 		if err := applyV001(db, script); err != nil {
@@ -100,7 +113,101 @@ func apply(ctx context.Context, db *gorm.DB) error {
 			return fmt.Errorf("record %s: %w", upgradeV002Key, err)
 		}
 	}
+	if !v003Applied {
+		if err := applyV003(db); err != nil {
+			return fmt.Errorf("apply %s: %w", upgradeV003Key, err)
+		}
+		if err := db.Create(&platform.SchemaMigration{Key: upgradeV003Key, AppliedAt: time.Now().UTC()}).Error; err != nil {
+			return fmt.Errorf("record %s: %w", upgradeV003Key, err)
+		}
+	}
 	return nil
+}
+
+func applyV003(db *gorm.DB) error {
+	indexes := map[string]struct {
+		table   string
+		columns []string
+		mysql   string
+	}{
+		"idx_feed_fanout_jobs_video_id": {"feed_fanout_jobs", []string{"video_id"}, "CREATE UNIQUE INDEX `idx_feed_fanout_jobs_video_id` ON `feed_fanout_jobs` (`video_id`)"},
+		"idx_feed_fanout_dispatch":      {"feed_fanout_jobs", []string{"done_at", "available_at", "lease_until", "id"}, "CREATE INDEX `idx_feed_fanout_dispatch` ON `feed_fanout_jobs` (`done_at`,`available_at`,`lease_until`,`id`)"},
+		"ux_feed_inbox":                 {"feed_inboxes", []string{"user_id", "video_id"}, "CREATE UNIQUE INDEX `ux_feed_inbox` ON `feed_inboxes` (`user_id`,`video_id`)"},
+		"idx_feed_inbox_user":           {"feed_inboxes", []string{"user_id", "created_at", "video_id"}, "CREATE INDEX `idx_feed_inbox_user` ON `feed_inboxes` (`user_id`,`created_at` DESC,`video_id` DESC)"},
+	}
+	script := sqliteV003
+	if db.Dialector.Name() == "mysql" {
+		script = mysqlV003
+	}
+	for _, statement := range splitSQL(script) {
+		if err := db.Exec(statement).Error; err != nil {
+			return fmt.Errorf("%s: %w", shortStatement(statement), err)
+		}
+	}
+	for table, columns := range map[string][]string{
+		"feed_fanout_jobs": {"id", "video_id", "author_id", "last_follower_id", "attempts", "available_at", "lease_until", "done_at", "last_error", "created_at"},
+		"feed_inboxes":     {"id", "user_id", "video_id", "created_at"},
+	} {
+		for _, column := range columns {
+			if !db.Migrator().HasColumn(table, column) {
+				return fmt.Errorf("v003 required column %s.%s is missing", table, column)
+			}
+		}
+	}
+	for name, spec := range indexes {
+		var columns []string
+		var err error
+		if db.Dialector.Name() == "mysql" {
+			columns, err = mysqlIndexColumns(db, spec.table, name)
+			if err == nil && len(columns) == 0 {
+				if err = db.Exec(spec.mysql).Error; err == nil {
+					columns, err = mysqlIndexColumns(db, spec.table, name)
+				}
+			}
+		} else {
+			columns, err = sqliteIndexColumns(db, name)
+		}
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(columns, spec.columns) {
+			return fmt.Errorf("v003 index %s columns differ: %v", name, columns)
+		}
+		if name == "idx_feed_fanout_jobs_video_id" || name == "ux_feed_inbox" {
+			unique, err := indexUnique(db, spec.table, name)
+			if err != nil {
+				return err
+			}
+			if !unique {
+				return fmt.Errorf("v003 index %s must be unique", name)
+			}
+		}
+	}
+	return nil
+}
+
+func indexUnique(db *gorm.DB, table, name string) (bool, error) {
+	if db.Dialector.Name() == "mysql" {
+		var nonUnique int
+		err := db.Raw("SELECT MIN(non_unique) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = ? AND index_name = ?", table, name).Scan(&nonUnique).Error
+		return nonUnique == 0, err
+	}
+	rows, err := db.Raw("PRAGMA index_list(`" + table + "`)").Rows()
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var seq, unique, partial int
+		var indexName, origin string
+		if err := rows.Scan(&seq, &indexName, &unique, &origin, &partial); err != nil {
+			return false, err
+		}
+		if indexName == name {
+			return unique == 1, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 func applyV002(db *gorm.DB) error {
@@ -149,7 +256,11 @@ func applyV002(db *gorm.DB) error {
 }
 
 func sqliteOutboxIndexColumns(db *gorm.DB) ([]string, error) {
-	rows, err := db.Raw("PRAGMA index_info(`idx_outbox_dispatch`)").Rows()
+	return sqliteIndexColumns(db, "idx_outbox_dispatch")
+}
+
+func sqliteIndexColumns(db *gorm.DB, name string) ([]string, error) {
+	rows, err := db.Raw("PRAGMA index_info(`" + name + "`)").Rows()
 	if err != nil {
 		return nil, err
 	}

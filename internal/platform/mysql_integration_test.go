@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +64,66 @@ func TestMySQLSearchLiteralPaginationIntegration(t *testing.T) {
 	page = readSearchResponse(t, response.Body.Bytes())
 	if len(page.Videos) != 1 || page.Videos[0].ID != wanted.ID || page.HasMoreVideos {
 		t.Fatalf("MySQL literal percent: %+v", page.Videos)
+	}
+}
+
+func TestMySQLHybridFollowingIntegration(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to a migrated disposable MySQL database")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	defer tx.Rollback()
+	s := NewServer(tx, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	s.UseFeedFanout(1)
+	h := s.Router()
+	prefix := fmt.Sprintf("mf%x", time.Now().UnixNano()&0xffffff)
+	lowAuthor, _ := registerTestUser(t, h, prefix+"low")
+	highAuthor, _ := registerTestUser(t, h, prefix+"high")
+	viewer, viewerToken := registerTestUser(t, h, prefix+"viewer")
+	extra, _ := registerTestUser(t, h, prefix+"extra")
+	for _, relation := range []Follow{{FollowerID: viewer, FolloweeID: lowAuthor}, {FollowerID: viewer, FolloweeID: highAuthor}, {FollowerID: extra, FolloweeID: highAuthor}} {
+		if err := tx.Create(&relation).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	stamp := time.Now().UTC().Truncate(time.Millisecond)
+	low := Video{AuthorID: lowAuthor, Title: "low", MediaURL: "/media/mysql-low.mp4", Status: "published", CreatedAt: stamp}
+	high := Video{AuthorID: highAuthor, Title: "high", MediaURL: "/media/mysql-high.mp4", Status: "published", CreatedAt: stamp}
+	for _, video := range []*Video{&low, &high} {
+		if err := tx.Create(video).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := s.enqueueFeedFanout(tx, *video); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []uint{high.ID, low.ID}
+	if got := collectFollowingIDs(t, h, viewerToken); !reflect.DeepEqual(got, want) {
+		t.Fatalf("pending MySQL feed: got=%v want=%v", got, want)
+	}
+	for i := 0; i < 4; i++ {
+		worked, err := s.ProcessFeedFanoutOnce(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !worked {
+			break
+		}
+	}
+	if got := collectFollowingIDs(t, h, viewerToken); !reflect.DeepEqual(got, want) {
+		t.Fatalf("completed MySQL feed: got=%v want=%v", got, want)
+	}
+	var job FeedFanoutJob
+	if err := tx.Where("video_id = ?", low.ID).First(&job).Error; err != nil || job.DoneAt == nil {
+		t.Fatalf("low-follower job not complete: %+v err=%v", job, err)
 	}
 }
 

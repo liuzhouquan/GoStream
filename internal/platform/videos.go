@@ -256,7 +256,7 @@ func (s *Server) createVideo(c *gin.Context) {
 		if status == "processing" {
 			return tx.Create(&VideoProcessJob{VideoID: v.ID, SourceURL: v.MediaURL, AvailableAt: time.Now().UTC()}).Error
 		}
-		return nil
+		return s.enqueueFeedFanout(tx, v)
 	}); err != nil {
 		if errors.Is(err, errMediaNotOwned) {
 			respondError(c, 400, "video or cover must be uploaded by this account")
