@@ -35,15 +35,18 @@ JSON errors use `{ "error": "..." }`; authenticated routes require `Authorizatio
 | POST | `/api/messages/:id/ack` | Recipient message ACK | Implemented |
 | POST | `/api/messages/acks` | Batch recipient message ACK | Implemented |
 | POST/GET | `/api/groups` | Create and list joined groups | Implemented |
-| POST | `/api/groups/:id/members` | Group owner invites a user | Implemented |
+| POST | `/api/groups/:id/members` | Group owner invites a user; 200-member maximum | Implemented |
 | DELETE | `/api/groups/:id/members/:user_id` | Owner removes a member or a member leaves | Implemented |
 | GET | `/api/groups/:id/messages?before_id=...&limit=...` | Group history, newest first | Implemented |
 | GET | `/api/groups/:id/unread` | Count unread group messages | Implemented |
 | POST | `/api/groups/:id/messages/:message_id/ack` | Advance member read cursor | Implemented |
 
-`POST /api/users`, `POST /api/sessions`, and `POST /api/videos/:id/views` allow 10, 30, and 120 requests per peer IP per UTC minute respectively. All attempts count, including invalid credentials and nonexistent videos. Exceeding the budget returns HTTP 429, `{"error":"rate limit exceeded"}`, and `Retry-After` in seconds. The peer is taken from the TCP connection address; `X-Forwarded-For` and `X-Real-IP` are ignored, so a reverse proxy must apply its own trusted client-IP limits and may cause its users to share this backend budget. With `REDIS_ADDR`, API instances share one atomic Redis counter; if Redis is unavailable, each instance enforces its own bounded local counter. A fixed-window boundary can allow two budgets close together. `play_count` counts accepted requests, not unique viewers or watch completions.
 | GET | `/api/ws` | Realtime WebSocket authenticated by subprotocol | Implemented |
 | GET | `/health`, `/ready`, `/metrics` | Liveness, database readiness, Prometheus metrics | Implemented |
+
+`POST /api/users`, `POST /api/sessions`, and `POST /api/videos/:id/views` allow 10, 30, and 120 requests per peer IP per UTC minute respectively. All attempts count, including invalid credentials and nonexistent videos. Exceeding the budget returns HTTP 429, `{"error":"rate limit exceeded"}`, and `Retry-After` in seconds. The peer is taken from the TCP connection address; `X-Forwarded-For` and `X-Real-IP` are ignored, so a reverse proxy must apply its own trusted client-IP limits and may cause its users to share this backend budget. With `REDIS_ADDR`, API instances share one atomic Redis counter; if Redis is unavailable, each instance enforces its own bounded local counter. A fixed-window boundary can allow two budgets close together. `play_count` counts accepted requests, not unique viewers or watch completions.
+
+`POST /api/groups/:id/members` accepts `{"user_id":123}` from the group owner. A new member beyond 200 returns HTTP 409. Repeating an invitation for an existing member returns `{"member":true}` without a second notification, even at capacity.
 
 Registration accepts `username`, `password` (8–72 characters), and optional `nickname`; login accepts `username` and `password`. Both return a user and 24-hour access token. Passwords use bcrypt and tokens use HS256 with `JWT_SECRET`.
 

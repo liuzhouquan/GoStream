@@ -271,6 +271,163 @@ func TestMySQLFeedFanoutLeaseTakeoverIntegration(t *testing.T) {
 	}
 }
 
+// Separate database handles model two API instances. The fixture is committed
+// because MySQL connections cannot observe another connection's open tx.
+func TestMySQLGroupMemberCapIntegration(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to a migrated disposable MySQL database")
+	}
+	dbA, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbB, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, db := range []*gorm.DB{dbA, dbB} {
+		sqlDB, err := db.DB()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = sqlDB.Close() })
+	}
+	const existingMembers, invitees = 199, 16
+	prefix := fmt.Sprintf("gcap%x", time.Now().UnixNano())
+	users := make([]User, existingMembers+invitees)
+	for i := range users {
+		users[i] = User{Username: fmt.Sprintf("%s_%d", prefix, i), Nickname: "group cap fixture", PasswordHash: "unused"}
+	}
+	var groupID uint
+	t.Cleanup(func() {
+		if err := dbA.Transaction(func(tx *gorm.DB) error {
+			if groupID != 0 {
+				var notices []Notification
+				if err := tx.Where("event_key LIKE ?", fmt.Sprintf("groupinvite:%d:%%", groupID)).Find(&notices).Error; err != nil {
+					return err
+				}
+				if len(notices) > 0 {
+					noticeIDs := make([]uint, len(notices))
+					outboxKeys := make([]string, len(notices))
+					for i, notice := range notices {
+						noticeIDs[i] = notice.ID
+						outboxKeys[i] = fmt.Sprintf("notification:%d", notice.ID)
+					}
+					if err := tx.Where("event_key IN ?", outboxKeys).Delete(&OutboxEvent{}).Error; err != nil {
+						return err
+					}
+					if err := tx.Where("id IN ?", noticeIDs).Delete(&Notification{}).Error; err != nil {
+						return err
+					}
+				}
+				for _, row := range []any{&GroupRead{}, &GroupMember{}} {
+					if err := tx.Where("group_id = ?", groupID).Delete(row).Error; err != nil {
+						return err
+					}
+				}
+				if err := tx.Delete(&ChatGroup{}, groupID).Error; err != nil {
+					return err
+				}
+			}
+			ids := make([]uint, 0, len(users))
+			for _, user := range users {
+				if user.ID != 0 {
+					ids = append(ids, user.ID)
+				}
+			}
+			if len(ids) == 0 {
+				return nil
+			}
+			return tx.Where("id IN ?", ids).Delete(&User{}).Error
+		}); err != nil {
+			t.Errorf("clean group cap fixture: %v", err)
+		}
+	})
+	if err := dbA.CreateInBatches(&users, 100).Error; err != nil {
+		t.Fatal(err)
+	}
+	group := ChatGroup{OwnerID: users[0].ID, Name: "member cap fixture"}
+	if err := dbA.Create(&group).Error; err != nil {
+		t.Fatal(err)
+	}
+	groupID = group.ID
+	members := make([]GroupMember, existingMembers)
+	for i := range members {
+		members[i] = GroupMember{GroupID: group.ID, UserID: users[i].ID, JoinedAt: time.Now().UTC()}
+	}
+	if err := dbA.CreateInBatches(&members, 100).Error; err != nil {
+		t.Fatal(err)
+	}
+	sA := NewServer(dbA, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	sB := NewServer(dbB, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	token, err := sA.issueToken(users[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	routers := []http.Handler{sA.Router(), sB.Router()}
+	path := fmt.Sprintf("/api/groups/%d/members", group.ID)
+	start := make(chan struct{})
+	statuses := make(chan int, invitees)
+	var wg sync.WaitGroup
+	for i := 0; i < invitees; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			body := fmt.Sprintf(`{"user_id":%d}`, users[existingMembers+i].ID)
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
+			req.Header.Set("Authorization", "Bearer "+token)
+			req.Header.Set("Content-Type", "application/json")
+			res := httptest.NewRecorder()
+			routers[i%2].ServeHTTP(res, req)
+			statuses <- res.Code
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(statuses)
+	var admitted, conflicts, unexpected int
+	for status := range statuses {
+		switch status {
+		case http.StatusOK:
+			admitted++
+		case http.StatusConflict:
+			conflicts++
+		default:
+			unexpected++
+		}
+	}
+	var count int64
+	if err := dbA.Model(&GroupMember{}).Where("group_id = ?", group.ID).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if admitted != 1 || conflicts != invitees-1 || unexpected != 0 || count != 200 {
+		t.Fatalf("concurrent invites: admitted=%d conflicts=%d unexpected=%d members=%d", admitted, conflicts, unexpected, count)
+	}
+	duplicate := request(t, routers[0], http.MethodPost, path, token, map[string]uint{"user_id": users[0].ID})
+	if duplicate.Code != http.StatusOK {
+		t.Fatalf("duplicate at full capacity: %d %s", duplicate.Code, duplicate.Body.String())
+	}
+	var notices []Notification
+	if err := dbA.Where("event_key LIKE ?", fmt.Sprintf("groupinvite:%d:%%", group.ID)).Find(&notices).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(notices) != 1 {
+		t.Fatalf("invitation notifications = %d, want 1", len(notices))
+	}
+	var readCount, outboxCount int64
+	if err := dbA.Model(&GroupRead{}).Where("group_id = ?", group.ID).Count(&readCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := dbA.Model(&OutboxEvent{}).Where("event_key = ?", fmt.Sprintf("notification:%d", notices[0].ID)).Count(&outboxCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if readCount != 1 || outboxCount != 1 {
+		t.Fatalf("invitation side effects: reads=%d outbox=%d", readCount, outboxCount)
+	}
+}
+
 func TestMySQLConcurrentVideoActionsIntegration(t *testing.T) {
 	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
 	if dsn == "" {

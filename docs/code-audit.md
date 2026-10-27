@@ -118,3 +118,5 @@
 2026-10-27：P0-01 已通过 PR #1 合并到 `main`，quality、MySQL 和 MinIO CI 均通过。P1 请求资源预算拆成两个小 PR：先给 HTTP 请求体总读取时间设上限，再单独处理公开高成本路由的频率预算；原审计问题和修复顺序不变。`fix/upload-body-timeout` 已加入慢 body、后续完整请求、分片持久化与 WebSocket 心跳回归；P1-02 频率约束仍未实现。
 
 2026-10-27：P1-01 已通过 PR #2 合并到 `main`，三项 CI 均通过。P1-02 已在 `fix/public-route-rate-limits` 分支加入注册、登录和播放计数的每 IP 一分钟预算；Redis 原子计数与有界本机回退、429/`Retry-After`、Prometheus 结果计数和对应测试均已实现。原始审计问题仍保留；此项的最终 CI 和合并状态以 PR 记录为准。
+
+2026-10-27：P1-02 已通过 PR #3 合并到 `main`；quality、Redis、MySQL、MinIO CI 均通过。本机演示 API 更新后，真实 MySQL/Redis 的 30 次无效登录返回 401，第 31 次返回 429 和 `Retry-After`，`/ready` 仍为 200。P1-03 的真实 MySQL 回归测试在原代码上复现了 199 人同时邀请 16 人后达到 208 人；`fix/group-member-cap` 把群行锁、人数复核及插入放入同一事务。隔离 MySQL 8.4 双实例测试连续十次通过，满员重复邀请和通知/游标/outbox 单次写入也已检查；所有 `TestMySQL*` 测试及群测试三次 race 运行通过。Go 全量测试、race、vet、构建及配置检查通过；CI 合并状态待记录。

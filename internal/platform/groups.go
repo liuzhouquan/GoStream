@@ -15,6 +15,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+var errGroupFull = errors.New("group member limit reached")
+
 func groupID(c *gin.Context) (uint, bool) {
 	n, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil || n == 0 {
@@ -98,16 +100,28 @@ func (s *Server) addGroupMember(c *gin.Context) {
 		respondError(c, 404, "user not found")
 		return
 	}
-	var count int64
-	if err := s.DB.Model(&GroupMember{}).Where("group_id = ?", group.ID).Count(&count).Error; err != nil {
-		respondError(c, 500, "could not count group members")
-		return
-	}
-	if count >= 200 {
-		respondError(c, 409, "group has reached its 200-member limit")
-		return
-	}
 	if err := s.DB.Transaction(func(tx *gorm.DB) error {
+		// Every invitation locks the same group row before counting. A later
+		// invitation sees the preceding transaction's committed member.
+		var locked ChatGroup
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&locked, group.ID).Error; err != nil {
+			return err
+		}
+		var count int64
+		if err := tx.Model(&GroupMember{}).Where("group_id = ?", group.ID).Count(&count).Error; err != nil {
+			return err
+		}
+		if count >= 200 {
+			var existing GroupMember
+			result := tx.Select("id").Where("group_id = ? AND user_id = ?", group.ID, in.UserID).Limit(1).Find(&existing)
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected > 0 {
+				return nil
+			}
+			return errGroupFull
+		}
 		var last uint
 		if err := tx.Model(&GroupMessage{}).Where("group_id = ?", group.ID).Select("COALESCE(MAX(id), 0)").Scan(&last).Error; err != nil {
 			return err
@@ -121,6 +135,10 @@ func (s *Server) addGroupMember(c *gin.Context) {
 		}
 		return enqueueNotification(tx, Notification{UserID: in.UserID, EventKey: fmt.Sprintf("groupinvite:%d:%d", group.ID, in.UserID), Kind: "group", ActorID: uid(c), Text: "added you to a group"})
 	}); err != nil {
+		if errors.Is(err, errGroupFull) {
+			respondError(c, 409, "group has reached its 200-member limit")
+			return
+		}
 		respondError(c, 500, "could not add group member")
 		return
 	}
