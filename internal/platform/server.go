@@ -23,6 +23,7 @@ type Server struct {
 	Hub                *Hub
 	metrics            *serverMetrics
 	cache              *redisFeedCache
+	rateLimiter        *rateLimiter
 	realtime           *realtimeBridge
 	ffmpegBin          string
 	ffprobeBin         string
@@ -31,7 +32,7 @@ type Server struct {
 }
 
 func NewServer(db *gorm.DB, secret, mediaDir string) *Server {
-	return &Server{DB: db, Secret: []byte(secret), MediaDir: mediaDir, Hub: NewHub(), metrics: newServerMetrics(), fanoutMaxFollowers: 1000, upgrader: websocket.Upgrader{
+	return &Server{DB: db, Secret: []byte(secret), MediaDir: mediaDir, Hub: NewHub(), metrics: newServerMetrics(), rateLimiter: newRateLimiter(nil), fanoutMaxFollowers: 1000, upgrader: websocket.Upgrader{
 		ReadBufferSize: 4096, WriteBufferSize: 4096,
 		Subprotocols: []string{"gostream"},
 		CheckOrigin: func(r *http.Request) bool {
@@ -73,8 +74,8 @@ func (s *Server) Router() *gin.Engine {
 	})
 	r.GET("/metrics", s.metrics.handler())
 	api := r.Group("/api")
-	api.POST("/users", s.register)
-	api.POST("/sessions", s.login)
+	api.POST("/users", s.limitPublicRoute("register", 10), s.register)
+	api.POST("/sessions", s.limitPublicRoute("login", 30), s.login)
 	api.POST("/uploads", s.auth(), s.upload)
 	api.POST("/uploads/sessions", s.auth(), s.createUploadSession)
 	api.GET("/uploads/sessions/:id", s.auth(), s.getUploadSession)
@@ -102,7 +103,7 @@ func (s *Server) Router() *gin.Engine {
 	api.POST("/videos/:id/comments", s.auth(), s.createComment)
 	api.GET("/videos/:id/comments", s.comments)
 	api.GET("/videos/:id/comments/:comment_id/replies", s.commentReplies)
-	api.POST("/videos/:id/views", s.recordView)
+	api.POST("/videos/:id/views", s.limitPublicRoute("view", 120), s.recordView)
 	api.GET("/notifications", s.auth(), s.notifications)
 	api.GET("/notifications/unread", s.auth(), s.unread)
 	api.PATCH("/notifications/read", s.auth(), s.markNotificationsRead)

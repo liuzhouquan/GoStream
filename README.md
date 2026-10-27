@@ -51,6 +51,7 @@ The normal and object overlays both bind API port 8080; stop the normal stack be
 - Following Feed push/pull index with durable 128-follower batches for ordinary authors and direct reads for higher-follower authors; configure `FEED_FANOUT_MAX_FOLLOWERS` (`0` SQL-only default, `1000` to enable the current hybrid strategy). [Design and measured limits](docs/FEED_HYBRID.md)
 - Explainable recommendation ranking using interactions, freshness, followed authors, and recently interacted authors
 - JWT access tokens and bcrypt password hashing
+- Per-peer registration, login, and view-request budgets with HTTP 429 and `Retry-After`; Redis shares counts across instances and a bounded local counter covers outages. See [API semantics](docs/API.md).
 - Local or MinIO media storage, single-file and 4 MiB resumable chunk uploads, media ownership checks, file integrity checks, and an offline media import/backup/restore tool
 - Durable FFmpeg processing jobs in Compose: source video limits, leased retries, H.264 MP4 output with AAC for audio inputs, generated JPEG cover, and persisted output duration/dimensions
 - Author-visible processing failure reasons and hourly cleanup of old unregistered files and unreferenced assets registered over seven days ago

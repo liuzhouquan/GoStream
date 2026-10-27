@@ -15,6 +15,7 @@ type serverMetrics struct {
 	duration       *prometheus.HistogramVec
 	outbox         *prometheus.CounterVec
 	feedCache      *prometheus.CounterVec
+	rateLimit      *prometheus.CounterVec
 	feedFanout     *prometheus.CounterVec
 	feedFanoutAge  prometheus.Histogram
 	feedFanoutJobs prometheus.Gauge
@@ -38,6 +39,9 @@ func newServerMetrics() *serverMetrics {
 		feedCache: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "gostream_feed_cache_total", Help: "Feed page cache outcomes.",
 		}, []string{"result"}),
+		rateLimit: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "gostream_rate_limit_total", Help: "Public route rate budget outcomes, without client identifiers.",
+		}, []string{"route", "result"}),
 		feedFanout: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "gostream_feed_fanout_batches_total", Help: "Feed fanout batch attempts by result.",
 		}, []string{"result"}),
@@ -55,7 +59,7 @@ func newServerMetrics() *serverMetrics {
 			Name: "gostream_websocket_connections", Help: "Current local WebSocket connections.",
 		}),
 	}
-	m.registry.MustRegister(m.requests, m.duration, m.outbox, m.feedCache, m.feedFanout, m.feedFanoutAge, m.feedFanoutJobs, m.mediaReconcile, m.wsConnections)
+	m.registry.MustRegister(m.requests, m.duration, m.outbox, m.feedCache, m.rateLimit, m.feedFanout, m.feedFanoutAge, m.feedFanoutJobs, m.mediaReconcile, m.wsConnections)
 	m.registry.MustRegister(prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	return m
 }
