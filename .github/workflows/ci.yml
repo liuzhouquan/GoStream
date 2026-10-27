@@ -47,6 +47,8 @@ jobs:
         run: node --check web/app.js
 
       - name: Validate Compose configuration
+        env:
+          JWT_SECRET: ci-compose-configuration-only-secret-123456789
         run: |
           docker compose config --quiet
           docker compose -f docker-compose.yml -f docker-compose.object.yml config --quiet
@@ -132,6 +134,7 @@ jobs:
       GOSTREAM_TEST_MINIO_ENDPOINT: 127.0.0.1:19000
       GOSTREAM_TEST_MINIO_ACCESS_KEY: gostream-ci
       GOSTREAM_TEST_MINIO_SECRET_KEY: gostream-ci-test-only-secret
+      JWT_SECRET: ci-compose-configuration-only-secret-123456789
     steps:
       - name: Check out source
         uses: actions/checkout@v7

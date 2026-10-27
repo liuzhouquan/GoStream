@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	gormsqlite "gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -581,6 +582,35 @@ func TestAuthorizationRequiresBearerScheme(t *testing.T) {
 	h.ServeHTTP(res, req)
 	if res.Code != http.StatusUnauthorized {
 		t.Fatalf("raw token accepted: %d", res.Code)
+	}
+}
+
+func TestAuthenticationRejectsKnownAndExpiredSigningKeys(t *testing.T) {
+	_, h, _ := testServer(t)
+	userID, validToken := registerTestUser(t, h, "signingkeyuser")
+	if res := request(t, h, http.MethodGet, "/api/users/me", validToken, nil); res.Code != http.StatusOK {
+		t.Fatalf("valid token status=%d body=%s", res.Code, res.Body.String())
+	}
+	sign := func(secret string, expires time.Time) string {
+		t.Helper()
+		token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+			"sub": userID, "exp": expires.Unix(),
+		}).SignedString([]byte(secret))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return token
+	}
+	for name, token := range map[string]string{
+		"binary development key":  sign("local-development-secret-change-me-please", time.Now().Add(time.Hour)),
+		"compose development key": sign("local-development-secret-change-before-deploy", time.Now().Add(time.Hour)),
+		"expired real key":        sign("test-signing-secret-at-least-32-bytes", time.Now().Add(-time.Minute)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			if res := request(t, h, http.MethodGet, "/api/users/me", token, nil); res.Code != http.StatusUnauthorized {
+				t.Fatalf("invalid token status=%d body=%s", res.Code, res.Body.String())
+			}
+		})
 	}
 }
 

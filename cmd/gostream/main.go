@@ -3,13 +3,16 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
 	"os/exec"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,10 +25,10 @@ import (
 )
 
 func main() {
-	addr := env("ADDR", ":8080")
-	secret := env("JWT_SECRET", "local-development-secret-change-me-please")
-	if len(secret) < 32 {
-		log.Fatal("JWT_SECRET must contain at least 32 characters")
+	addr := env("ADDR", "127.0.0.1:8080")
+	secret := env("JWT_SECRET", localDevelopmentJWTSecret)
+	if err := validateJWTSecret(addr, secret); err != nil {
+		log.Fatal(err)
 	}
 	mediaDir := env("MEDIA_DIR", "data/media")
 	driver := env("DB_DRIVER", "sqlite")
@@ -146,6 +149,25 @@ func main() {
 			log.Printf("graceful shutdown failed: %v", err)
 		}
 	}
+}
+
+const localDevelopmentJWTSecret = "local-development-secret-change-me-please"
+const oldComposeJWTSecret = "local-development-secret-change-before-deploy"
+
+func validateJWTSecret(addr, secret string) error {
+	if len(secret) < 32 {
+		return errors.New("JWT_SECRET must contain at least 32 characters")
+	}
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("invalid ADDR: %w", err)
+	}
+	ip := net.ParseIP(host)
+	loopback := strings.EqualFold(host, "localhost") || (ip != nil && ip.IsLoopback())
+	if !loopback && (secret == localDevelopmentJWTSecret || secret == oldComposeJWTSecret) {
+		return errors.New("JWT_SECRET must be a unique secret when ADDR is not loopback")
+	}
+	return nil
 }
 
 func env(key, fallback string) string {

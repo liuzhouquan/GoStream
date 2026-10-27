@@ -8,7 +8,7 @@
 
 ## 从现有本地媒体切到 MinIO
 
-以下示例沿用当前 Compose 项目和原 `media_data` 卷。先自行保留 MySQL 与媒体卷的独立备份。操作期间停止 API；MySQL、Redis 继续运行。运行目录为仓库根目录。
+以下示例沿用当前 Compose 项目和原 `media_data` 卷。先自行保留 MySQL 与媒体卷的独立备份，并确认 `.env` 中已有稳定的 `JWT_SECRET`；切换期间不要更换密钥，否则现有登录令牌会失效。操作期间停止 API；MySQL、Redis 继续运行。运行目录为仓库根目录。
 
 ```sh
 docker compose -f docker-compose.yml -f docker-compose.object.yml build api minio
