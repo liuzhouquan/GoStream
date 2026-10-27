@@ -428,6 +428,29 @@ func TestMySQLGroupMemberCapIntegration(t *testing.T) {
 	}
 }
 
+func TestMySQLOutboxLeaseHandoffIntegration(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to a migrated disposable MySQL database")
+	}
+	dbA, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbB, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, db := range []*gorm.DB{dbA, dbB} {
+		sqlDB, err := db.DB()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = sqlDB.Close() })
+	}
+	checkOutboxLeaseHandoff(t, dbA, dbB)
+}
+
 func TestMySQLConcurrentVideoActionsIntegration(t *testing.T) {
 	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
 	if dsn == "" {
