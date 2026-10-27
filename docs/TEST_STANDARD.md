@@ -30,6 +30,8 @@ HTTP 服务对接收请求头和请求体设置十分钟总读取期限。`TestA
 
 群邀请的 200 人上限由 `TestMySQLGroupMemberCapIntegration` 在已迁移的隔离 MySQL 库中验证：预置 199 人，两套独立数据库连接同时处理 16 个邀请，恰好一个成功、15 个返回 409，最终人数为 200；已在群中的用户于满员时重复邀请返回 200，且通知、未读游标和 outbox 各只新增一份。该测试需要 `GOSTREAM_TEST_MYSQL_DSN`，默认无外部依赖的 Go 测试会跳过；CI 的 MySQL 任务提供该环境。
 
+Outbox 租约交接由 `TestOutboxLeaseHandoff`、`TestOutboxExpiredLeaseWithoutTakeover` 及 opt-in 的 `TestMySQLOutboxLeaseHandoffIntegration` 验证。测试在第一 worker 已领取、尚未结束发送时把租约时刻推进到过去，再让第二 worker 成功或死信：旧 worker 的失败不能改写已发布事件，旧 worker 的成功不能给死信补上 `published_at`；没有接管者时过期 worker 也不得确认。真实 MySQL 测试使用两套独立连接和已迁移的隔离库。`attempts` 只保证最终状态更新的租约所有权，不能防止租约交接前已经发生的实时重复投递。
+
 运行环境需要在记录中注明：Git commit、Go 版本、操作系统/CPU/内存、容器镜像版本、MySQL/Redis/RabbitMQ/MinIO 配置、数据库规模、是否启用 FFmpeg，以及具体命令。CI 最终至少执行 Go 测试、vet、构建和前端语法检查；race、真实组件集成测试和浏览器验收可以在单独任务中执行，但发布前必须有对应结果。
 
 当前已有 opt-in MySQL 测试位于 `internal/platform/mysql_integration_test.go`，并依赖 `GOSTREAM_TEST_MYSQL_DSN`。CI 的 MySQL 任务先在全新服务库执行固定 SQL 的 v001–v004 安装，再用第二个隔离库检查已有数据采用、缺失索引恢复、从 v001 升级及重复运行，并比较两个库的列、索引和外键元数据。`tests/integration/mysql_recovery.sh` 另建两个临时库，执行真实 MySQL 逻辑备份、异库恢复、v002 回滚和重新升级，随后执行全部 `TestMySQL*` 平台测试。SQLite 迁移测试对照当前 GORM 模型、模拟建索引失败后重试、验证 v004 已完成任务的回填，并拒绝缺列旧库。现有 `tests/integration/media_smoke.py`、`media_failure_smoke.py`、`minio_smoke.py`、`minio_outage_smoke.py`、`minio_processing_outage_smoke.py` 和 `tests/load` 提供部分测试能力。`TestMinIOMediaAcrossInstances` 使用隔离桶验证双实例文件/分片、Range、完成重试和垃圾回收；`TestMinIOMediaTransfer` 验证最终媒体与有效续传分片导入、清单备份、恢复、重复运行和损坏/冲突拒绝。`TestMinIOMediaValidationAndRecovery` 在真实 MinIO 上用两套 API 路由覆盖匿名/越权、会话超限、分片长度与索引、冲突哈希、同大小损坏对象的重试修复、缺失对象恢复、重复完成及错误整文件哈希；配置 `GOSTREAM_TEST_MINIO_MYSQL_DSN` 时使用已迁移的隔离 MySQL，CI 在联合恢复演练后执行此组合。CI 的真实 MinIO 任务还运行 SQL 与对象联合恢复演练，并在新数据库和新桶完成切换前的上传会话。RabbitMQ、完整混合负载、存储完全中断及更多视频编解码格式与权限负例仍待开发。

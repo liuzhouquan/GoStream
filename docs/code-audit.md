@@ -120,3 +120,5 @@
 2026-10-27：P1-01 已通过 PR #2 合并到 `main`，三项 CI 均通过。P1-02 已在 `fix/public-route-rate-limits` 分支加入注册、登录和播放计数的每 IP 一分钟预算；Redis 原子计数与有界本机回退、429/`Retry-After`、Prometheus 结果计数和对应测试均已实现。原始审计问题仍保留；此项的最终 CI 和合并状态以 PR 记录为准。
 
 2026-10-27：P1-02 已通过 PR #3 合并到 `main`；quality、Redis、MySQL、MinIO CI 均通过。本机演示 API 更新后，真实 MySQL/Redis 的 30 次无效登录返回 401，第 31 次返回 429 和 `Retry-After`，`/ready` 仍为 200。P1-03 的真实 MySQL 回归测试在原代码上复现了 199 人同时邀请 16 人后达到 208 人；`fix/group-member-cap` 把群行锁、人数复核及插入放入同一事务。隔离 MySQL 8.4 双实例测试连续十次通过，满员重复邀请和通知/游标/outbox 单次写入也已检查；所有 `TestMySQL*` 测试及群测试三次 race 运行通过。Go 全量测试、race、vet、构建及配置检查通过；CI 合并状态待记录。
+
+2026-10-27：P1-03 已通过 PR #4 合并到 `main`，quality、Redis、MySQL、MinIO CI 均通过。演示 API 更新后容器健康、`/ready` 与 `/health` 返回 200；紧跟重建的第一次 ready 探测曾返回 502，确认是启动窗口。P1-04 的受控双 worker 测试在旧代码上确认了两种状态覆盖：新 worker 发布后旧 worker 写入失败信息，或新 worker 死信后旧 worker 又标记发布。`fix/outbox-lease-fencing` 用 `attempts` 代数和未过期条件约束最终写入；SQLite 五轮 race、真实 MySQL 8.4 双连接十轮及三轮 race、全部 MySQL 平台测试、Go 全量测试/race/vet/构建及配置检查通过。原始审计问题保留；CI 与合并状态待记录。

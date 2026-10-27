@@ -47,6 +47,10 @@ func notificationPreview(value string) string {
 // ProcessOutboxOnce atomically leases ready rows, then dispatches and acknowledges them.
 // A crashed worker leaves the row eligible for another attempt after the lease expires.
 func (s *Server) ProcessOutboxOnce(ctx context.Context) (int, error) {
+	return s.processOutboxOnce(ctx, s.dispatchOutbox)
+}
+
+func (s *Server) processOutboxOnce(ctx context.Context, dispatch func(context.Context, OutboxEvent) error) (int, error) {
 	now := time.Now().UTC()
 	var candidates []OutboxEvent
 	if err := s.DB.WithContext(ctx).Where("published_at IS NULL AND dead_at IS NULL AND available_at <= ?", now).
@@ -60,7 +64,7 @@ func (s *Server) ProcessOutboxOnce(ctx context.Context) (int, error) {
 		}
 		leaseUntil := time.Now().UTC().Add(30 * time.Second)
 		claim := s.DB.WithContext(ctx).Model(&OutboxEvent{}).
-			Where("id = ? AND published_at IS NULL AND dead_at IS NULL AND available_at <= ?", item.ID, now).
+			Where("id = ? AND attempts = ? AND published_at IS NULL AND dead_at IS NULL AND available_at <= ?", item.ID, item.Attempts, now).
 			Updates(map[string]any{"available_at": leaseUntil, "attempts": gorm.Expr("attempts + 1")})
 		if claim.Error != nil {
 			return processed, claim.Error
@@ -70,25 +74,40 @@ func (s *Server) ProcessOutboxOnce(ctx context.Context) (int, error) {
 		}
 		s.metrics.outbox.WithLabelValues("claimed").Inc()
 		item.Attempts++
-		err := s.dispatchOutbox(ctx, item)
+		err := dispatch(ctx, item)
+		finished := time.Now().UTC()
+		// attempts is a monotonic lease generation. An expired worker cannot
+		// acknowledge a later worker's claim or change a terminal state.
+		final := s.DB.WithContext(ctx).Model(&OutboxEvent{}).
+			Where("id = ? AND attempts = ? AND published_at IS NULL AND dead_at IS NULL AND available_at > ?", item.ID, item.Attempts, finished)
 		if err == nil {
-			s.metrics.outbox.WithLabelValues("dispatched").Inc()
-			finished := time.Now().UTC()
-			if e := s.DB.WithContext(ctx).Model(&OutboxEvent{}).Where("id = ?", item.ID).
-				Updates(map[string]any{"published_at": finished, "last_error": ""}).Error; e != nil {
-				return processed, e
+			result := final.Updates(map[string]any{"published_at": finished, "last_error": ""})
+			if result.Error != nil {
+				return processed, result.Error
+			}
+			if result.RowsAffected == 0 {
+				s.metrics.outbox.WithLabelValues("stale").Inc()
+			} else {
+				s.metrics.outbox.WithLabelValues("dispatched").Inc()
 			}
 		} else {
-			s.metrics.outbox.WithLabelValues("failed").Inc()
-			updates := map[string]any{"last_error": err.Error(), "available_at": time.Now().UTC().Add(retryDelay(item.Attempts))}
+			updates := map[string]any{"last_error": err.Error(), "available_at": finished.Add(retryDelay(item.Attempts))}
 			if item.Attempts >= outboxMaxAttempts {
-				s.metrics.outbox.WithLabelValues("dead").Inc()
-				updates["dead_at"] = time.Now().UTC()
+				updates["dead_at"] = finished
 			}
-			if e := s.DB.WithContext(ctx).Model(&OutboxEvent{}).Where("id = ?", item.ID).Updates(updates).Error; e != nil {
-				return processed, e
+			result := final.Updates(updates)
+			if result.Error != nil {
+				return processed, result.Error
 			}
-			log.Printf("outbox event %d attempt %d failed: %v", item.ID, item.Attempts, err)
+			if result.RowsAffected == 0 {
+				s.metrics.outbox.WithLabelValues("stale").Inc()
+			} else {
+				s.metrics.outbox.WithLabelValues("failed").Inc()
+				if item.Attempts >= outboxMaxAttempts {
+					s.metrics.outbox.WithLabelValues("dead").Inc()
+				}
+				log.Printf("outbox event %d attempt %d failed: %v", item.ID, item.Attempts, err)
+			}
 		}
 		processed++
 	}
