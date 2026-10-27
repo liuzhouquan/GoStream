@@ -29,6 +29,8 @@ docker compose up --build
 
 Keep that value across restarts and API replicas; changing it invalidates existing access tokens. If `.env` already exists, add a unique `JWT_SECRET` there instead of replacing the file. Use `docker compose --profile observability up --build` for Prometheus on port 9090 and Grafana on port 3000. Set `GRAFANA_ADMIN_PASSWORD` for the latter.
 
+The API gives each HTTP request at most 10 minutes to send its headers and body. A slow direct upload can time out; use resumable 4 MiB chunks and retry the affected chunk. WebSocket connections use their own heartbeat deadline after upgrade.
+
 To run the MySQL/Redis/API stack with MinIO, use a fresh Compose project so existing local-media URLs do not point at objects that have not been imported:
 
 ```sh
