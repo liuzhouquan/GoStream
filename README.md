@@ -12,13 +12,22 @@ This repository is under active staged development. See [delivery scope](docs/DE
 - Node.js is not required for the current static web client
 - Docker is optional; Docker Compose runs the API with MySQL and Redis. An `observability` profile adds Prometheus and Grafana. The object-storage overlay adds a private MinIO bucket.
 
-The default local profile stores data in `./data/gostream.db` using SQLite with WAL, a five-second busy timeout, and foreign-key enforcement. It needs no external services. Run:
+The default local profile listens only on `127.0.0.1:8080` and stores data in `./data/gostream.db` using SQLite with WAL, a five-second busy timeout, and foreign-key enforcement. It needs no external services. Run:
 
 ```sh
 go run ./cmd/gostream
 ```
 
-Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECRET`, `MEDIA_DIR`, and optionally `REDIS_ADDR` with environment variables. Set a unique `JWT_SECRET` outside local development. Pending chunks live beside the media directory at `<MEDIA_DIR>.chunks`. Set `FFMPEG_BIN` to an installed FFmpeg executable to enable asynchronous MP4 transcoding and JPEG cover generation; `FFPROBE_BIN` optionally selects the ffprobe executable. With processing enabled, source videos are limited to 10 minutes and 3840×2160 pixels total, with neither side above 4096 pixels. Without FFmpeg, uploaded videos publish without transcoding or probed metadata. Compose installs FFmpeg and enables the worker. The MySQL/Redis Compose profile starts with `docker compose up --build`; use `docker compose --profile observability up --build` for Prometheus on port 9090 and Grafana on port 3000. Set `GRAFANA_ADMIN_PASSWORD` for the latter.
+Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECRET`, `MEDIA_DIR`, and optionally `REDIS_ADDR` with environment variables. The built-in development signing key works only for a direct loopback listener. Set a unique `JWT_SECRET` when using a public listener or a reverse proxy, including a proxy that forwards to loopback. Pending chunks live beside the media directory at `<MEDIA_DIR>.chunks`. Set `FFMPEG_BIN` to an installed FFmpeg executable to enable asynchronous MP4 transcoding and JPEG cover generation; `FFPROBE_BIN` optionally selects the ffprobe executable. With processing enabled, source videos are limited to 10 minutes and 3840×2160 pixels total, with neither side above 4096 pixels. Without FFmpeg, uploaded videos publish without transcoding or probed metadata. Compose installs FFmpeg and enables the worker.
+
+Before starting Compose on a new checkout, generate one persistent secret in the ignored `.env` file:
+
+```sh
+printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)" > .env
+docker compose up --build
+```
+
+Keep that value across restarts and API replicas; changing it invalidates existing access tokens. If `.env` already exists, add a unique `JWT_SECRET` there instead of replacing the file. Use `docker compose --profile observability up --build` for Prometheus on port 9090 and Grafana on port 3000. Set `GRAFANA_ADMIN_PASSWORD` for the latter.
 
 To run the MySQL/Redis/API stack with MinIO, use a fresh Compose project so existing local-media URLs do not point at objects that have not been imported:
 

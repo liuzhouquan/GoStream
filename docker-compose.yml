@@ -33,7 +33,7 @@ services:
       ADDR: :8080
       DB_DRIVER: mysql
       DB_DSN: gostream:gostream-local@tcp(mysql:3306)/gostream?charset=utf8mb4&parseTime=True&loc=Local
-      JWT_SECRET: ${JWT_SECRET:-local-development-secret-change-before-deploy}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a unique random value in .env or the shell}
       MEDIA_DIR: /app/data/media
       REDIS_ADDR: redis:6379
       FFMPEG_BIN: /usr/bin/ffmpeg
