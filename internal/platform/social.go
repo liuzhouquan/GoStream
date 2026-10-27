@@ -84,7 +84,8 @@ func (s *Server) action(kind string, active bool) gin.HandlerFunc {
 			return
 		}
 		var changed bool
-		err := s.DB.Transaction(func(tx *gorm.DB) error {
+		err := transactionWithDeadlockRetry(c.Request.Context(), s.DB, func(tx *gorm.DB) error {
+			changed = false
 			if active {
 				res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&VideoAction{UserID: uid(c), VideoID: v.ID, Kind: kind})
 				if res.Error != nil {
