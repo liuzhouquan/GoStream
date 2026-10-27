@@ -123,7 +123,7 @@ func main() {
 		}()
 	}
 	log.Printf("GoStream listening at %s (db=%s)", addr, driver)
-	httpServer := &http.Server{Addr: addr, Handler: server.Router(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1 << 20}
+	httpServer := newAPIServer(addr, server.Router())
 	serveErr := make(chan error, 1)
 	go func() {
 		if err := httpServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
@@ -148,6 +148,18 @@ func main() {
 		if err = httpServer.Shutdown(shutdownCtx); err != nil {
 			log.Printf("graceful shutdown failed: %v", err)
 		}
+	}
+}
+
+func newAPIServer(addr string, handler http.Handler) *http.Server {
+	// Bound total time spent reading request headers and body, including uploads.
+	// A 250 MiB direct upload gets ten minutes; resumable chunks are smaller.
+	return &http.Server{
+		Addr: addr, Handler: handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Minute,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 }
 

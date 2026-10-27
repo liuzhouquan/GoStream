@@ -1,15 +1,71 @@
 package main
 
 import (
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+func TestAPIServerBodyReadDeadline(t *testing.T) {
+	readResult := make(chan error, 1)
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, err := io.Copy(io.Discard, r.Body)
+		readResult <- err
+		if err != nil {
+			http.Error(w, "body read failed", http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	config := newAPIServer("127.0.0.1:0", handler)
+	if config.ReadTimeout != 10*time.Minute {
+		t.Fatalf("API body read timeout = %s, want 10m", config.ReadTimeout)
+	}
+	web := httptest.NewUnstartedServer(handler)
+	web.Config.ReadTimeout = 150 * time.Millisecond
+	web.Config.ReadHeaderTimeout = config.ReadHeaderTimeout
+	web.Config.IdleTimeout = config.IdleTimeout
+	web.Config.MaxHeaderBytes = config.MaxHeaderBytes
+	web.Start()
+	defer web.Close()
+	conn, err := net.Dial("tcp", web.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := fmt.Fprint(conn, "POST /upload HTTP/1.1\r\nHost: test\r\nContent-Length: 2\r\n\r\nx"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-readResult:
+		var netErr net.Error
+		if !errors.As(err, &netErr) || !netErr.Timeout() {
+			t.Fatalf("slow body read error = %v, want timeout", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("slow body kept handler blocked past read deadline")
+	}
+	response, err := http.Post(web.URL+"/upload", "application/octet-stream", strings.NewReader("ok"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusNoContent {
+		t.Fatalf("later valid request status = %d", response.StatusCode)
+	}
+}
 
 func TestJWTSecretStartupBoundary(t *testing.T) {
 	if os.Getenv("GOSTREAM_STARTUP_PROBE") == "1" {

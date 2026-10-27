@@ -1,10 +1,14 @@
 package platform
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -57,6 +61,101 @@ func connectDeviceSocket(t *testing.T, serverURL, token, deviceID string) *webso
 		t.Fatalf("socket ready: %+v %v", ready, err)
 	}
 	return conn
+}
+
+func TestHTTPReadTimeoutAllowsChunkAndWebSocket(t *testing.T) {
+	_, h, _ := testServer(t)
+	_, token := registerTestUser(t, h, "readtimeoutuser")
+	created := request(t, h, http.MethodPost, "/api/uploads/sessions", token, map[string]any{
+		"filename": "clip.mp4", "size": len(sampleMP4),
+	})
+	if created.Code != http.StatusCreated {
+		t.Fatalf("create upload session: %d %s", created.Code, created.Body.String())
+	}
+	var session struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &session); err != nil {
+		t.Fatal(err)
+	}
+	uploadWeb := httptest.NewUnstartedServer(h)
+	uploadWeb.Config.ReadTimeout = 5 * time.Second
+	uploadWeb.Start()
+	defer uploadWeb.Close()
+	req, err := http.NewRequest(http.MethodPut, uploadWeb.URL+"/api/uploads/sessions/"+session.ID+"/chunks/0", bytes.NewReader(sampleMP4))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	response, err := uploadWeb.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("upload chunk status = %d", response.StatusCode)
+	}
+	status := request(t, h, http.MethodGet, "/api/uploads/sessions/"+session.ID, token, nil)
+	if status.Code != http.StatusOK || !bytes.Contains(status.Body.Bytes(), []byte(`"uploaded_chunks":[0]`)) {
+		t.Fatalf("chunk was not saved: %d %s", status.Code, status.Body.String())
+	}
+	slowCreated := request(t, h, http.MethodPost, "/api/uploads/sessions", token, map[string]any{
+		"filename": "slow.mp4", "size": len(sampleMP4),
+	})
+	if slowCreated.Code != http.StatusCreated {
+		t.Fatalf("create slow upload session: %d %s", slowCreated.Code, slowCreated.Body.String())
+	}
+	var slowSession struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(slowCreated.Body.Bytes(), &slowSession); err != nil {
+		t.Fatal(err)
+	}
+	slowWeb := httptest.NewUnstartedServer(h)
+	slowWeb.Config.ReadTimeout = 150 * time.Millisecond
+	slowWeb.Start()
+	defer slowWeb.Close()
+	slowConn, err := net.Dial("tcp", slowWeb.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer slowConn.Close()
+	if err := slowConn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Fprintf(slowConn, "PUT /api/uploads/sessions/%s/chunks/0 HTTP/1.1\r\nHost: test\r\nAuthorization: Bearer %s\r\nContent-Length: %d\r\n\r\nx", slowSession.ID, token, len(sampleMP4)); err != nil {
+		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(slowConn).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		t.Fatalf("slow upload did not end at deadline: %v", err)
+	}
+	if line != "" && !strings.Contains(line, " 400 ") {
+		t.Fatalf("slow upload response = %q", line)
+	}
+	slowStatus := request(t, h, http.MethodGet, "/api/uploads/sessions/"+slowSession.ID, token, nil)
+	if slowStatus.Code != http.StatusOK || !bytes.Contains(slowStatus.Body.Bytes(), []byte(`"uploaded_chunks":[]`)) {
+		t.Fatalf("timed-out chunk was persisted: %d %s", slowStatus.Code, slowStatus.Body.String())
+	}
+	if retry := putTestChunk(h, token, slowSession.ID, 0, sampleMP4); retry.Code != http.StatusOK {
+		t.Fatalf("retry after timeout: %d %s", retry.Code, retry.Body.String())
+	}
+
+	socketWeb := httptest.NewUnstartedServer(h)
+	socketWeb.Config.ReadTimeout = 150 * time.Millisecond
+	socketWeb.Start()
+	defer socketWeb.Close()
+	conn := connectDeviceSocket(t, socketWeb.URL, token, "")
+	time.Sleep(350 * time.Millisecond)
+	if err := conn.WriteJSON(socketEvent{Type: "ping"}); err != nil {
+		t.Fatal(err)
+	}
+	var pong struct {
+		Type string `json:"type"`
+	}
+	if err := conn.ReadJSON(&pong); err != nil || pong.Type != "pong" {
+		t.Fatalf("WebSocket after HTTP timeout: %+v %v", pong, err)
+	}
 }
 
 func TestDeviceIDValidation(t *testing.T) {
