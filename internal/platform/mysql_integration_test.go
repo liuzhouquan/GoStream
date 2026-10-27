@@ -111,21 +111,30 @@ func TestMySQLHybridFollowingIntegration(t *testing.T) {
 	if got := collectFollowingIDs(t, h, viewerToken); !reflect.DeepEqual(got, want) {
 		t.Fatalf("pending MySQL feed: got=%v want=%v", got, want)
 	}
-	for i := 0; i < 4; i++ {
+	// available_at is stored at MySQL millisecond precision. The next batch
+	// can become eligible just after an immediate poll in the same millisecond.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
 		worked, err := s.ProcessFeedFanoutOnce(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !worked {
+		var job FeedFanoutJob
+		if err := tx.Where("video_id = ?", low.ID).First(&job).Error; err != nil {
+			t.Fatal(err)
+		}
+		if job.DoneAt != nil {
 			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("low-follower job not complete after bounded polling: %+v", job)
+		}
+		if !worked {
+			time.Sleep(2 * time.Millisecond)
 		}
 	}
 	if got := collectFollowingIDs(t, h, viewerToken); !reflect.DeepEqual(got, want) {
 		t.Fatalf("completed MySQL feed: got=%v want=%v", got, want)
-	}
-	var job FeedFanoutJob
-	if err := tx.Where("video_id = ?", low.ID).First(&job).Error; err != nil || job.DoneAt == nil {
-		t.Fatalf("low-follower job not complete: %+v err=%v", job, err)
 	}
 }
 
