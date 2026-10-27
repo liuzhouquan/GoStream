@@ -124,3 +124,5 @@
 2026-10-27：P1-03 已通过 PR #4 合并到 `main`，quality、Redis、MySQL、MinIO CI 均通过。演示 API 更新后容器健康、`/ready` 与 `/health` 返回 200；紧跟重建的第一次 ready 探测曾返回 502，确认是启动窗口。P1-04 的受控双 worker 测试在旧代码上确认了两种状态覆盖：新 worker 发布后旧 worker 写入失败信息，或新 worker 死信后旧 worker 又标记发布。`fix/outbox-lease-fencing` 用 `attempts` 代数和未过期条件约束最终写入；SQLite 五轮 race、真实 MySQL 8.4 双连接十轮及三轮 race、全部 MySQL 平台测试、Go 全量测试/race/vet/构建及配置检查通过。原始审计问题保留；CI 与合并状态待记录。
 
 2026-10-27：P1-04 已通过 PR #5 合并到 `main`；quality、Redis、MySQL、MinIO CI 均通过。本机演示 API 更新后 `/ready`、`/health` 均为 200，容器二进制 SHA-256 与 Go 1.27.2 构建一致。此修复防止旧 worker 覆盖新租约的数据库状态；实时重复通知仍可能发生，当前 Web toast 尚未按通知 ID 去重。下一项 P1-05 需用启用/关闭 FFmpeg 的两阶段重启验证失败视频更换源文件后的状态恢复。
+
+2026-10-27：文档 PR #6 的首轮 MySQL CI 暴露 `TestMySQLHybridFollowingIntegration` 在首批写入后四次立即轮询仍未拿到完成标记。MySQL `available_at` 的毫秒精度与读取时刻交错是待确认原因；旧测试在本机隔离库连续 30 次未复现。改为最多两秒、短间隔重查任务，并保留 `done_at` 和 Feed ID 断言；新隔离库 100 次目标测试、五次 race 和所有 `TestMySQL*` 通过。更新后的 CI 结果待记录。
