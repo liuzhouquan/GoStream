@@ -1,12 +1,16 @@
 package platform
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 func TestVideoProcessingStateRetriesAndPrivacy(t *testing.T) {
@@ -87,6 +91,132 @@ func TestVideoProcessingStateRetriesAndPrivacy(t *testing.T) {
 	}
 	if got := request(t, h, http.MethodGet, path, token, nil); got.Code != http.StatusNotFound {
 		t.Fatalf("deleted processing video visible: %d", got.Code)
+	}
+}
+
+func TestVideoSourceReplacementRequiresProcessorForUnpublishedVideos(t *testing.T) {
+	processingServer, processingRouter, db := testServer(t)
+	checkVideoSourceReplacementRequiresProcessor(t, processingServer, processingRouter, db)
+}
+
+func checkVideoSourceReplacementRequiresProcessor(t *testing.T, processingServer *Server, processingRouter http.Handler, db *gorm.DB) {
+	t.Helper()
+	processingServer.UseFFmpeg("ffmpeg-test-only")
+	authorID, authorToken := registerTestUser(t, processingRouter, "recovery_author")
+	_, otherToken := registerTestUser(t, processingRouter, "recovery_other")
+	uploadURL := func(token string) string {
+		t.Helper()
+		res := uploadTestMedia(t, processingRouter, token, "clip.mp4", sampleMP4)
+		var result struct {
+			URL string `json:"url"`
+		}
+		if res.Code != http.StatusCreated || json.Unmarshal(res.Body.Bytes(), &result) != nil || result.URL == "" {
+			t.Fatalf("upload: %d %s", res.Code, res.Body.String())
+		}
+		return result.URL
+	}
+	source, replacement, foreignSource := uploadURL(authorToken), uploadURL(authorToken), uploadURL(otherToken)
+	createProcessing := func(title string) Video {
+		t.Helper()
+		res := request(t, processingRouter, http.MethodPost, "/api/videos", authorToken, map[string]string{"title": title, "media_url": source})
+		var video Video
+		if res.Code != http.StatusCreated || json.Unmarshal(res.Body.Bytes(), &video) != nil || video.Status != "processing" {
+			t.Fatalf("create processing video: %d %s", res.Code, res.Body.String())
+		}
+		return video
+	}
+	failed := createProcessing("failed source")
+	for attempt := 1; attempt <= videoProcessAttempts; attempt++ {
+		if err := db.Model(&VideoProcessJob{}).Where("video_id = ?", failed.ID).Update("available_at", time.Now().UTC().Add(-time.Second)).Error; err != nil {
+			t.Fatal(err)
+		}
+		job, err := processingServer.claimVideoProcessJob()
+		if err != nil || job == nil || job.VideoID != failed.ID {
+			t.Fatalf("claim failed video attempt %d: job=%+v err=%v", attempt, job, err)
+		}
+		processingServer.failVideoJob(*job, errors.New("controlled processing failure"))
+	}
+	processing := createProcessing("pending source")
+	// A new server on the same database represents the next process with the
+	// processor disabled, while preserving the original durable jobs.
+	disabled := NewServer(db, "test-signing-secret-at-least-32-bytes", processingServer.MediaDir)
+	disabledRouter := disabled.Router()
+	for _, tc := range []struct {
+		video  Video
+		status string
+	}{{failed, "failed"}, {processing, "processing"}} {
+		video := tc.video
+		path := fmt.Sprintf("/api/videos/%d", video.ID)
+		for _, url := range []string{source, replacement} {
+			res := request(t, disabledRouter, http.MethodPatch, path, authorToken, map[string]string{"title": "should not be saved", "media_url": url})
+			if res.Code != http.StatusConflict || !strings.Contains(res.Body.String(), "video processing is unavailable") {
+				t.Errorf("video %d source %s: got %d, want actionable 409: %s", video.ID, url, res.Code, res.Body.String())
+			}
+		}
+		owner := request(t, disabledRouter, http.MethodGet, path, authorToken, nil)
+		var current Video
+		if owner.Code != http.StatusOK || json.Unmarshal(owner.Body.Bytes(), &current) != nil || current.MediaURL != source || current.Title != video.Title || current.Status != tc.status {
+			t.Fatalf("rejected edit changed video %d: %d %s", video.ID, owner.Code, owner.Body.String())
+		}
+		var jobCount int64
+		if err := db.Model(&VideoProcessJob{}).Where("video_id = ?", video.ID).Count(&jobCount).Error; err != nil || jobCount != 1 {
+			t.Fatalf("rejected edit changed jobs for video %d: count=%d err=%v", video.ID, jobCount, err)
+		}
+		if public := request(t, disabledRouter, http.MethodGet, path, "", nil); public.Code != http.StatusNotFound {
+			t.Fatalf("unpublished video %d became public: %d", video.ID, public.Code)
+		}
+		if feed := request(t, disabledRouter, http.MethodGet, "/api/feed", "", nil); feed.Code != http.StatusOK || jsonContainsVideo(feed.Body.Bytes(), video.ID) {
+			t.Fatalf("unpublished video %d in feed: %d %s", video.ID, feed.Code, feed.Body.String())
+		}
+	}
+	failedPath := fmt.Sprintf("/api/videos/%d", failed.ID)
+	if res := request(t, disabledRouter, http.MethodPatch, failedPath, otherToken, map[string]string{"media_url": foreignSource}); res.Code != http.StatusForbidden {
+		t.Fatalf("non-author edit: %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, disabledRouter, http.MethodPatch, failedPath, authorToken, map[string]string{"media_url": foreignSource}); res.Code != http.StatusBadRequest {
+		t.Fatalf("unowned replacement: %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, disabledRouter, http.MethodPatch, failedPath, authorToken, map[string]string{"title": "metadata edit"}); res.Code != http.StatusOK {
+		t.Fatalf("metadata-only edit: %d %s", res.Code, res.Body.String())
+	}
+	created := request(t, disabledRouter, http.MethodPost, "/api/videos", authorToken, map[string]string{"title": "immediate", "media_url": source})
+	var published Video
+	if created.Code != http.StatusCreated || json.Unmarshal(created.Body.Bytes(), &published) != nil || published.Status != "published" {
+		t.Fatalf("no-processor publication: %d %s", created.Code, created.Body.String())
+	}
+	if res := request(t, disabledRouter, http.MethodPatch, fmt.Sprintf("/api/videos/%d", published.ID), authorToken, map[string]string{"media_url": replacement}); res.Code != http.StatusOK || !jsonContainsStatus(res.Body.Bytes(), "published") {
+		t.Fatalf("published video replacement: %d %s", res.Code, res.Body.String())
+	}
+	if feed := request(t, disabledRouter, http.MethodGet, "/api/feed", "", nil); !jsonContainsVideo(feed.Body.Bytes(), published.ID) {
+		t.Fatalf("published video missing from feed: %s", feed.Body.String())
+	}
+	resumed := NewServer(db, "test-signing-secret-at-least-32-bytes", processingServer.MediaDir)
+	resumed.UseFFmpeg("ffmpeg-test-only")
+	resumedRouter := resumed.Router()
+	for _, video := range []Video{failed, processing} {
+		path := fmt.Sprintf("/api/videos/%d", video.ID)
+		if res := request(t, resumedRouter, http.MethodPatch, path, authorToken, map[string]string{"media_url": replacement}); res.Code != http.StatusOK || !jsonContainsStatus(res.Body.Bytes(), "processing") {
+			t.Fatalf("retry video %d after enabling processor: %d %s", video.ID, res.Code, res.Body.String())
+		}
+		var jobCount int64
+		if err := db.Model(&VideoProcessJob{}).Where("video_id = ?", video.ID).Count(&jobCount).Error; err != nil || jobCount != 2 {
+			t.Fatalf("video %d retry job count = %d, err=%v", video.ID, jobCount, err)
+		}
+	}
+	oldJob, err := resumed.claimVideoProcessJob()
+	if err != nil || oldJob == nil || oldJob.VideoID != processing.ID || oldJob.SourceURL != source {
+		t.Fatalf("claim obsolete processing job: %+v, err=%v", oldJob, err)
+	}
+	if err := resumed.processVideoJob(context.Background(), *oldJob); err != nil {
+		t.Fatalf("retire obsolete processing job: %v", err)
+	}
+	current := request(t, resumedRouter, http.MethodGet, fmt.Sprintf("/api/videos/%d", processing.ID), authorToken, nil)
+	var processingVideo Video
+	if current.Code != http.StatusOK || json.Unmarshal(current.Body.Bytes(), &processingVideo) != nil || processingVideo.Status != "processing" || processingVideo.MediaURL != replacement {
+		t.Fatalf("obsolete job changed replacement: %d %s", current.Code, current.Body.String())
+	}
+	if profile := request(t, disabledRouter, http.MethodGet, fmt.Sprintf("/api/users/%d/videos", authorID), "", nil); jsonContainsVideo(profile.Body.Bytes(), failed.ID) {
+		t.Fatal("processing retry leaked into public profile")
 	}
 }
 

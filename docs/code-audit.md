@@ -126,3 +126,7 @@
 2026-10-27：P1-04 已通过 PR #5 合并到 `main`；quality、Redis、MySQL、MinIO CI 均通过。本机演示 API 更新后 `/ready`、`/health` 均为 200，容器二进制 SHA-256 与 Go 1.27.2 构建一致。此修复防止旧 worker 覆盖新租约的数据库状态；实时重复通知仍可能发生，当前 Web toast 尚未按通知 ID 去重。下一项 P1-05 需用启用/关闭 FFmpeg 的两阶段重启验证失败视频更换源文件后的状态恢复。
 
 2026-10-27：文档 PR #6 的首轮 MySQL CI 暴露 `TestMySQLHybridFollowingIntegration` 在首批写入后四次立即轮询仍未拿到完成标记。MySQL `available_at` 的毫秒精度与读取时刻交错是待确认原因；旧测试在本机隔离库连续 30 次未复现。改为最多两秒、短间隔重查任务，并保留 `done_at` 和 Feed ID 断言；新隔离库 100 次目标测试、五次 race 和所有 `TestMySQL*` 通过。更新后的 CI 结果待记录。
+
+2026-10-28：PR #6 已合并，更新后的 quality、Redis、MySQL、MinIO CI 均通过（run 40531605249）。P1-05 在真实 FFmpeg 和三次 API 进程启动的隔离 SQLite 演练中复现：超长视频失败后关闭处理器，原代码对更换源返回 200，视频却仍为 `failed`。修复在锁定当前视频的事务中拒绝对 `failed`/`processing` 视频提交 `media_url`，返回 409 并回滚其他字段；重新启用 FFmpeg 后，真实视频转码、封面与关注 Feed 验证通过。SQLite/MySQL 回归覆盖两种状态、所有权、已发布视频及旧任务；MinIO 和混合配置多实例尚未在此场景中验证。CI 和合并状态待记录。
+
+P1-05 本地验证还包括 Go 1.27.2 的全量测试、全量 race、vet、API/媒体工具构建、前端/Python 语法与三套 Compose 配置；隔离 MySQL 8.4 视频恢复测试在 race 下通过，临时库与授权已删除。
