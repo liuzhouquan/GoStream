@@ -116,3 +116,5 @@
 2026-10-27：P0-01 的修复已在 `fix/jwt-secret-default` 分支实现并本地验证。默认本地监听改为回环地址；公开监听拒绝两种旧开发密钥；Compose 要求显式 `JWT_SECRET`。启动回归测试先失败后通过，隔离 HTTP 验证旧密钥 token 为 401、独立密钥 token 为 200；Go 全量测试、race、vet、构建与 Compose 配置检查通过。运行中的本机演示 API 已轮换到 `.env` 中的随机密钥并恢复 `/ready` 200。上面的审计发现和原始复现保留为基线证据；其他 P1/P2 项仍未修复。
 
 2026-10-27：P0-01 已通过 PR #1 合并到 `main`，quality、MySQL 和 MinIO CI 均通过。P1 请求资源预算拆成两个小 PR：先给 HTTP 请求体总读取时间设上限，再单独处理公开高成本路由的频率预算；原审计问题和修复顺序不变。`fix/upload-body-timeout` 已加入慢 body、后续完整请求、分片持久化与 WebSocket 心跳回归；P1-02 频率约束仍未实现。
+
+2026-10-27：P1-01 已通过 PR #2 合并到 `main`，三项 CI 均通过。P1-02 已在 `fix/public-route-rate-limits` 分支加入注册、登录和播放计数的每 IP 一分钟预算；Redis 原子计数与有界本机回退、429/`Retry-After`、Prometheus 结果计数和对应测试均已实现。原始审计问题仍保留；此项的最终 CI 和合并状态以 PR 记录为准。

@@ -105,6 +105,7 @@ func main() {
 		client := redis.NewClient(&redis.Options{Addr: redisAddr, DialTimeout: 500 * time.Millisecond, ReadTimeout: 100 * time.Millisecond, WriteTimeout: 100 * time.Millisecond, MaxRetries: 0})
 		defer client.Close()
 		server.UseRedisFeedCache(client)
+		server.UseRedisRateLimiter(client)
 		if err := server.UseRedisRealtime(client); err != nil {
 			log.Fatalf("initialize realtime bridge: %v", err)
 		}

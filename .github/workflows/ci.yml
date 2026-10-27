@@ -54,6 +54,34 @@ jobs:
           docker compose -f docker-compose.yml -f docker-compose.object.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.object.yml -f tests/integration/object-test.compose.yml config --quiet
 
+  redis-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      redis:
+        image: redis:8.2.9
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=10
+    env:
+      GOSTREAM_TEST_REDIS_ADDR: 127.0.0.1:6379
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install the declared Go version
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Test shared Redis request budget
+        run: go test ./internal/platform -run '^TestRateLimiterRealRedisIntegration$' -count=1 -v
+
   mysql-integration:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

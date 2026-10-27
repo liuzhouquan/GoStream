@@ -26,7 +26,7 @@ JSON errors use `{ "error": "..." }`; authenticated routes require `Authorizatio
 | PUT/DELETE | `/api/videos/:id/favorite` | Favorite state | Implemented |
 | POST/GET | `/api/videos/:id/comments` | Create a comment or page through top-level comments | Implemented |
 | GET | `/api/videos/:id/comments/:comment_id/replies` | Page through one comment's replies | Implemented |
-| POST | `/api/videos/:id/views` | Increment play count | Implemented |
+| POST | `/api/videos/:id/views` | Increment accepted play-request count | Implemented |
 | GET | `/api/notifications?before_id=...&limit=...`, `/api/notifications/unread` | Paged notification inbox and unread count | Implemented |
 | PATCH | `/api/notifications/read?up_to_id=...` | Mark notifications read through a known ID; omitted bound keeps legacy mark-all behavior | Implemented |
 | GET | `/api/search?q=...&type=...&limit=...&users_before_id=...&videos_before_id=...` | Independently page users and published video text | Implemented |
@@ -40,6 +40,8 @@ JSON errors use `{ "error": "..." }`; authenticated routes require `Authorizatio
 | GET | `/api/groups/:id/messages?before_id=...&limit=...` | Group history, newest first | Implemented |
 | GET | `/api/groups/:id/unread` | Count unread group messages | Implemented |
 | POST | `/api/groups/:id/messages/:message_id/ack` | Advance member read cursor | Implemented |
+
+`POST /api/users`, `POST /api/sessions`, and `POST /api/videos/:id/views` allow 10, 30, and 120 requests per peer IP per UTC minute respectively. All attempts count, including invalid credentials and nonexistent videos. Exceeding the budget returns HTTP 429, `{"error":"rate limit exceeded"}`, and `Retry-After` in seconds. The peer is taken from the TCP connection address; `X-Forwarded-For` and `X-Real-IP` are ignored, so a reverse proxy must apply its own trusted client-IP limits and may cause its users to share this backend budget. With `REDIS_ADDR`, API instances share one atomic Redis counter; if Redis is unavailable, each instance enforces its own bounded local counter. A fixed-window boundary can allow two budgets close together. `play_count` counts accepted requests, not unique viewers or watch completions.
 | GET | `/api/ws` | Realtime WebSocket authenticated by subprotocol | Implemented |
 | GET | `/health`, `/ready`, `/metrics` | Liveness, database readiness, Prometheus metrics | Implemented |
 
