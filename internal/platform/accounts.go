@@ -2,16 +2,40 @@ package platform
 
 import (
 	"errors"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	mysqlDriver "github.com/go-sql-driver/mysql"
+	sqlite3 "github.com/mattn/go-sqlite3"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9_]{3,32}$`)
+
+func duplicateAccountKey(err error) bool {
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	var mysqlErr *mysqlDriver.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlErr.Number == 1062
+	}
+	var sqliteErr sqlite3.Error
+	return errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique
+}
+
+func respondUserLookupError(c *gin.Context, err error) {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		respondError(c, 404, "user not found")
+		return
+	}
+	log.Printf("load user failed: %v", err)
+	respondError(c, 500, "could not load user")
+}
 
 func (s *Server) register(c *gin.Context) {
 	var in struct {
@@ -43,7 +67,12 @@ func (s *Server) register(c *gin.Context) {
 	}
 	u := User{Username: in.Username, Nickname: in.Nickname, PasswordHash: string(hash)}
 	if err = s.DB.Create(&u).Error; err != nil {
-		respondError(c, 409, "username already exists")
+		if duplicateAccountKey(err) {
+			respondError(c, 409, "username already exists")
+			return
+		}
+		log.Printf("create account failed: %v", err)
+		respondError(c, 500, "could not create account")
 		return
 	}
 	token, err := s.issueToken(u.ID)
@@ -64,7 +93,21 @@ func (s *Server) login(c *gin.Context) {
 		return
 	}
 	var u User
-	if s.DB.Where("username = ?", strings.ToLower(strings.TrimSpace(in.Username))).First(&u).Error != nil || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.Password)) != nil {
+	if err := s.DB.Where("username = ?", strings.ToLower(strings.TrimSpace(in.Username))).First(&u).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("look up account failed: %v", err)
+			respondError(c, 500, "could not authenticate account")
+			return
+		}
+		respondError(c, 401, "invalid username or password")
+		return
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.Password)); err != nil {
+		if !errors.Is(err, bcrypt.ErrMismatchedHashAndPassword) {
+			log.Printf("verify account password hash failed: %v", err)
+			respondError(c, 500, "could not authenticate account")
+			return
+		}
 		respondError(c, 401, "invalid username or password")
 		return
 	}
@@ -78,8 +121,8 @@ func (s *Server) login(c *gin.Context) {
 
 func (s *Server) me(c *gin.Context) {
 	var u User
-	if s.DB.First(&u, uid(c)).Error != nil {
-		respondError(c, 404, "user not found")
+	if err := s.DB.First(&u, uid(c)).Error; err != nil {
+		respondUserLookupError(c, err)
 		return
 	}
 	c.JSON(200, u)
@@ -143,8 +186,8 @@ func (s *Server) updateMe(c *gin.Context) {
 
 func (s *Server) getUser(c *gin.Context) {
 	var u User
-	if s.DB.First(&u, c.Param("id")).Error != nil {
-		respondError(c, 404, "user not found")
+	if err := s.DB.First(&u, c.Param("id")).Error; err != nil {
+		respondUserLookupError(c, err)
 		return
 	}
 	var videos, followers, following int64
@@ -165,7 +208,7 @@ func (s *Server) userPresence(c *gin.Context) {
 	}
 	var user User
 	if err := s.DB.Select("id", "last_seen_at").First(&user, id).Error; err != nil {
-		respondError(c, 404, "user not found")
+		respondUserLookupError(c, err)
 		return
 	}
 	c.JSON(200, gin.H{"user_id": user.ID, "online": s.onlineAcrossInstances(c.Request.Context(), user.ID), "last_seen_at": user.LastSeenAt})
