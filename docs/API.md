@@ -48,6 +48,8 @@ JSON errors use `{ "error": "..." }`; authenticated routes require `Authorizatio
 
 `POST /api/groups/:id/members` accepts `{"user_id":123}` from the group owner. A new member beyond 200 returns HTTP 409. Repeating an invitation for an existing member returns `{"member":true}` without a second notification, even at capacity.
 
+Group routes that require membership and resumable upload-session routes return 404 when the group/session does not exist or does not belong to the caller. A database failure while checking either resource returns a generic 500; the underlying storage error is logged and not exposed in the response.
+
 Registration accepts `username`, `password` (8–72 bytes), and optional `nickname`; login accepts `username` and `password`. Both return a user and 24-hour access token. Passwords use bcrypt and tokens use HS256 with `JWT_SECRET`.
 
 Registration returns 409 only for a duplicate username. Login returns 401 for an unknown username or incorrect password. Storage failures and an unreadable stored password hash return 500 with a generic error; account and profile lookups return 404 only when the user does not exist, and 500 on storage failure. Internal database details are logged, not sent in these responses.

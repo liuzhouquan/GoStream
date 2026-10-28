@@ -79,7 +79,12 @@ func (s *Server) ownedUpload(c *gin.Context) (UploadSession, bool) {
 	}
 	var session UploadSession
 	if err := s.DB.Where("id = ? AND owner_id = ?", id, uid(c)).First(&session).Error; err != nil {
-		respondError(c, 404, "upload session not found")
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			respondError(c, 404, "upload session not found")
+			return UploadSession{}, false
+		}
+		log.Printf("load upload session failed: %v", err)
+		respondError(c, 500, "could not load upload session")
 		return UploadSession{}, false
 	}
 	return session, true
