@@ -84,7 +84,7 @@
 - 证据/复现：本轮按相同表达式计算，1000 次点赞显示 `1.0k`，再点一次后显示 `2`；10000 显示 `1.0万`，再点一次也显示 `2`。后端计数没有因此改变。
 - 影响：高互动视频的前端显示错误，影响演示可信度。最小修复：保留原始数值于 DOM 状态或使用服务端最新计数，再格式化显示；覆盖 999/1000/10000 阈值及取消点赞。
 
-**P2-03 浏览器本地认证缓存损坏会在脚本入口直接中断｜浏览器已复现，修复分支待合并。**
+**P2-03 浏览器本地认证缓存损坏会在脚本入口直接中断｜浏览器已复现并通过 PR #11 修复。**
 
 - 位置：[`web/app.js`](../web/app.js) 第 1 行在顶层直接 `JSON.parse(localStorage.getItem('gostream.user') || 'null')`，无异常处理。
 - 证据/复现方法：在浏览器开发者工具将 `gostream.user` 设成无效 JSON 后刷新；初始化抛异常，后续事件处理和页面渲染无法注册。最小修复：小范围容错解析并清除损坏缓存；增加浏览器刷新恢复检查。
@@ -138,3 +138,5 @@ P1-05 本地验证还包括 Go 1.27.2 的全量测试、全量 race、vet、API/
 2026-10-28：P2-01 群成员/上传会话路径已通过 PR #9 合并到 `main`（`df9f2a4`），quality、Redis、MySQL、MinIO 和真实 FFmpeg CI 均通过（run 40614837522）。P2-02 的 `tests/integration/web_action_counts.py` 用隔离静态服务、模拟 API 和 Chromium 复现：对基线 `df9f2a4:web/app.js` 中 1000 次点赞的卡片点击后，测试失败并观察到 `♥ 2`。`fix/web-action-counts` 将原始计数存于按钮 `data-count`，成功响应后更新，期间禁用按钮；同一脚本在修复后通过 999、1000、10000 的点赞/取消、1000 收藏/取消及请求失败状态不变检查。Go 1.27.2 全量测试、全量 race、vet、构建、Web/Python 语法和三套 Compose 配置检查通过。服务端接口为模拟响应，真实 MySQL 互动端到端尚未在本场景复验；CI 与合并状态待记录。
 
 2026-10-28：P2-02 已通过 PR #10 合并到 `main`（`35dedfc`），quality、Redis、MySQL、MinIO 和真实 FFmpeg CI 均通过（run 40616889554）。P2-03 的 `tests/integration/web_stored_session.py` 在隔离静态服务和 Chromium 中复现：原始 `df9f2a4:web/app.js` 遇到损坏的 `gostream.user` JSON 后脚本不再初始化，Feed 卡片数为 0 且损坏缓存保留。`fix/web-stored-session-recovery` 从缓存读取时验证用户 ID、昵称与 token；无效或不完整缓存清理后以游客身份打开 Feed。浏览器测试已覆盖无效 JSON、错误用户结构、缺失/空 token、缺失用户及有效缓存保留。Go 1.27.2 全量测试、race、vet、API/媒体工具构建、Web/Python 语法、原互动计数浏览器回归与三套 Compose 配置检查通过。该测试使用模拟 Feed，不能证明服务端 JWT 有效；CI 与合并状态待记录。
+
+2026-10-28：P2-03 已通过 PR #11 合并到 `main`（`9bd34af`）；quality、Redis、MySQL、MinIO 和真实 FFmpeg CI 均通过（run 40650210463）。原审计问题留作修复前证据。剩余上传完成与清理交错、群历史语义、媒体源文件访问规则仍须按上表确认，不能由本次浏览器回归代替。
