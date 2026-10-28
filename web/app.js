@@ -1,4 +1,18 @@
-const state = { token: localStorage.getItem('gostream.token') || '', user: JSON.parse(localStorage.getItem('gostream.user') || 'null'), view: 'feed', scene: 'recommend', cursor: '', loading: false, socket: null, notificationCursor: 0, notificationTopID: 0, notificationHasMore: false, notificationLoading: false, notificationLoadID: 0, search: null, chatPeer: '', chatCursor: 0, chatHasMore: false, chatLoadID: 0, chatLoading: false, chatPendingLive: [], seenMessages: new Set(), groupID: '', groupSeenMessages: new Set(), groups: [], socketRetry: 0, socketTimer: null, heartbeatTimer: null };
+function loadStoredAuth() {
+  const rawToken = localStorage.getItem('gostream.token');
+  const rawUser = localStorage.getItem('gostream.user');
+  try {
+    const user = JSON.parse(rawUser || 'null');
+    if (rawToken?.trim() && user && Number.isSafeInteger(user.id) && user.id > 0 && typeof user.nickname === 'string') {
+      return { token: rawToken, user };
+    }
+  } catch (_) { /* A damaged local cache should not stop page startup. */ }
+  if (rawUser !== null) localStorage.removeItem('gostream.user');
+  if (rawToken !== null) localStorage.removeItem('gostream.token');
+  return { token: '', user: null };
+}
+const storedAuth = loadStoredAuth();
+const state = { token: storedAuth.token, user: storedAuth.user, view: 'feed', scene: 'recommend', cursor: '', loading: false, socket: null, notificationCursor: 0, notificationTopID: 0, notificationHasMore: false, notificationLoading: false, notificationLoadID: 0, search: null, chatPeer: '', chatCursor: 0, chatHasMore: false, chatLoadID: 0, chatLoading: false, chatPendingLive: [], seenMessages: new Set(), groupID: '', groupSeenMessages: new Set(), groups: [], socketRetry: 0, socketTimer: null, heartbeatTimer: null };
 const $ = (selector, root = document) => root.querySelector(selector);
 const content = $('#content');
 const titles = {feed:'发现灵感',following:'关注动态',hot:'热门视频',search:'发现创作者',upload:'发布作品',notifications:'通知中心',chat:'即时消息',profile:'个人主页'};
