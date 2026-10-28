@@ -48,7 +48,9 @@ JSON errors use `{ "error": "..." }`; authenticated routes require `Authorizatio
 
 `POST /api/groups/:id/members` accepts `{"user_id":123}` from the group owner. A new member beyond 200 returns HTTP 409. Repeating an invitation for an existing member returns `{"member":true}` without a second notification, even at capacity.
 
-Registration accepts `username`, `password` (8–72 characters), and optional `nickname`; login accepts `username` and `password`. Both return a user and 24-hour access token. Passwords use bcrypt and tokens use HS256 with `JWT_SECRET`.
+Registration accepts `username`, `password` (8–72 bytes), and optional `nickname`; login accepts `username` and `password`. Both return a user and 24-hour access token. Passwords use bcrypt and tokens use HS256 with `JWT_SECRET`.
+
+Registration returns 409 only for a duplicate username. Login returns 401 for an unknown username or incorrect password. Storage failures and an unreadable stored password hash return 500 with a generic error; account and profile lookups return 404 only when the user does not exist, and 500 on storage failure. Internal database details are logged, not sent in these responses.
 
 Single-file upload uses multipart field `file`; allowed extensions are MP4, WebM, MOV, JPEG, PNG, and WebP. The server enforces a 250 MiB limit and records the uploader. JPEG, PNG, and WebP images must fully decode after a dimensions check (at most 8192 pixels on either side and 16 million pixels total); a truncated or mismatched file returns HTTP 400 before asset registration on both direct upload and resumable completion. Video publication accepts `title`, optional `description`, `media_url`, and optional `cover_url`; the video and cover must be files uploaded by the same account. `PATCH /api/videos/:id` accepts those same editable fields and checks author ownership. Avatar updates through `PATCH /api/users/me` also require an image uploaded by that account.
 

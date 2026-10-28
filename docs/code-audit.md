@@ -130,3 +130,5 @@
 2026-10-28：PR #6 已合并，更新后的 quality、Redis、MySQL、MinIO CI 均通过（run 40531605249）。P1-05 在真实 FFmpeg 和三次 API 进程启动的隔离 SQLite 演练中复现：超长视频失败后关闭处理器，原代码对更换源返回 200，视频却仍为 `failed`。修复在锁定当前视频的事务中拒绝对 `failed`/`processing` 视频提交 `media_url`，返回 409 并回滚其他字段；重新启用 FFmpeg 后，真实视频转码、封面与关注 Feed 验证通过。SQLite/MySQL 回归覆盖两种状态、所有权、已发布视频及旧任务；MinIO 和混合配置多实例尚未在此场景中验证。CI 和合并状态待记录。
 
 P1-05 本地验证还包括 Go 1.27.2 的全量测试、全量 race、vet、API/媒体工具构建、前端/Python 语法与三套 Compose 配置；隔离 MySQL 8.4 视频恢复测试在 race 下通过，临时库与授权已删除。
+
+2026-10-28：P1-05 已通过 PR #7 合并到 `main`（`54853a7`），quality、Redis、MySQL、MinIO 与新增的真实 FFmpeg 重启 CI 均通过（run 40612367587）。P2-01 的账户路径在 `fix/account-storage-errors` 分支分步处理：SQLite 实际 HTTP 测试先复现数据库关闭后注册误报 409、资料误报 404，修复后未知用户/错误密码仍为 401、重复用户名仍为 409，存储故障及损坏哈希返回 500。隔离 MySQL 8.4 的重复键、正常登录和无效事务测试在 race 下通过，临时库与授权已删除。Go 1.27.2 全量测试、全量 race、vet、构建、Web 语法和三套 Compose 配置检查通过。群成员及上传会话查询的同类映射尚未处理；本分支的 CI 与合并状态待记录。
