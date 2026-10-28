@@ -26,6 +26,15 @@ func groupID(c *gin.Context) (uint, bool) {
 	return uint(n), true
 }
 
+func respondGroupLookupError(c *gin.Context, err error) {
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		respondError(c, 404, "group not found")
+		return
+	}
+	log.Printf("load group membership failed: %v", err)
+	respondError(c, 500, "could not load group")
+}
+
 func (s *Server) memberGroup(c *gin.Context) (ChatGroup, GroupMember, bool) {
 	id, ok := groupID(c)
 	if !ok {
@@ -33,8 +42,12 @@ func (s *Server) memberGroup(c *gin.Context) (ChatGroup, GroupMember, bool) {
 	}
 	var group ChatGroup
 	var member GroupMember
-	if s.DB.First(&group, id).Error != nil || s.DB.Where("group_id = ? AND user_id = ?", id, uid(c)).First(&member).Error != nil {
-		respondError(c, 404, "group not found")
+	if err := s.DB.First(&group, id).Error; err != nil {
+		respondGroupLookupError(c, err)
+		return ChatGroup{}, GroupMember{}, false
+	}
+	if err := s.DB.Where("group_id = ? AND user_id = ?", id, uid(c)).First(&member).Error; err != nil {
+		respondGroupLookupError(c, err)
 		return ChatGroup{}, GroupMember{}, false
 	}
 	return group, member, true

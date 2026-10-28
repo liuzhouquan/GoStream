@@ -26,6 +26,8 @@ Compose 现在要求提供唯一的 `JWT_SECRET`（可放在已被 Git 忽略的
 
 账户存储错误由 `TestAccountStorageErrorResponses` 覆盖 SQLite 实际路由：真实用户名重复为 409，用户名不存在或密码错误为 401，损坏的密码哈希、数据库关闭后的注册/登录/资料查询为 500，响应不包含底层 SQL 错误。`TestMySQLAccountStorageErrorResponses` 在已迁移的隔离 MySQL 库中复验重复键 409、正常登录以及事务失效后的 500；需要 `GOSTREAM_TEST_MYSQL_DSN`，默认本地测试会跳过，CI 的 MySQL 任务执行。
 
+群成员与上传会话的所有权查询由 `TestOwnedLookupStorageErrors`、`TestGroupMembershipLookupStorageError` 覆盖：本人可读、其他账户看到 404、数据库关闭或群成员表查询失败返回不泄漏 SQL 内容的 500。`TestMySQLOwnedLookupStorageErrors` 在已迁移的隔离 MySQL 库中验证相同的 200/404/500 分类；它需要 `GOSTREAM_TEST_MYSQL_DSN`，默认本地测试跳过，CI MySQL 任务执行。
+
 HTTP 服务对接收请求头和请求体设置十分钟总读取期限。`TestAPIServerBodyReadDeadline` 使用缩短的测试期限确认慢 body 会释放读取中的 handler，后续完整请求仍可处理；`TestHTTPReadTimeoutAllowsChunkAndWebSocket` 通过真实 HTTP 连接检查完整分片、超时的未完成分片不落库及重试，并在超过缩短的 HTTP 期限后检查 WebSocket 心跳。十分钟是配置上限，不代表已验证真实 250 MiB 慢速上传的吞吐；发布前仍需在目标网络运行大文件续传和多客户端慢连接验收。
 
 公开高成本路由按连接 IP 设置固定一分钟预算，超限返回 429 和 `Retry-After`。`TestPublicRouteBudgetsUsePeerAddress` 验证注册、登录、播放计数、另一 IP 正常请求及伪造转发头无法绕过；`TestRateLimiterRedisAtomicAndLocalFallback` 验证双实例并发计数、Redis 断开时本地回退、恢复和指标；`TestRateLimiterLocalCapacityAndWindowRecovery`、`TestRateLimiterWindowRollover` 验证本机键数量上限、过期回收与分钟切换。`TestRateLimiterRealRedisIntegration` 需设置 `GOSTREAM_TEST_REDIS_ADDR` 指向隔离 Redis，检查真实 Lua 原子计数并清理测试键；CI 的 `redis-integration` 任务也运行该测试。固定窗口边界、代理后共享 IP、分布式来源和 Redis 故障期间各实例独立预算仍是容量限制，不代表已完成大规模防刷压测。
