@@ -273,6 +273,7 @@ func (s *Server) createVideo(c *gin.Context) {
 }
 
 var errMediaNotOwned = errors.New("media is not registered to this account")
+var errVideoProcessorDisabled = errors.New("video processing is disabled")
 
 // All writers of a media URL lock its registration before creating a reference.
 // The asset reaper takes the same lock, so it cannot delete a selected upload.
@@ -396,6 +397,9 @@ func (s *Server) updateVideo(c *gin.Context) {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND author_id = ? AND status <> ?", v.ID, uid(c), "deleted").First(&current).Error; err != nil {
 			return err
 		}
+		if in.MediaURL != nil && s.ffmpegBin == "" && (current.Status == "failed" || current.Status == "processing") {
+			return errVideoProcessorDisabled
+		}
 		needProcessing := s.ffmpegBin != "" && in.MediaURL != nil && (*in.MediaURL != current.MediaURL || current.Status == "failed")
 		if in.MediaURL != nil && (*in.MediaURL != current.MediaURL || needProcessing) {
 			updates["duration_ms"] = 0
@@ -418,6 +422,10 @@ func (s *Server) updateVideo(c *gin.Context) {
 	}); err != nil {
 		if errors.Is(err, errMediaNotOwned) {
 			respondError(c, 400, "video or cover must be uploaded by this account")
+			return
+		}
+		if errors.Is(err, errVideoProcessorDisabled) {
+			respondError(c, http.StatusConflict, "video processing is unavailable; retry later or contact the administrator")
 			return
 		}
 		respondError(c, 500, "could not edit video")

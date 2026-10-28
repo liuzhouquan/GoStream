@@ -460,6 +460,29 @@ func TestMySQLOutboxLeaseHandoffIntegration(t *testing.T) {
 	checkOutboxLeaseHandoff(t, dbA, dbB)
 }
 
+func TestMySQLVideoSourceRecoveryWithoutProcessor(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to a migrated disposable MySQL database")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	t.Cleanup(func() { _ = tx.Rollback().Error })
+	server := NewServer(tx, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	checkVideoSourceReplacementRequiresProcessor(t, server, server.Router(), tx)
+}
+
 func TestMySQLConcurrentVideoActionsIntegration(t *testing.T) {
 	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
 	if dsn == "" {
