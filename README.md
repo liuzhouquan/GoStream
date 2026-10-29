@@ -63,6 +63,7 @@ The normal and object overlays both bind API port 8080; stop the normal stack be
 - User and video search with independent ID cursor pages, literal wildcard matching, and playable web results
 - One-level comment threads with separate root/reply cursor pages, lazy loading in the web client, and reply notifications
 - Direct/group WebSocket messaging, paged direct history, batch recipient ACKs, per-device direct read state and group cursors, bounded device registration with idle cleanup, offline replay, and optional Redis cross-instance event relay and presence
+- Real two-process IM recovery tests with MySQL/Redis, SIGKILL, per-device ACKs and 105-message backlog synchronization; [guarantees and reproduction](docs/IM.md)
 - Multiple WebSocket connections per account (up to eight per API instance), with committed direct/group messages sent to each active device and control replies kept on the originating connection
 - `/health`, database-backed `/ready`, `/metrics`, and optional `PPROF_ADDR`
 - SQLite is persistent and real; it is not a mock database

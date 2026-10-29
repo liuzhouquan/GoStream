@@ -66,6 +66,8 @@ docker compose -p gostream-object -f docker-compose.yml -f docker-compose.object
 
 RabbitMQ 验证运行 `python3 tests/integration/rabbitmq_smoke.py --go-bin /usr/local/go/bin/go --mysql-container gostream-mysql-1 --mysql-addr 127.0.0.1:3307`。脚本只在随机 MySQL 库/用户和临时 RabbitMQ 4.3.7 上写入，运行真实 broker 矩阵的 race 测试、API 后台 worker 自动投递、SIGTERM 退出及运维 CLI，结束后删除资源。它需要 Docker、可拉取的固定镜像以及 MySQL 容器内部的 root 密码环境；CI 新增 `rabbitmq-integration` 任务执行同一入口。直接运行 `TestRabbitMQNotificationIntegration` 需要 `GOSTREAM_TEST_RABBITMQ_URL`、专用且已迁移的空 outbox 库 `GOSTREAM_TEST_RABBITMQ_MYSQL_DSN`；只有显式提供允许停止的临时 `GOSTREAM_TEST_RABBITMQ_CONTAINER` 才执行 broker 重启分项。用例覆盖发布确认/不可路由、确认后 SQL 完成丢失、消费提交后 ACK 丢失、两消费者同时处理 16 份重复投递、瞬时/持续 SQL 故障、死信回放、重启恢复和实际 WebSocket 内容。无环境时普通 Go 测试跳过此矩阵。详细保证、命令和未验证窗口见 [`RABBITMQ.md`](RABBITMQ.md)。
 
+IM 双进程故障验证运行 `python3 tests/integration/im_smoke.py --go-bin /usr/local/go/bin/go --mysql-container gostream-mysql-1 --mysql-addr 127.0.0.1:3307`。脚本建立随机 MySQL 库/用户与临时 Redis 8.2.9，以 `-race` 编译生产 API，并以 `-race` 运行 `tests/integration/im`。两个真实 API 进程各持有独立 SQL/Redis 连接，检查同键并发发送、冲突拒绝、单聊/群聊远端提示和发送者其他设备回显、重复 Redis 提示、越权和混合无效 ACK 批次、Redis 停机后的 SQL 补读/重订阅、双方真实 SIGKILL 与重连/重试、105 条单聊和 105 条群消息的 100 条重放上限、完整历史补页、逐设备 ACK，以及群成员移除后的访问拒绝。SIGKILL 检查操作系统退出信号，正常关闭检查退出码和子进程竞态报告。需要 Linux、C 编译器、Docker 和 MySQL 容器内的 root 密码环境；独立 `im-integration` CI 任务执行相同入口，再以 `--check-timeout-cleanup` 故意在 API 启动后触发 Go 十秒超时，要求外层脚本成功回收其进程组、临时目录、Redis 和 SQL 资源；内层超时是预期失败，外层清理失败必须让 CI 失败。普通 Go 测试在没有四个 `GOSTREAM_TEST_IM_*` 环境变量时跳过该矩阵；优先使用自动隔离资源的脚本。此项不代替两浏览器验收、迟提交群消息顺序、长期活跃设备回执压缩或 20 客户端/1,000 消息压测，详见 [`IM.md`](IM.md)。
+
 ## 功能验收矩阵
 
 | 编号 | 最终必须验证的结果 | 最低证据 | 当前判断 |
@@ -76,7 +78,7 @@ RabbitMQ 验证运行 `python3 tests/integration/rabbitmq_smoke.py --go-bin /usr
 | A04 Feed | 时间线、关注、热榜、推荐均正确分页；相同时间戳与新插入记录不造成稳定数据集中的漏项/重复；普通作者推送、高粉作者拉取可配置且结果一致；Redis 中断可回退数据库 | 单元测试 + 真实 MySQL/Redis 双实例 + 压测 | 部分通过：混合推拉、批量幂等、迟到关注及真实 MySQL 同时间戳翻页已局部验证；v004 完整数据集交替读压测只改善约 11% 与 4% 的 P95，未达 20% 门槛；真实 MySQL 双连接接管 130 粉任务且重放无重复，小数据读写混合短跑 1,907 请求无错误；实际进程故障、完整数据集 20 并发/60 秒三轮及持续积压仍未验收 |
 | A05 互动与计数 | 并发重复点赞/收藏、取消及关注只有一次状态转换；计数与明细一致且非负；评论回复层级、权限和通知正确；播放计数策略明确 | 真实 MySQL 并发集成测试，结束后核对表和计数 | 部分通过：真实 MySQL 并发删除曾出现 1213 死锁并返回 500；整笔事务有限重试后，双连接 8×80 次点赞/收藏切换与隔离库混合短跑通过且计数匹配；多用户/多视频、播放量和完整通知矩阵待验 |
 | A06 异步事件 | 业务事务失败不留待发事件；提交成功后 broker 停机也不丢事件；发布确认后重复投递不产生重复通知；消费者重启、失败重试和死信可恢复 | 真实 MySQL/RabbitMQ 故障注入 + outbox/消费者状态核对 | 部分通过：确认发布、不可路由退回、确认后 SQL 状态丢失、提交后 ACK 丢失、双消费者重复投递、SQL 重试/耗尽死信/回放、broker 重启及真实 API worker 已在隔离 MySQL/RabbitMQ 验证；实际强杀进程窗口、DLQ 目标中断及完整最终配置仍待验 |
-| A07 IM | 两实例间单聊/群聊、成员权限、同一 `client_id` 重试、每设备 ACK、离线重放、超过 100 条的历史补页都正确；Redis 中断后重连能补齐；相同会话历史按服务端 ID 排序，重复推送可去重 | 两浏览器配置 + 两 API 实例 + 真实 MySQL/Redis 故障场景 | 部分通过：局部多实例与浏览器测试已有，故障和长期回执清理待验 |
+| A07 IM | 两实例间单聊/群聊、成员权限、同一 `client_id` 重试、每设备 ACK、离线重放、超过 100 条的历史补页都正确；Redis 中断后重连能补齐；相同会话历史按服务端 ID 排序，重复推送可去重 | 两浏览器配置 + 两 API 实例 + 真实 MySQL/Redis 故障场景 | 部分通过：真实双 API/MySQL/Redis、双方 SIGKILL、Redis 停机/重订阅、重复提示、105 条单聊/群聊补页、逐设备 ACK 和群权限撤回已验证；最终两浏览器、迟提交群顺序、presence 完整过期观察、活跃回执压缩与规定压测仍待验 |
 | A08 通知与搜索 | 关注/点赞/评论/私信通知按权限显示，分页和有界已读不吞掉新通知；搜索用户与已发布视频支持独立分页和转义字符，隐藏视频不出现 | 真实 MySQL + 浏览器分页测试 + 查询计划记录 | 部分通过：功能已验证，较大数据量查询计划待补 |
 | A09 Web 全流程 | 两个独立浏览器账号完成注册、续传发布、Feed、互动、主页、搜索、通知、单聊和群聊；刷新/重启后状态一致；手机宽度下主要操作可用 | 最终 Compose 版本的浏览器记录，附账号/数据清理说明 | 部分通过：现有功能分批验证，完整最终配置待验 |
 | A10 数据升级与运维 | 新库安装、从当前 schema 升级、重复运行迁移、失败恢复均有结果；CI 通过；Prometheus 指标可解释；备份与恢复操作有记录 | 版本化迁移测试 + CI 运行记录 + 恢复演练 | 部分通过：v004 本地新库安装、旧库回填和隔离 MySQL 备份/恢复重放已通过；CI 运行 40441635650 的质量、MySQL、MinIO 任务均通过；在线备份一致性与较大规模恢复成本待验 |
