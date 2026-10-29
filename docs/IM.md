@@ -38,7 +38,7 @@ Local recipients and the sender's other local devices are also reached by the pr
 | Presence | Local hub plus expiring Redis node entries; Redis failure falls back to local visibility | Configured refresh is 30 seconds and node expiry 75 seconds; this test does not wait through a full crashed-node expiry |
 | Device retention | New IDs capped at 32; 30-day idle eviction and 90-day expiry remove device-specific state, retaining messages | Continuously active devices' exact receipts are not compacted yet |
 
-Group removal blocks later sends/history reads and removes that member's device cursors. Remote group hints recheck current SQL membership before dispatch. Data already delivered before removal cannot be recalled. The server commit-order regression below is separate from the process matrix. The web client currently loads only the latest 100 group rows and ACKs live rows directly; backlog paging and gap-safe cumulative ACK handling remain a known client defect (P1-09).
+Group removal locks the group row, deletes that member's records and removes device cursors. In-flight sends re-verify membership under the group row lock and are rejected if revocation committed; ACK transactions verify active membership before writing device or shared cursors. Remote group hints recheck current SQL membership before dispatch. Data already delivered before removal cannot be recalled. The server commit-order and member-revocation regressions below are separate from the process matrix. The web client currently loads only the latest 100 group rows and ACKs live rows directly; backlog paging and gap-safe cumulative ACK handling remain a known client defect (P1-09).
 
 ## Same-group transaction ordering
 
@@ -54,7 +54,11 @@ go test -race ./internal/platform -run '^TestMySQLGroupCommitOrder$' -count=3 -v
 
 The test uses two independently connected servers and real WebSocket/HTTP routes. A test-only GORM callback pauses after the first SQL insert; production binaries have no fault switch. It checks commit and rollback blocking, independent groups, unread after ACKing the lower ID, and same-client-ID retries. Existing MySQL CI discovers it via `^TestMySQL`. Without the DSN it skips, which is not acceptance evidence.
 
-A hot group now waits on its own database row; no throughput improvement is claimed. Committed rows can still be delivered in a different order because fanout happens after the transaction. Cumulative group ACK requires the client to have synchronized all earlier rows; this change does not provide exact group receipts. Membership removal and ACK still need their own concurrent transaction tests.
+A hot group now waits on its own database row; no throughput improvement is claimed. Committed rows can still be delivered in a different order because fanout happens after the transaction. Cumulative group ACK requires the client to have synchronized all earlier rows; this change does not provide exact group receipts.
+
+### Group membership revocation and in-flight sends/ACKs
+
+`removeGroupMember` acquires `SELECT id FROM chat_groups WHERE id = ? FOR UPDATE` inside its deletion transaction to serialize against concurrent invitations and message sends. `sendGroupMessage` re-checks that the sender is still a member (`tx.Where("group_id = ? AND user_id = ?", e.GroupID, userID).First(&currentMember)`) under the group row lock, returning `group not found` if revocation committed ahead of insertion. `ackGroupMessage` wraps its cursor updates in a transaction that re-checks active membership before creating or updating `GroupDeviceRead` / `GroupRead`, returning 404 (`group membership not found`) if the member has been removed. Sequential and permission checks run in `TestGroupMemberRevocationPermissions`; concurrent serialization runs under MySQL in `TestMySQLGroupMemberRevocationRace`.
 
 ## Real process verification
 
