@@ -100,6 +100,16 @@ Local execution used Go 1.27.2, MySQL 8.4.11, Redis 8.2.9 and WSL2 Linux x86_64;
 
 A07 remains partial pending the final two-browser/full-component workflow, concurrent membership revocation, full presence-expiry fault observation, long-lived active-device receipt compaction and the prescribed load run. Device eviction/expiry have separate existing SQLite/MySQL tests; this process matrix does not simulate 90 days. RabbitMQ commit/confirm/ACK kill windows remain separate A06 work. A disconnect can produce duplicate real-time events; SQL history and receipts, with client synchronization, provide recovery.
 
+## Group history membership and unread semantics
+
+Group messaging enforces membership boundaries across all endpoints:
+1. **Non-members**: `GET /api/groups/:id/messages`, `/unread`, and ACK routes return 404; WebSocket sends return a `group not found` error event.
+2. **First invitation**: `GroupRead.LastAckID` initializes to the highest message ID at invitation time. The user starts with `unread_count = 0` (no historic unread backlog).
+3. **Membership removal**: Removes `GroupMember`, `GroupRead`, and `GroupDeviceRead`. The user immediately loses access to all history, unread, and sending routes.
+4. **Re-invitation**: The cursor is advanced to the latest message at the moment of re-invitation. Messages sent while absent do not generate unread notifications. Once re-admitted, the member can query full group history (`groupHistory`), matching the transparent context model of modern messaging platforms (Telegram/Slack).
+
+These boundaries are verified by `TestGroupMembershipLifecycleAndHistorySemantics` in `internal/platform/group_history_semantics_test.go`.
+
 ## Code reading order
 
 1. [`hub.go`](../internal/platform/hub.go): authenticate, persist, ACK, local fanout and replay.
