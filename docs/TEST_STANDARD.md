@@ -1,6 +1,6 @@
 # GoStream 测试与验收标准
 
-更新日期：2026-10-27。此文档规定 [`DELIVERY_SCOPE.md`](DELIVERY_SCOPE.md) 所述求职展示版如何判定完成。带有“目标”的条件尚未通过；已运行过的命令和实测数字以 [`PERFORMANCE.md`](PERFORMANCE.md) 与 [`PROGRESS.md`](../PROGRESS.md) 为准。
+更新日期：2026-10-29。此文档规定 [`DELIVERY_SCOPE.md`](DELIVERY_SCOPE.md) 所述求职展示版如何判定完成。带有“目标”的条件尚未通过；已运行过的命令和实测数字以 [`PERFORMANCE.md`](PERFORMANCE.md) 与 [`PROGRESS.md`](../PROGRESS.md) 为准。
 
 ## 判定规则
 
@@ -17,7 +17,7 @@ go version
 go test ./...
 go test -race ./...
 go vet ./...
-go build ./cmd/gostream
+go build ./cmd/gostream ./cmd/gostream-media ./cmd/gostream-events
 node --check web/app.js
 docker compose config --quiet
 ```
@@ -44,7 +44,7 @@ Outbox 租约交接由 `TestOutboxLeaseHandoff`、`TestOutboxExpiredLeaseWithout
 
 运行环境需要在记录中注明：Git commit、Go 版本、操作系统/CPU/内存、容器镜像版本、MySQL/Redis/RabbitMQ/MinIO 配置、数据库规模、是否启用 FFmpeg，以及具体命令。CI 最终至少执行 Go 测试、vet、构建和前端语法检查；race、真实组件集成测试和浏览器验收可以在单独任务中执行，但发布前必须有对应结果。
 
-当前已有 opt-in MySQL 测试位于 `internal/platform/mysql_integration_test.go`，并依赖 `GOSTREAM_TEST_MYSQL_DSN`。CI 的 MySQL 任务先在全新服务库执行固定 SQL 的 v001–v004 安装，再用第二个隔离库检查已有数据采用、缺失索引恢复、从 v001 升级及重复运行，并比较两个库的列、索引和外键元数据。`tests/integration/mysql_recovery.sh` 另建两个临时库，执行真实 MySQL 逻辑备份、异库恢复、v002 回滚和重新升级，随后执行全部 `TestMySQL*` 平台测试。SQLite 迁移测试对照当前 GORM 模型、模拟建索引失败后重试、验证 v004 已完成任务的回填，并拒绝缺列旧库。现有 `tests/integration/media_smoke.py`、`media_failure_smoke.py`、`minio_smoke.py`、`minio_outage_smoke.py`、`minio_processing_outage_smoke.py` 和 `tests/load` 提供部分测试能力。`TestMinIOMediaAcrossInstances` 使用隔离桶验证双实例文件/分片、Range、完成重试和垃圾回收；`TestMinIOMediaTransfer` 验证最终媒体与有效续传分片导入、清单备份、恢复、重复运行和损坏/冲突拒绝。`TestMinIOMediaValidationAndRecovery` 在真实 MinIO 上用两套 API 路由覆盖匿名/越权、会话超限、分片长度与索引、冲突哈希、同大小损坏对象的重试修复、缺失对象恢复、重复完成及错误整文件哈希；配置 `GOSTREAM_TEST_MINIO_MYSQL_DSN` 时使用已迁移的隔离 MySQL，CI 在联合恢复演练后执行此组合。CI 的真实 MinIO 任务还运行 SQL 与对象联合恢复演练，并在新数据库和新桶完成切换前的上传会话。RabbitMQ、完整混合负载、存储完全中断及更多视频编解码格式与权限负例仍待开发。
+当前已有 opt-in MySQL 测试位于 `internal/platform/mysql_integration_test.go`，并依赖 `GOSTREAM_TEST_MYSQL_DSN`。CI 的 MySQL 任务先在全新服务库执行固定 SQL 的 v001–v004 安装，再用第二个隔离库检查已有数据采用、缺失索引恢复、从 v001 升级及重复运行，并比较两个库的列、索引和外键元数据。`tests/integration/mysql_recovery.sh` 另建两个临时库，执行真实 MySQL 逻辑备份、异库恢复、v002 回滚和重新升级，随后执行全部 `TestMySQL*` 平台测试。SQLite 迁移测试对照当前 GORM 模型、模拟建索引失败后重试、验证 v004 已完成任务的回填，并拒绝缺列旧库。现有 `tests/integration/media_smoke.py`、`media_failure_smoke.py`、`minio_smoke.py`、`minio_outage_smoke.py`、`minio_processing_outage_smoke.py` 和 `tests/load` 提供部分测试能力。`TestMinIOMediaAcrossInstances` 使用隔离桶验证双实例文件/分片、Range、完成重试和垃圾回收；`TestMinIOMediaTransfer` 验证最终媒体与有效续传分片导入、清单备份、恢复、重复运行和损坏/冲突拒绝。`TestMinIOMediaValidationAndRecovery` 在真实 MinIO 上用两套 API 路由覆盖匿名/越权、会话超限、分片长度与索引、冲突哈希、同大小损坏对象的重试修复、缺失对象恢复、重复完成及错误整文件哈希；配置 `GOSTREAM_TEST_MINIO_MYSQL_DSN` 时使用已迁移的隔离 MySQL，CI 在联合恢复演练后执行此组合。CI 的真实 MinIO 任务还运行 SQL 与对象联合恢复演练，并在新数据库和新桶完成切换前的上传会话。RabbitMQ 已有独立真实组件脚本，完整混合负载、存储完全中断及更多视频编解码格式与权限负例仍待补齐。
 
 MinIO 测试使用独立 Compose 项目和端口，不应对正在演示的 `gostream` 项目运行 `down -v`：
 
@@ -64,16 +64,18 @@ docker compose -p gostream-object -f docker-compose.yml -f docker-compose.object
 
 上传完成与清理由 `TestUploadCompletionKeepsLeaseDuringAssembly`、`TestUploadCleanupRechecksCompletionLease`、`TestUploadCompletionLeaseLossKeepsCommittedMedia`、`TestUploadCleanupRecoversAfterDatabaseFailure` 和 `TestUploadCompletionHeartbeatStopsOnFailure` 覆盖。它们检查暂停后的续租、清理候选状态变更、旧 worker 不删除新 worker 已登记的本地文件、清理事务失败后的租约接管，以及取消/数据库故障时心跳退出。`TestMinIOUploadCompletionCleanupLease` 需要真实 MinIO 和专用、已迁移且没有上传会话的隔离 MySQL 库（`GOSTREAM_TEST_UPLOAD_LEASE_MYSQL_DSN`）；它用两套独立 SQL 连接与代理暂停真实对象 GET，观察续租后推进清理时刻，检查最终对象哈希、唯一资产登记、跨实例完成重试及废弃会话清理。运行命令为 `go test -race ./internal/platform -run '^TestMinIOUploadCompletionCleanupLease$' -count=1 -v`，MinIO 配置沿用上述三个环境变量；CI 会另建专用库。该用例模拟清理时间边界，不代表已测量真实长时间传输、进程强杀或存储完全中断。
 
+RabbitMQ 验证运行 `python3 tests/integration/rabbitmq_smoke.py --go-bin /usr/local/go/bin/go --mysql-container gostream-mysql-1 --mysql-addr 127.0.0.1:3307`。脚本只在随机 MySQL 库/用户和临时 RabbitMQ 4.3.7 上写入，运行真实 broker 矩阵的 race 测试、API 后台 worker 自动投递、SIGTERM 退出及运维 CLI，结束后删除资源。它需要 Docker、可拉取的固定镜像以及 MySQL 容器内部的 root 密码环境；CI 新增 `rabbitmq-integration` 任务执行同一入口。直接运行 `TestRabbitMQNotificationIntegration` 需要 `GOSTREAM_TEST_RABBITMQ_URL`、专用且已迁移的空 outbox 库 `GOSTREAM_TEST_RABBITMQ_MYSQL_DSN`；只有显式提供允许停止的临时 `GOSTREAM_TEST_RABBITMQ_CONTAINER` 才执行 broker 重启分项。用例覆盖发布确认/不可路由、确认后 SQL 完成丢失、消费提交后 ACK 丢失、两消费者同时处理 16 份重复投递、瞬时/持续 SQL 故障、死信回放、重启恢复和实际 WebSocket 内容。无环境时普通 Go 测试跳过此矩阵。详细保证、命令和未验证窗口见 [`RABBITMQ.md`](RABBITMQ.md)。
+
 ## 功能验收矩阵
 
 | 编号 | 最终必须验证的结果 | 最低证据 | 当前判断 |
 | --- | --- | --- | --- |
-| A01 启动与持久化 | 空库一键启动后 `/health`、`/ready`、`/metrics` 可访问；重启 API 后账号、视频、互动和消息仍在；依赖故障时 `/ready` 的语义与文档一致 | Compose、真实 MySQL/Redis/RabbitMQ/MinIO、重启记录 | 部分通过：MinIO 覆盖配置可启动，RabbitMQ 与全组件持久化恢复仍待验 |
+| A01 启动与持久化 | 空库一键启动后 `/health`、`/ready`、`/metrics` 可访问；重启 API 后账号、视频、互动和消息仍在；依赖故障时 `/ready` 的语义与文档一致 | Compose、真实 MySQL/Redis/RabbitMQ/MinIO、重启记录 | 部分通过：MinIO 覆盖配置可启动，RabbitMQ 独立停机/重启恢复及真实 API worker 生命周期已验；最终全组件 Compose 持久化恢复仍待验 |
 | A02 身份与权限 | 注册、登录、JWT 过期/伪造、资料和头像修改、关注与取消；未登录者和其他用户不能修改私有资源；重复关注结果一致 | API 单元/集成测试 + 两账号浏览器操作 | 部分通过：主路径已有，最终部署权限矩阵待复验 |
 | A03 视频与对象 | 文件和分片上传能在断点后续传；同一会话可跨两 API 实例完成；错块、错哈希、越权、超限均拒绝；FFmpeg 成功后视频/封面可从 MinIO 读取，失败后不进入公共 Feed；重试、删除、孤儿清理无误删 | 真实 MySQL/MinIO/FFmpeg + 视频探测 + 故障测试 | 部分通过：真实 MinIO 双实例续传、FFmpeg、Range、对象清理及停机后上传恢复已验；离线旧媒体导入及隔离 SQL/对象恢复已验；分片与资产负例已在真实 MySQL/MinIO 上验证；输出 PUT 成功响应丢失及 JPEG/PNG/WebP 截断文件已验；存储完全中断、更多视频格式/权限场景与较大规模恢复成本待验 |
 | A04 Feed | 时间线、关注、热榜、推荐均正确分页；相同时间戳与新插入记录不造成稳定数据集中的漏项/重复；普通作者推送、高粉作者拉取可配置且结果一致；Redis 中断可回退数据库 | 单元测试 + 真实 MySQL/Redis 双实例 + 压测 | 部分通过：混合推拉、批量幂等、迟到关注及真实 MySQL 同时间戳翻页已局部验证；v004 完整数据集交替读压测只改善约 11% 与 4% 的 P95，未达 20% 门槛；真实 MySQL 双连接接管 130 粉任务且重放无重复，小数据读写混合短跑 1,907 请求无错误；实际进程故障、完整数据集 20 并发/60 秒三轮及持续积压仍未验收 |
 | A05 互动与计数 | 并发重复点赞/收藏、取消及关注只有一次状态转换；计数与明细一致且非负；评论回复层级、权限和通知正确；播放计数策略明确 | 真实 MySQL 并发集成测试，结束后核对表和计数 | 部分通过：真实 MySQL 并发删除曾出现 1213 死锁并返回 500；整笔事务有限重试后，双连接 8×80 次点赞/收藏切换与隔离库混合短跑通过且计数匹配；多用户/多视频、播放量和完整通知矩阵待验 |
-| A06 异步事件 | 业务事务失败不留待发事件；提交成功后 broker 停机也不丢事件；发布确认后重复投递不产生重复通知；消费者重启、失败重试和死信可恢复 | 真实 MySQL/RabbitMQ 故障注入 + outbox/消费者状态核对 | 未验证：当前只有数据库 outbox worker |
+| A06 异步事件 | 业务事务失败不留待发事件；提交成功后 broker 停机也不丢事件；发布确认后重复投递不产生重复通知；消费者重启、失败重试和死信可恢复 | 真实 MySQL/RabbitMQ 故障注入 + outbox/消费者状态核对 | 部分通过：确认发布、不可路由退回、确认后 SQL 状态丢失、提交后 ACK 丢失、双消费者重复投递、SQL 重试/耗尽死信/回放、broker 重启及真实 API worker 已在隔离 MySQL/RabbitMQ 验证；实际强杀进程窗口、DLQ 目标中断及完整最终配置仍待验 |
 | A07 IM | 两实例间单聊/群聊、成员权限、同一 `client_id` 重试、每设备 ACK、离线重放、超过 100 条的历史补页都正确；Redis 中断后重连能补齐；相同会话历史按服务端 ID 排序，重复推送可去重 | 两浏览器配置 + 两 API 实例 + 真实 MySQL/Redis 故障场景 | 部分通过：局部多实例与浏览器测试已有，故障和长期回执清理待验 |
 | A08 通知与搜索 | 关注/点赞/评论/私信通知按权限显示，分页和有界已读不吞掉新通知；搜索用户与已发布视频支持独立分页和转义字符，隐藏视频不出现 | 真实 MySQL + 浏览器分页测试 + 查询计划记录 | 部分通过：功能已验证，较大数据量查询计划待补 |
 | A09 Web 全流程 | 两个独立浏览器账号完成注册、续传发布、Feed、互动、主页、搜索、通知、单聊和群聊；刷新/重启后状态一致；手机宽度下主要操作可用 | 最终 Compose 版本的浏览器记录，附账号/数据清理说明 | 部分通过：现有功能分批验证，完整最终配置待验 |

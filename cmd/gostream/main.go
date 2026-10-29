@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -68,6 +69,12 @@ func main() {
 	}
 	defer sqlDB.Close()
 	server := platform.NewServer(db, secret, mediaDir)
+	if brokerURL := os.Getenv("RABBITMQ_URL"); brokerURL != "" {
+		if err := server.UseRabbitMQ(brokerURL, env("RABBITMQ_QUEUE", "gostream.notifications.v1")); err != nil {
+			log.Fatal(err)
+		}
+		defer server.CloseRabbitMQ()
+	}
 	fanoutMaxFollowers, err := strconv.Atoi(env("FEED_FANOUT_MAX_FOLLOWERS", "0"))
 	if err != nil || fanoutMaxFollowers < 0 || fanoutMaxFollowers > 100000 {
 		log.Fatal("FEED_FANOUT_MAX_FOLLOWERS must be an integer from 0 to 100000")
@@ -133,13 +140,11 @@ func main() {
 	}()
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	go server.RunOutbox(ctx)
-	go server.RunUploadCleanup(ctx)
-	go server.RunMessageDeviceCleanup(ctx)
-	go server.RunMediaReconciliation(ctx)
-	go server.RunVideoProcessing(ctx)
-	go server.RunFeedFanout(ctx)
-	go server.RunRealtimeBridge(ctx)
+	var workers sync.WaitGroup
+	for _, run := range []func(context.Context){server.RunOutbox, server.RunUploadCleanup, server.RunMessageDeviceCleanup, server.RunMediaReconciliation, server.RunVideoProcessing, server.RunFeedFanout, server.RunRealtimeBridge, server.RunRabbitMQ} {
+		workers.Go(func() { run(ctx) })
+	}
+	defer func() { stop(); workers.Wait() }()
 	select {
 	case err = <-serveErr:
 		log.Fatal(err)

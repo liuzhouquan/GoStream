@@ -25,6 +25,7 @@ type Server struct {
 	cache              *redisFeedCache
 	rateLimiter        *rateLimiter
 	realtime           *realtimeBridge
+	broker             *rabbitNotificationBroker
 	ffmpegBin          string
 	ffprobeBin         string
 	fanoutMaxFollowers int

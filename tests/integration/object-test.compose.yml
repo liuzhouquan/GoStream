@@ -3,6 +3,8 @@
 services:
   mysql:
     ports: !override ["127.0.0.1:13307:3306"]
+  rabbitmq:
+    ports: !override []
   api:
     image: gostream-api:latest
     ports: !override ["127.0.0.1:18080-18081:8080"]

@@ -40,8 +40,8 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
-      - name: Build API
-        run: go build -o "$RUNNER_TEMP/gostream" ./cmd/gostream
+      - name: Build executables
+        run: go build ./cmd/gostream ./cmd/gostream-media ./cmd/gostream-events
 
       - name: Check web client syntax
         run: node --check web/app.js
@@ -53,6 +53,42 @@ jobs:
           docker compose config --quiet
           docker compose -f docker-compose.yml -f docker-compose.object.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.object.yml -f tests/integration/object-test.compose.yml config --quiet
+          python3 - <<'PY'
+          import json, subprocess
+          command = ['docker', 'compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.object.yml', '-f', 'tests/integration/object-test.compose.yml', 'config', '--format', 'json']
+          config = json.loads(subprocess.check_output(command, text=True))
+          assert not config['services']['rabbitmq'].get('ports'), 'isolated broker must not bind demo host ports'
+          PY
+
+  rabbitmq-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root-rabbitmq-ci-only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="MYSQL_PWD=root-rabbitmq-ci-only mysqladmin ping -h 127.0.0.1 -uroot --silent"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Install the declared Go version
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Exercise broker confirms, redelivery, DLQ replay, restart and API workers
+        run: >-
+          python3 tests/integration/rabbitmq_smoke.py
+          --go-bin go
+          --mysql-container "${{ job.services.mysql.id }}"
+          --mysql-addr 127.0.0.1:3306
 
   redis-integration:
     runs-on: ubuntu-24.04

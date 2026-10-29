@@ -27,6 +27,24 @@ services:
       timeout: 3s
       retries: 20
 
+  rabbitmq:
+    image: rabbitmq:4.3.7-management
+    hostname: rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: gostream
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-gostream-local-rabbitmq-secret}
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "+S 2:2"
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
   api:
     build: .
     environment:
@@ -36,11 +54,15 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a unique random value in .env or the shell}
       MEDIA_DIR: /app/data/media
       REDIS_ADDR: redis:6379
+      RABBITMQ_URL: amqp://gostream:${RABBITMQ_PASSWORD:-gostream-local-rabbitmq-secret}@rabbitmq:5672/
+      RABBITMQ_QUEUE: gostream.notifications.v1
       FFMPEG_BIN: /usr/bin/ffmpeg
     depends_on:
       mysql:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     ports:
       - "8080:8080"
@@ -84,6 +106,7 @@ services:
       - prometheus
 
 volumes:
+  rabbitmq_data:
   mysql_data:
   redis_data:
   media_data:
