@@ -244,6 +244,18 @@ jobs:
           GOSTREAM_TEST_MINIO_MYSQL_DSN: gostream:gostream-media-ci-only@tcp(127.0.0.1:3306)/gostream_media_ci?charset=utf8mb4&parseTime=True&loc=Local
         run: go test ./internal/platform -run '^TestMinIOProcessedOutputLostResponse$' -count=1 -v
 
+      - name: Test completion leases and cleanup across MySQL and MinIO instances
+        env:
+          GOSTREAM_TEST_MYSQL_DSN: gostream:gostream-media-ci-only@tcp(127.0.0.1:3306)/gostream_upload_lease_ci?charset=utf8mb4&parseTime=True&loc=Local
+          GOSTREAM_TEST_UPLOAD_LEASE_MYSQL_DSN: gostream:gostream-media-ci-only@tcp(127.0.0.1:3306)/gostream_upload_lease_ci?charset=utf8mb4&parseTime=True&loc=Local
+        run: |
+          docker exec -i -e MYSQL_PWD=root-media-ci-only "${{ job.services.mysql.id }}" mysql -uroot <<'SQL'
+          CREATE DATABASE gostream_upload_lease_ci;
+          GRANT ALL PRIVILEGES ON gostream_upload_lease_ci.* TO 'gostream'@'%';
+          SQL
+          go test ./internal/migrations -run '^TestApplyMySQLIntegration$' -count=1
+          go test -race ./internal/platform -run '^TestMinIOUploadCompletionCleanupLease$' -count=1 -v
+
       - name: Stop isolated MinIO
         if: always()
         run: docker rm -f gostream-ci-minio || true

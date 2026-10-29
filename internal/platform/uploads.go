@@ -218,7 +218,7 @@ func (s *Server) completeUploadSession(c *gin.Context) {
 		return
 	}
 	now := time.Now().UTC()
-	leaseUntil := now.Add(5 * time.Minute).Truncate(time.Millisecond)
+	leaseUntil := now.Add(uploadCompletionLeaseDuration).Truncate(time.Millisecond)
 	claim := s.DB.Model(&UploadSession{}).
 		Where("id = ? AND owner_id = ? AND expires_at > ? AND (status = ? OR (status = ? AND (lease_until IS NULL OR lease_until < ?)))", session.ID, uid(c), now, "open", "completing", now).
 		Updates(map[string]any{"status": "completing", "lease_until": leaseUntil})
@@ -231,13 +231,17 @@ func (s *Server) completeUploadSession(c *gin.Context) {
 		return
 	}
 	succeeded := false
+	lease := s.keepUploadCompletionLease(c.Request.Context(), session.ID, leaseUntil)
 	defer func() {
+		currentLease, _ := lease.stop()
 		if !succeeded {
-			_ = s.DB.Model(&UploadSession{}).Where("id = ? AND status = ? AND lease_until = ?", session.ID, "completing", leaseUntil).Updates(map[string]any{"status": "open", "lease_until": nil}).Error
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = s.DB.WithContext(ctx).Model(&UploadSession{}).Where("id = ? AND status = ? AND lease_until = ?", session.ID, "completing", currentLease).Updates(map[string]any{"status": "open", "lease_until": nil}).Error
 		}
 	}()
 	if s.objectMedia != nil {
-		s.completeObjectUploadSession(c, session, url, leaseUntil, &succeeded)
+		s.completeObjectUploadSession(c, session, url, lease, &succeeded)
 		return
 	}
 	var chunks []UploadChunk
@@ -317,13 +321,11 @@ func (s *Server) completeUploadSession(c *gin.Context) {
 		return
 	}
 	finalPath := filepath.Join(s.MediaDir, session.ID+session.Ext)
-	linked := false
-	if err := os.Link(tmpName, finalPath); err == nil {
-		linked = true
-	} else if !os.IsExist(err) {
-		respondError(c, 500, "could not finalize upload")
-		return
-	} else {
+	if err := os.Link(tmpName, finalPath); err != nil {
+		if !os.IsExist(err) {
+			respondError(c, 500, "could not finalize upload")
+			return
+		}
 		stored, readErr := os.Open(finalPath)
 		if readErr != nil {
 			respondError(c, 500, "could not inspect existing upload")
@@ -337,10 +339,9 @@ func (s *Server) completeUploadSession(c *gin.Context) {
 			return
 		}
 	}
-	if err := s.registerCompletedUpload(c.Request.Context(), uid(c), session, url, kind, total, leaseUntil); err != nil {
-		if linked {
-			_ = os.Remove(finalPath)
-		}
+	if err := s.registerCompletedUpload(c.Request.Context(), uid(c), session, url, kind, total, lease); err != nil {
+		// Another completion may already have committed this shared path.
+		// Keep it for retries; unreferenced files use the orphan grace period.
 		respondError(c, 500, "could not register completed upload")
 		return
 	}
@@ -351,7 +352,11 @@ func (s *Server) completeUploadSession(c *gin.Context) {
 	c.JSON(200, gin.H{"url": url, "size": total, "sha256": hash})
 }
 
-func (s *Server) registerCompletedUpload(ctx context.Context, ownerID uint, session UploadSession, url, kind string, total int64, leaseUntil time.Time) error {
+func (s *Server) registerCompletedUpload(ctx context.Context, ownerID uint, session UploadSession, url, kind string, total int64, lease *uploadCompletionLease) error {
+	leaseUntil, err := lease.stop()
+	if err != nil {
+		return err
+	}
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&MediaAsset{OwnerID: ownerID, URL: url, Kind: kind, Size: total})
 		if res.Error != nil {
@@ -366,12 +371,12 @@ func (s *Server) registerCompletedUpload(ctx context.Context, ownerID uint, sess
 				return errors.New("existing asset conflicts with upload")
 			}
 		}
-		updated := tx.Model(&UploadSession{}).Where("id = ? AND status = ? AND lease_until = ?", session.ID, "completing", leaseUntil).Updates(map[string]any{"status": "completed", "lease_until": nil})
+		updated := tx.Model(&UploadSession{}).Where("id = ? AND status = ? AND lease_until = ? AND lease_until > ?", session.ID, "completing", leaseUntil, time.Now().UTC()).Updates(map[string]any{"status": "completed", "lease_until": nil})
 		if updated.Error != nil {
 			return updated.Error
 		}
 		if updated.RowsAffected != 1 {
-			return errors.New("upload session lost completion lease")
+			return errUploadLeaseLost
 		}
 		return nil
 	})
@@ -380,16 +385,35 @@ func (s *Server) registerCompletedUpload(ctx context.Context, ownerID uint, sess
 // CleanupExpiredUploads removes partial files after their 24-hour resume window.
 // Completed sessions remain in the database so completion retries stay idempotent.
 func (s *Server) CleanupExpiredUploads(ctx context.Context) (int, error) {
-	now := time.Now().UTC()
+	return s.cleanupExpiredUploadsAt(ctx, time.Now().UTC())
+}
+
+func (s *Server) cleanupExpiredUploadsAt(ctx context.Context, now time.Time) (int, error) {
 	var sessions []UploadSession
-	if err := s.DB.WithContext(ctx).Where("(expires_at <= ? AND (status = ? OR (status = ? AND (lease_until IS NULL OR lease_until < ?)))) OR (status = ? AND cleaned_at IS NULL AND created_at <= ?)",
-		now, "open", "completing", now, "completed", now.Add(-time.Hour)).Order("created_at ASC").Limit(100).Find(&sessions).Error; err != nil {
+	if err := s.DB.WithContext(ctx).Where("(expires_at <= ? AND (status = ? OR (status IN ? AND (lease_until IS NULL OR lease_until < ?)))) OR (status = ? AND cleaned_at IS NULL AND created_at <= ?)",
+		now, "open", []string{"completing", "cleaning"}, now, "completed", now.Add(-time.Hour)).Order("created_at ASC").Limit(100).Find(&sessions).Error; err != nil {
 		return 0, err
 	}
 	cleaned := 0
 	for _, session := range sessions {
 		if err := ctx.Err(); err != nil {
 			return cleaned, err
+		}
+		if session.Status != "completed" {
+			// Selection is only a hint. A heartbeat may have renewed this row
+			// since the query; claim it before deleting any external bytes.
+			until := now.Add(uploadCompletionLeaseDuration).Truncate(time.Millisecond)
+			claim := s.DB.WithContext(ctx).Model(&UploadSession{}).
+				Where("id = ? AND expires_at <= ? AND (status = ? OR (status IN ? AND (lease_until IS NULL OR lease_until < ?)))",
+					session.ID, now, "open", []string{"completing", "cleaning"}, now).
+				Updates(map[string]any{"status": "cleaning", "lease_until": until})
+			if claim.Error != nil {
+				return cleaned, claim.Error
+			}
+			if claim.RowsAffected == 0 {
+				continue
+			}
+			session.LeaseUntil = &until
 		}
 		if s.objectMedia != nil {
 			if err := s.objectMedia.removePrefix(ctx, "chunks/"+session.ID+"/"); err != nil {
@@ -400,17 +424,29 @@ func (s *Server) CleanupExpiredUploads(ctx context.Context) (int, error) {
 				return cleaned, err
 			}
 		}
-		if err := s.DB.WithContext(ctx).Where("session_id = ?", session.ID).Delete(&UploadChunk{}).Error; err != nil {
-			return cleaned, err
+		err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			if err := tx.Where("session_id = ?", session.ID).Delete(&UploadChunk{}).Error; err != nil {
+				return err
+			}
+			var result *gorm.DB
+			if session.Status != "completed" {
+				result = tx.Where("id = ? AND status = ? AND lease_until = ?", session.ID, "cleaning", session.LeaseUntil).Delete(&UploadSession{})
+			} else {
+				result = tx.Model(&UploadSession{}).Where("id = ? AND status = ? AND cleaned_at IS NULL", session.ID, "completed").Update("cleaned_at", time.Now().UTC())
+			}
+			if result.Error != nil {
+				return result.Error
+			}
+			if result.RowsAffected != 1 {
+				return errUploadLeaseLost
+			}
+			return nil
+		})
+		if errors.Is(err, errUploadLeaseLost) {
+			continue
 		}
-		if session.Status != "completed" {
-			if err := s.DB.WithContext(ctx).Where("id = ? AND status <> ?", session.ID, "completed").Delete(&UploadSession{}).Error; err != nil {
-				return cleaned, err
-			}
-		} else {
-			if err := s.DB.WithContext(ctx).Model(&UploadSession{}).Where("id = ?", session.ID).Update("cleaned_at", now).Error; err != nil {
-				return cleaned, err
-			}
+		if err != nil {
+			return cleaned, err
 		}
 		cleaned++
 	}
