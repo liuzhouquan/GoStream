@@ -38,7 +38,7 @@ Local recipients and the sender's other local devices are also reached by the pr
 | Presence | Local hub plus expiring Redis node entries; Redis failure falls back to local visibility | Configured refresh is 30 seconds and node expiry 75 seconds; this test does not wait through a full crashed-node expiry |
 | Device retention | New IDs capped at 32; 30-day idle eviction and 90-day expiry remove device-specific state, retaining messages | Continuously active devices' exact receipts are not compacted yet |
 
-Group removal blocks later sends/history reads and removes that member's device cursors. Remote group hints recheck current SQL membership before dispatch. Data already delivered before removal cannot be recalled. The server commit-order regression below is separate from the process matrix. The web client currently loads only the latest 100 group rows and ACKs live rows directly; backlog paging and gap-safe cumulative ACK handling remain a known client defect (P1-09).
+Group removal blocks later sends/history reads and removes that member's device cursors. Remote group hints recheck current SQL membership before dispatch. Data already delivered before removal cannot be recalled. The server commit-order regression below is separate from the process matrix. The web client manages group paging (`loadOlderGroupMessages`), out-of-order gap synchronization (`syncGroupMessages`), and safe cumulative ACK gating (`syncGroupAck`) on branch `fix/web-group-sync-ack`; browser automation in `tests/integration/web_group_sync.py` verifies backlog paging and gap-safe cursors (P1-09).
 
 ## Same-group transaction ordering
 
@@ -98,7 +98,7 @@ Direct invocation of `TestIMProcessRecovery` requires all of `GOSTREAM_TEST_IM_B
 
 Local execution used Go 1.27.2, MySQL 8.4.11, Redis 8.2.9 and WSL2 Linux x86_64; actual run results are in [`PROGRESS.md`](../PROGRESS.md). Test duration is correctness-check runtime, not a message latency or capacity measurement. This work does not claim the 20-client/1,000-message performance gate has passed.
 
-A07 remains partial pending the final two-browser/full-component workflow, web group backlog/gap synchronization, concurrent membership revocation, full presence-expiry fault observation, long-lived active-device receipt compaction and the prescribed load run. Device eviction/expiry have separate existing SQLite/MySQL tests; this process matrix does not simulate 90 days. RabbitMQ commit/confirm/ACK kill windows remain separate A06 work. A disconnect can produce duplicate real-time events; SQL history and receipts, with client synchronization, provide recovery.
+A07 remains partial pending the final two-browser/full-component workflow, concurrent membership revocation, full presence-expiry fault observation, long-lived active-device receipt compaction and the prescribed load run. Device eviction/expiry have separate existing SQLite/MySQL tests; this process matrix does not simulate 90 days. RabbitMQ commit/confirm/ACK kill windows remain separate A06 work. A disconnect can produce duplicate real-time events; SQL history and receipts, with client synchronization, provide recovery.
 
 ## Code reading order
 

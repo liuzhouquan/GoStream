@@ -12,7 +12,7 @@ function loadStoredAuth() {
   return { token: '', user: null };
 }
 const storedAuth = loadStoredAuth();
-const state = { token: storedAuth.token, user: storedAuth.user, view: 'feed', scene: 'recommend', cursor: '', loading: false, socket: null, notificationCursor: 0, notificationTopID: 0, notificationHasMore: false, notificationLoading: false, notificationLoadID: 0, search: null, chatPeer: '', chatCursor: 0, chatHasMore: false, chatLoadID: 0, chatLoading: false, chatPendingLive: [], seenMessages: new Set(), groupID: '', groupSeenMessages: new Set(), groups: [], socketRetry: 0, socketTimer: null, heartbeatTimer: null };
+const state = { token: storedAuth.token, user: storedAuth.user, view: 'feed', scene: 'recommend', cursor: '', loading: false, socket: null, notificationCursor: 0, notificationTopID: 0, notificationHasMore: false, notificationLoading: false, notificationLoadID: 0, search: null, chatPeer: '', chatCursor: 0, chatHasMore: false, chatLoadID: 0, chatLoading: false, chatPendingLive: [], seenMessages: new Set(), groupID: '', groupSeenMessages: new Set(), groups: [], groupCursor: 0, groupHasMore: false, groupLoadID: 0, groupLoading: false, groupPendingLive: [], groupLastAckID: 0, groupAckedID: 0, groupSyncing: false, socketRetry: 0, socketTimer: null, heartbeatTimer: null };
 const $ = (selector, root = document) => root.querySelector(selector);
 const content = $('#content');
 const titles = {feed:'发现灵感',following:'关注动态',hot:'热门视频',search:'发现创作者',upload:'发布作品',notifications:'通知中心',chat:'即时消息',profile:'个人主页'};
@@ -38,7 +38,7 @@ async function api(path, options={}) {
 }
 function toast(text) { const el=$('#toast');el.textContent=text;el.classList.add('show');setTimeout(()=>el.classList.remove('show'),2400); }
 function setAuth(token,user) { state.token=token;state.user=user;localStorage.setItem('gostream.token',token);localStorage.setItem('gostream.user',JSON.stringify(user));renderSession();ensureSocket();$('#auth-dialog').close();toast(`欢迎来到 GoStream，${user.nickname}`);loadView(); }
-function clearAuth() { if(state.socketTimer)clearTimeout(state.socketTimer);if(state.heartbeatTimer)clearInterval(state.heartbeatTimer);state.socketTimer=null;state.heartbeatTimer=null;if(state.socket)state.socket.close();state.socket=null;state.groupID='';state.chatPeer='';state.chatLoadID++;state.chatLoading=false;state.chatPendingLive=[];state.chatCursor=0;state.chatHasMore=false;state.notificationLoadID++;state.notificationCursor=0;state.notificationTopID=0;state.notificationHasMore=false;state.notificationLoading=false;state.token='';state.user=null;localStorage.removeItem('gostream.token');localStorage.removeItem('gostream.user');renderSession();loadView(); }
+function clearAuth() { if(state.socketTimer)clearTimeout(state.socketTimer);if(state.heartbeatTimer)clearInterval(state.heartbeatTimer);state.socketTimer=null;state.heartbeatTimer=null;if(state.socket)state.socket.close();state.socket=null;state.groupID='';state.groupLoadID++;state.groupLoading=false;state.groupPendingLive=[];state.groupCursor=0;state.groupHasMore=false;state.groupLastAckID=0;state.groupAckedID=0;state.groupSyncing=false;state.groupSeenMessages.clear();state.chatPeer='';state.chatLoadID++;state.chatLoading=false;state.chatPendingLive=[];state.chatCursor=0;state.chatHasMore=false;state.notificationLoadID++;state.notificationCursor=0;state.notificationTopID=0;state.notificationHasMore=false;state.notificationLoading=false;state.token='';state.user=null;localStorage.removeItem('gostream.token');localStorage.removeItem('gostream.user');renderSession();loadView(); }
 function renderSession() { $('#session-state').textContent=state.user?`你好，${state.user.nickname}`:'游客浏览中';$('#auth-open').textContent=state.user?'退出登录':'登录 / 注册';$('#top-avatar').innerHTML=state.user?.avatar_url?`<img src="${esc(state.user.avatar_url)}" alt="头像" />`:esc(state.user?(state.user.nickname||'G').slice(0,1).toUpperCase():'G'); }
 function activate(view) { state.view=view;state.cursor='';document.querySelectorAll('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===view));$('#page-title').textContent=titles[view]||titles.feed;document.querySelectorAll('.scene').forEach(x=>x.classList.toggle('active',x.dataset.scene===state.scene));loadView(); }
 function formatCount(n=0) { if(n>=10000)return `${(n/10000).toFixed(1)}万`;if(n>=1000)return `${(n/1000).toFixed(1)}k`;return String(n); }
@@ -182,12 +182,15 @@ function ensureSocket(){
     }else if(data.type==='group_message'){
       if(String(data.message.group_id)===String(state.groupID) && $('#group-log')){
         appendGroupMessage(data.message);
-        if(String(data.message.sender_id)!==String(state.user.id))api(`/api/groups/${data.message.group_id}/messages/${data.message.id}/ack`,{method:'POST'}).catch(()=>{});
       }else toast(String(data.message.sender_id)===String(state.user.id)?'另一设备发送了一条群消息':'收到一条新群消息');
     }else if(data.type==='notification'){
       toast('收到一条新通知');if(state.view==='notifications')renderNotifications().catch(err=>toast(err.message));
-    }else if(data.type==='sync_required'||data.type==='group_sync_required')toast('离线消息较多，请打开聊天历史查看');
-    else if(data.type==='error')toast(data.message);
+    }else if(data.type==='sync_required'||data.type==='group_sync_required'){
+      toast('离线消息较多，请打开聊天历史查看');
+      if(data.type==='group_sync_required' && state.view==='chat' && state.groupID){
+        syncGroupMessages(state.groupID).catch(()=>{});
+      }
+    }else if(data.type==='error')toast(data.message);
   };
   ws.onclose=()=>{
     if(state.heartbeatTimer)clearInterval(state.heartbeatTimer);state.heartbeatTimer=null;
@@ -253,24 +256,155 @@ function appendMessage(m){
   const log=$('#chat-log');
   if(log){if(log.firstElementChild?.tagName==='P')log.innerHTML='';log.insertAdjacentHTML('beforeend',messageRow(m));log.scrollTop=log.scrollHeight;}
 }
+function groupMessageRow(m){
+  const time = m.created_at ? new Date(m.created_at).toLocaleString() : '';
+  return `<div class="message-row" data-message-id="${m.id||''}"><b>${m.sender_id===state.user.id?'你':`用户 ${m.sender_id}`}</b> ${esc(m.body)}<small>${esc(time)}</small></div>`;
+}
 async function openGroup(id){
   state.groupID=String(id);
-  const history=await api(`/api/groups/${id}/messages?limit=100`);
-  const panel=$('#group-panel');if(!panel)return;
+  const loadID=++state.groupLoadID;
+  state.groupLoading=true;
+  state.groupPendingLive=[];
+  state.groupCursor=0;
+  state.groupHasMore=false;
+  state.groupLastAckID=0;
+  state.groupAckedID=0;
   state.groupSeenMessages.clear();
-  const items=(history.items||[]).reverse();
-  const group=state.groups.find(g=>String(g.id)===String(id));
-  const controls=group?.owner_id===state.user.id?`<form id="group-add-form" class="form-grid"><label>邀请用户 ID<input name="user_id" type="number" min="1" required /></label><button class="text-button">添加成员</button></form><form id="group-remove-form" class="form-grid"><label>移除成员 ID<input name="user_id" type="number" min="1" required /></label><button class="text-button">移除成员</button></form>`:`<button class="text-button group-leave" data-group-leave="${esc(id)}">退出群聊</button>`;
-  panel.innerHTML=`<h3>群聊 #${esc(id)}</h3><div id="group-log" class="message-list">${items.map(m=>`<div class="message-row"><b>${m.sender_id===state.user.id?'你':`用户 ${m.sender_id}`}</b> ${esc(m.body)}<small>${new Date(m.created_at).toLocaleString()}</small></div>`).join('')}</div><form id="group-send-form" class="form-grid"><label>发送群消息<textarea name="body" maxlength="4000" required></textarea></label><button class="primary-button">发送到群聊 →</button></form>${controls}`;
-  items.forEach(m=>state.groupSeenMessages.add(m.id));
-  if(items.length)api(`/api/groups/${id}/messages/${items[items.length-1].id}/ack`,{method:'POST'}).catch(()=>{});
-  ensureSocket();
+  const panel=$('#group-panel');
+  if(panel)panel.innerHTML=`<h3>群聊 #${esc(id)}</h3><p>正在加载群消息…</p>`;
+  try{
+    const [unread,history]=await Promise.all([
+      api(`/api/groups/${id}/unread`),
+      api(`/api/groups/${id}/messages?limit=100`)
+    ]);
+    if(loadID!==state.groupLoadID||state.view!=='chat'||String(state.groupID)!==String(id))return;
+    const p=$('#group-panel');
+    if(!p)return;
+    const items=(history.items||[]).reverse();
+    state.groupLastAckID=Number(unread?.last_ack_id||0);
+    state.groupAckedID=state.groupLastAckID;
+    state.groupCursor=Number(history.next_cursor||(items.length?items[0].id:0));
+    state.groupHasMore=Boolean(history.has_more);
+    const group=state.groups.find(g=>String(g.id)===String(id));
+    const controls=group?.owner_id===state.user.id?`<form id="group-add-form" class="form-grid"><label>邀请用户 ID<input name="user_id" type="number" min="1" required /></label><button class="text-button">添加成员</button></form><form id="group-remove-form" class="form-grid"><label>移除成员 ID<input name="user_id" type="number" min="1" required /></label><button class="text-button">移除成员</button></form>`:`<button class="text-button group-leave" data-group-leave="${esc(id)}">退出群聊</button>`;
+    p.innerHTML=`<h3>群聊 #${esc(id)}</h3><button id="group-more" class="text-button chat-more" data-group-more ${state.groupHasMore?'':'hidden'}>加载更早的群消息</button><div id="group-log" class="message-list">${items.map(groupMessageRow).join('')||'<p>还没有群消息。</p>'}</div><form id="group-send-form" class="form-grid"><label>发送群消息<textarea name="body" maxlength="4000" required></textarea></label><button class="primary-button">发送到群聊 →</button></form>${controls}`;
+    items.forEach(m=>state.groupSeenMessages.add(m.id));
+    const log=$('#group-log');
+    if(log)log.scrollTop=log.scrollHeight;
+    state.groupLoading=false;
+    const loadedIDs=new Set(items.map(m=>m.id));
+    for(const m of state.groupPendingLive){
+      if(!loadedIDs.has(m.id))appendGroupMessage(m);
+    }
+    state.groupPendingLive=[];
+    syncGroupAck();
+    ensureSocket();
+  }catch(err){
+    if(loadID===state.groupLoadID){
+      state.groupLoading=false;
+      state.groupPendingLive=[];
+    }
+    throw err;
+  }
+}
+async function loadOlderGroupMessages(){
+  if(!state.groupHasMore||!state.groupCursor)return;
+  const id=state.groupID,loadID=state.groupLoadID,cursor=state.groupCursor,button=$('#group-more');
+  if(button)button.disabled=true;
+  try{
+    const history=await api(`/api/groups/${id}/messages?before_id=${cursor}&limit=100`);
+    if(loadID!==state.groupLoadID||state.view!=='chat'||String(state.groupID)!==String(id))return;
+    const log=$('#group-log'),items=(history.items||[]).reverse();
+    const fresh=items.filter(m=>!state.groupSeenMessages.has(m.id));
+    if(log&&fresh.length){
+      const height=log.scrollHeight;
+      log.insertAdjacentHTML('afterbegin',fresh.map(groupMessageRow).join(''));
+      log.scrollTop+=log.scrollHeight-height;
+    }
+    fresh.forEach(m=>state.groupSeenMessages.add(m.id));
+    state.groupCursor=Number(history.next_cursor||0);
+    state.groupHasMore=Boolean(history.has_more);
+    if(button)button.hidden=!state.groupHasMore;
+    syncGroupAck();
+  }finally{
+    if(button)button.disabled=false;
+  }
+}
+async function syncGroupMessages(id){
+  if(state.groupSyncing||!id)return;
+  state.groupSyncing=true;
+  const loadID=state.groupLoadID;
+  try{
+    const history=await api(`/api/groups/${id}/messages?limit=100`);
+    if(loadID!==state.groupLoadID||state.view!=='chat'||String(state.groupID)!==String(id))return;
+    const log=$('#group-log');
+    if(!log)return;
+    if(log.firstElementChild?.tagName==='P')log.innerHTML='';
+    const items=(history.items||[]).reverse();
+    const fresh=items.filter(m=>!state.groupSeenMessages.has(m.id));
+    if(fresh.length){
+      for(const m of fresh){
+        state.groupSeenMessages.add(m.id);
+        const rows=[...log.querySelectorAll('.message-row[data-message-id]')];
+        const succ=rows.find(r=>Number(r.dataset.messageId)>m.id);
+        if(succ){
+          succ.insertAdjacentHTML('beforebegin',groupMessageRow(m));
+        }else{
+          log.insertAdjacentHTML('beforeend',groupMessageRow(m));
+        }
+      }
+      log.scrollTop=log.scrollHeight;
+    }
+  }finally{
+    state.groupSyncing=false;
+    syncGroupAck();
+  }
+}
+function syncGroupAck(){
+  if(state.groupLoading||state.groupSyncing||!state.groupID)return;
+  const log=$('#group-log');
+  if(!log)return;
+  const rows=[...log.querySelectorAll('.message-row[data-message-id]')];
+  const ids=rows.map(r=>Number(r.dataset.messageId)).filter(id=>id>0);
+  if(!ids.length)return;
+  const oldestLoadedID=ids[0],newestLoadedID=ids[ids.length-1];
+  if(state.groupHasMore&&state.groupLastAckID<oldestLoadedID)return;
+  if(newestLoadedID>state.groupAckedID){
+    const ackID=newestLoadedID,groupID=state.groupID;
+    state.groupAckedID=ackID;
+    api(`/api/groups/${groupID}/messages/${ackID}/ack`,{method:'POST'}).then(res=>{
+      if(res?.last_ack_id){
+        state.groupLastAckID=Math.max(state.groupLastAckID,Number(res.last_ack_id));
+        state.groupAckedID=Math.max(state.groupAckedID,Number(res.last_ack_id));
+      }
+    }).catch(()=>{
+      if(state.groupAckedID===ackID)state.groupAckedID=state.groupLastAckID;
+    });
+  }
 }
 function appendGroupMessage(m){
+  if(state.groupLoading){state.groupPendingLive.push(m);return;}
   if(m.id&&state.groupSeenMessages.has(m.id))return;
   if(m.id)state.groupSeenMessages.add(m.id);
   const log=$('#group-log');
-  if(log){log.insertAdjacentHTML('beforeend',`<div class="message-row"><b>${m.sender_id===state.user.id?'你':`用户 ${m.sender_id}`}</b> ${esc(m.body)}<small>${new Date(m.created_at).toLocaleTimeString()}</small></div>`);log.scrollTop=log.scrollHeight;}
+  if(log){
+    if(log.firstElementChild?.tagName==='P')log.innerHTML='';
+    const rows=[...log.querySelectorAll('.message-row[data-message-id]')];
+    const lastRow=rows[rows.length-1];
+    const lastID=lastRow?Number(lastRow.dataset.messageId):0;
+    const succ=m.id?rows.find(r=>Number(r.dataset.messageId)>m.id):null;
+    if(succ){
+      succ.insertAdjacentHTML('beforebegin',groupMessageRow(m));
+    }else{
+      log.insertAdjacentHTML('beforeend',groupMessageRow(m));
+    }
+    log.scrollTop=log.scrollHeight;
+    if(m.id&&lastID>0&&m.id>lastID+1){
+      syncGroupMessages(state.groupID).catch(()=>{});
+      return;
+    }
+    syncGroupAck();
+  }
 }
 function commentForm(videoID, parentID='') {
   if (!state.token) return '<button class="text-button" data-auth="open">登录后参与讨论</button>';
@@ -321,7 +455,7 @@ const commentMore=e.target.closest('[data-comment-more]');if(commentMore){commen
 const replyMore=e.target.closest('[data-reply-more]');if(replyMore){const videoID=replyMore.dataset.videoId,parentID=replyMore.dataset.replyMore;replyMore.disabled=true;replyMore.remove();try{await loadReplies(videoID,parentID,true);}catch(err){const list=$(`#comments-${videoID} [data-comment-id="${parentID}"] .reply-list`);if(list)list.append(replyMore);replyMore.disabled=false;toast(err.message);}return;}
 const replies=e.target.closest('[data-replies]');if(replies){const thread=replies.closest('.comment-thread'),list=thread.querySelector('.reply-list');if(thread.dataset.repliesLoaded){list.hidden=!list.hidden;}else{try{await loadReplies(replies.dataset.videoId,replies.dataset.replies);}catch(err){toast(err.message);}}return;}
 const replyTo=e.target.closest('[data-reply-to]');if(replyTo){const slot=replyTo.closest('.comment-thread').querySelector('.reply-form-slot');slot.hidden=!slot.hidden;if(!slot.hidden)slot.querySelector('input')?.focus();return;}
-const act=e.target.closest('[data-action]');if(act){try{if(act.dataset.action==='like'||act.dataset.action==='favorite'){if(!state.token){$('#auth-dialog').showModal();return;}if(act.disabled)return;act.disabled=true;try{const active=!act.classList.contains('on');await api(`/api/videos/${act.dataset.id}/${act.dataset.action}`,{method:active?'PUT':'DELETE'});act.classList.toggle('on',active);const count=Math.max(0,Number(act.dataset.count||0)+(active?1:-1));act.dataset.count=String(count);const icon=act.dataset.action==='like'?(active?'♥':'♡'):(active?'★':'☆');act.textContent=`${icon} ${formatCount(count)}`;}finally{act.disabled=false;}}else{const slot=$(`#comments-${act.dataset.id}`);if(slot.innerHTML){slot.innerHTML='';return;}slot.innerHTML='正在加载评论…';await loadComments(act.dataset.id);}}catch(err){toast(err.message);}return;}if(e.target.closest('.load-more')){state.cursor=state.cursor||'';loadFeed(state.scene);return;}const follow=e.target.closest('[data-follow]');if(follow){if(!state.token){$('#auth-dialog').showModal();return;}try{await api(`/api/users/me/following/${follow.dataset.follow}`,{method:'PUT'});follow.textContent='已关注';follow.disabled=true;}catch(err){toast(err.message);}return;}if(e.target.closest('[data-notification-more]')){loadMoreNotifications().catch(err=>toast(err.message));return;}if(e.target.closest('[data-read-all]')){try{const upTo=state.notificationTopID;if(!upTo)return;await api(`/api/notifications/read?up_to_id=${upTo}`,{method:'PATCH'});toast('当前通知已标记为已读');await renderNotifications();}catch(err){toast(err.message);}return;}if(e.target.closest('[data-chat-connect]')){state.chatPeer=$('#chat-peer').value;connectChat().catch(err=>toast(err.message));return;}if(e.target.closest('[data-chat-more]')){loadOlderMessages().catch(err=>toast(err.message));return;}const open=e.target.closest('[data-group-open]');if(open){openGroup(open.dataset.groupOpen).catch(err=>toast(err.message));return;}const leave=e.target.closest('[data-group-leave]');if(leave){try{await api(`/api/groups/${leave.dataset.groupLeave}/members/${state.user.id}`,{method:'DELETE'});state.groupID='';await renderChat();toast('已退出群聊');}catch(err){toast(err.message);}return;}if(e.target.closest('[data-play]')){const v=e.target.closest('.poster').querySelector('video');if(v){v.paused?v.play():v.pause();api(`/api/videos/${e.target.closest('[data-play]').dataset.play}/views`,{method:'POST'}).catch(()=>{});}return;}});
+const act=e.target.closest('[data-action]');if(act){try{if(act.dataset.action==='like'||act.dataset.action==='favorite'){if(!state.token){$('#auth-dialog').showModal();return;}if(act.disabled)return;act.disabled=true;try{const active=!act.classList.contains('on');await api(`/api/videos/${act.dataset.id}/${act.dataset.action}`,{method:active?'PUT':'DELETE'});act.classList.toggle('on',active);const count=Math.max(0,Number(act.dataset.count||0)+(active?1:-1));act.dataset.count=String(count);const icon=act.dataset.action==='like'?(active?'♥':'♡'):(active?'★':'☆');act.textContent=`${icon} ${formatCount(count)}`;}finally{act.disabled=false;}}else{const slot=$(`#comments-${act.dataset.id}`);if(slot.innerHTML){slot.innerHTML='';return;}slot.innerHTML='正在加载评论…';await loadComments(act.dataset.id);}}catch(err){toast(err.message);}return;}if(e.target.closest('.load-more')){state.cursor=state.cursor||'';loadFeed(state.scene);return;}const follow=e.target.closest('[data-follow]');if(follow){if(!state.token){$('#auth-dialog').showModal();return;}try{await api(`/api/users/me/following/${follow.dataset.follow}`,{method:'PUT'});follow.textContent='已关注';follow.disabled=true;}catch(err){toast(err.message);}return;}if(e.target.closest('[data-notification-more]')){loadMoreNotifications().catch(err=>toast(err.message));return;}if(e.target.closest('[data-read-all]')){try{const upTo=state.notificationTopID;if(!upTo)return;await api(`/api/notifications/read?up_to_id=${upTo}`,{method:'PATCH'});toast('当前通知已标记为已读');await renderNotifications();}catch(err){toast(err.message);}return;}if(e.target.closest('[data-chat-connect]')){state.chatPeer=$('#chat-peer').value;connectChat().catch(err=>toast(err.message));return;}if(e.target.closest('[data-chat-more]')){loadOlderMessages().catch(err=>toast(err.message));return;}if(e.target.closest('[data-group-more]')){loadOlderGroupMessages().catch(err=>toast(err.message));return;}const open=e.target.closest('[data-group-open]');if(open){openGroup(open.dataset.groupOpen).catch(err=>toast(err.message));return;}const leave=e.target.closest('[data-group-leave]');if(leave){try{await api(`/api/groups/${leave.dataset.groupLeave}/members/${state.user.id}`,{method:'DELETE'});state.groupID='';state.groupLoadID++;state.groupLoading=false;state.groupPendingLive=[];state.groupSeenMessages.clear();state.groupCursor=0;state.groupHasMore=false;state.groupLastAckID=0;state.groupAckedID=0;await renderChat();toast('已退出群聊');}catch(err){toast(err.message);}return;}if(e.target.closest('[data-play]')){const v=e.target.closest('.poster').querySelector('video');if(v){v.paused?v.play():v.pause();api(`/api/videos/${e.target.closest('[data-play]').dataset.play}/views`,{method:'POST'}).catch(()=>{});}return;}});
 document.addEventListener('submit',async e=>{e.preventDefault();const form=e.target;try{if(form.id==='auth-form'){const fd=new FormData(form),register=$('#auth-submit').dataset.mode==='register';const data=await api(register?'/api/users':'/api/sessions',{method:'POST',body:JSON.stringify({username:fd.get('username'),password:fd.get('password'),nickname:fd.get('nickname')})});setAuth(data.access_token,data.user);}else if(form.id==='upload-form'){const fd=new FormData(form),file=fd.get('file');const url=await uploadResumable(file);const published=await api('/api/videos',{method:'POST',body:JSON.stringify({title:fd.get('title'),description:fd.get('description'),media_url:url})});localStorage.removeItem(`gostream.upload.${state.user.id}.${file.name}.${file.size}.${file.lastModified}`);toast(published.status==='processing'?'视频处理中，请在个人主页查看进度':'作品已发布');activate(published.status==='processing'?'profile':'feed');}else if(form.id==='profile-form'){const fd=new FormData(form);const fields={nickname:fd.get('nickname'),bio:fd.get('bio')};const avatar=fd.get('avatar');if(avatar?.size)fields.avatar_url=await uploadAvatar(avatar);state.user=await api('/api/users/me',{method:'PATCH',body:JSON.stringify(fields)});localStorage.setItem('gostream.user',JSON.stringify(state.user));toast('个人资料已保存');renderProfile();}else if(form.classList.contains('video-edit-form')){const fd=new FormData(form);await api(`/api/videos/${form.dataset.videoId}`,{method:'PATCH',body:JSON.stringify({title:fd.get('title'),description:fd.get('description')})});toast('视频资料已更新');renderProfile();}else if(form.classList.contains('video-retry-form')){const file=form.elements.file.files[0];if(!file)throw new Error('请选择新的视频文件');const button=form.querySelector('button');button.disabled=true;try{const url=await uploadResumable(file,form.querySelector('.retry-progress'));const result=await api(`/api/videos/${form.dataset.videoId}`,{method:'PATCH',body:JSON.stringify({media_url:url})});if(result.status!=='processing'&&result.status!=='published')throw new Error('视频处理服务未启用');localStorage.removeItem(`gostream.upload.${state.user.id}.${file.name}.${file.size}.${file.lastModified}`);toast(result.status==='processing'?'已重新提交处理':'视频已发布');await renderProfile();}finally{button.disabled=false;}}else if(form.classList.contains('comment-form')){const videoID=form.dataset.commentVideo,parentID=form.dataset.parentId;await api(`/api/videos/${videoID}/comments`,{method:'POST',body:JSON.stringify({body:new FormData(form).get('body'),...(parentID?{parent_id:Number(parentID)}:{})})});form.reset();incrementCommentCounter(videoID);if(parentID){await loadReplies(videoID,parentID);const button=$(`#comments-${videoID} [data-comment-id="${parentID}"] [data-replies]`);if(button){const count=Number(button.dataset.replyCount||0)+1;button.dataset.replyCount=String(count);button.textContent=`查看回复 (${count})`;}form.closest('.reply-form-slot').hidden=true;toast('回复已发布');}else{await loadComments(videoID);toast('评论已发布');}}else if(form.id==='group-create-form'){const group=await api('/api/groups',{method:'POST',body:JSON.stringify({name:new FormData(form).get('name')})});state.groupID=String(group.id);await renderChat();toast('群聊已创建');}else if(form.id==='group-add-form'){await api(`/api/groups/${state.groupID}/members`,{method:'POST',body:JSON.stringify({user_id:Number(new FormData(form).get('user_id'))})});form.reset();toast('成员已添加');}else if(form.id==='group-remove-form'){const userID=Number(new FormData(form).get('user_id'));await api(`/api/groups/${state.groupID}/members/${userID}`,{method:'DELETE'});form.reset();toast('成员已移除');}else if(form.id==='group-send-form'){const body=new FormData(form).get('body');if(!state.socket||state.socket.readyState!==1)throw new Error('群聊连接中，请稍后重试');state.socket.send(JSON.stringify({type:'group_message',client_id:crypto.randomUUID(),group_id:Number(state.groupID),body}));appendGroupMessage({sender_id:state.user.id,body,created_at:new Date().toISOString()});form.reset();}else if(form.id==='chat-form'){const body=new FormData(form).get('body');if(!state.socket||state.socket.readyState!==1)throw new Error('请先连接聊天');const client_id=crypto.randomUUID();state.socket.send(JSON.stringify({type:'message',client_id,recipient_id:Number(state.chatPeer),body}));appendMessage({sender_id:state.user.id,recipient_id:Number(state.chatPeer),client_id,body,created_at:new Date().toISOString()});form.reset();}}catch(err){toast(err.message);}});
 $('#auth-form').addEventListener('submit',()=>{});
 document.addEventListener('submit',async e=>{
