@@ -334,6 +334,14 @@ func (s *Server) sendGroupMessage(userID uint, client *hubClient, e socketEvent)
 	msg := GroupMessage{GroupID: e.GroupID, SenderID: userID, ClientID: e.ClientID, Body: e.Body}
 	created, conflict := false, false
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
+		// Allocate IDs only after acquiring the same lock used by invitations.
+		// A later same-group message must not commit ahead of an earlier insert:
+		// cumulative ACKs would otherwise hide the earlier message on commit.
+		// Keep the lock until commit/rollback; different groups remain independent.
+		var group ChatGroup
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&group, e.GroupID).Error; err != nil {
+			return err
+		}
 		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&msg)
 		if res.Error != nil {
 			return res.Error
