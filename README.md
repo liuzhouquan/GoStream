@@ -1,6 +1,6 @@
 # GoStream
 
-GoStream is a runnable Go short-video social platform with a static web client, persistent database, resumable media uploads, direct and group messaging, and a database-backed notification worker. It runs as one API process by default; Redis can relay realtime events between API instances.
+GoStream is a runnable Go short-video social platform with a static web client, persistent database, resumable media uploads, direct and group messaging, and a transactional notification outbox with optional RabbitMQ delivery. It runs as one API process by default; Redis can relay realtime events between API instances.
 
 ## Status
 
@@ -10,7 +10,7 @@ This repository is under active staged development. See [delivery scope](docs/DE
 
 - Go 1.27.2 (the project toolchain declared in `go.mod`)
 - Node.js is not required for the current static web client
-- Docker is optional; Docker Compose runs the API with MySQL and Redis. An `observability` profile adds Prometheus and Grafana. The object-storage overlay adds a private MinIO bucket.
+- Docker is optional; Docker Compose runs the API with MySQL, Redis and RabbitMQ. An `observability` profile adds Prometheus and Grafana. The object-storage overlay adds a private MinIO bucket.
 
 The default local profile listens only on `127.0.0.1:8080` and stores data in `./data/gostream.db` using SQLite with WAL, a five-second busy timeout, and foreign-key enforcement. It needs no external services. Run:
 
@@ -28,6 +28,8 @@ docker compose up --build
 ```
 
 Keep that value across restarts and API replicas; changing it invalidates existing access tokens. If `.env` already exists, add a unique `JWT_SECRET` there instead of replacing the file. Use `docker compose --profile observability up --build` for Prometheus on port 9090 and Grafana on port 3000. Set `GRAFANA_ADMIN_PASSWORD` for the latter.
+
+Compose also starts RabbitMQ 4.3.7; its management UI is at <http://localhost:15672> (local user `gostream`, password from `RABBITMQ_PASSWORD`, default `gostream-local-rabbitmq-secret`). Use a URL-safe generated password, such as hexadecimal, when overriding it. Outside Compose, set `RABBITMQ_URL` and optionally `RABBITMQ_QUEUE` to enable the same transport; no URL keeps the SQLite development path independent of a broker. Broker downtime leaves notifications in SQL and pending source events in outbox until retry or dead-letter state. `/ready` continues to check SQL only. See [RabbitMQ operations](docs/RABBITMQ.md) before replaying dead events.
 
 The API gives each HTTP request at most 10 minutes to send its headers and body. A slow direct upload can time out; use resumable 4 MiB chunks and retry the affected chunk. WebSocket connections use their own heartbeat deadline after upgrade.
 
@@ -64,7 +66,7 @@ The normal and object overlays both bind API port 8080; stop the normal stack be
 - Multiple WebSocket connections per account (up to eight per API instance), with committed direct/group messages sent to each active device and control replies kept on the originating connection
 - `/health`, database-backed `/ready`, `/metrics`, and optional `PPROF_ADDR`
 - SQLite is persistent and real; it is not a mock database
-- RabbitMQ broker integration and durable cross-instance group push are later stages
+- RabbitMQ confirmed publication, durable consumer deduplication, bounded delayed retry and dead letters; [design, recovery and real tests](docs/RABBITMQ.md). Durable broker-backed group push remains a later stage.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/API.md](docs/API.md), [docs/DATABASE.md](docs/DATABASE.md), [docs/TECHNICAL_DESIGN.md](docs/TECHNICAL_DESIGN.md), [docs/LEARNING_GUIDE.md](docs/LEARNING_GUIDE.md), and [docs/INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md).
 
@@ -77,3 +79,5 @@ GoStream is licensed under the MIT License; see [LICENSE](LICENSE).
 The optional MinIO deployment builds the MinIO server from its pinned upstream source under AGPL-3.0. The Go MinIO client dependency is Apache-2.0. Their licenses and notices are separate from GoStream's MIT license; consult those components before redistributing a combined deployment image.
 
 Image validation uses `golang.org/x/image` under BSD-3-Clause. Its [license notice](third_party_licenses/golang.org-x-image-LICENSE) is also copied into the API image.
+
+RabbitMQ delivery uses the RabbitMQ-maintained Go client under BSD-2-Clause; its [license notice](third_party_licenses/rabbitmq-amqp091-go-LICENSE) is included in the API image.

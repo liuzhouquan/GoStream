@@ -147,3 +147,8 @@ P1-05 本地验证还包括 Go 1.27.2 的全量测试、全量 race、vet、API/
 - **P1-07｜已复现。** 位置：`internal/platform/uploads.go:completeUploadSession` 的本地 `registerCompletedUpload` 失败分支。`TestUploadCompletionLeaseLossKeepsCommittedMedia` 暂停旧 worker 的资产登记，令租约过期并由另一请求完成；新请求 200、旧请求 500 后，`UploadSession` 为 `completed`，已登记的本地最终文件却不存在。影响是成功上传的源媒体在租约交接后被旧请求误删。
 - **修复范围。** `upload_lease.go` 每 100 秒条件续租五分钟，停止并等待心跳后用最新未过期租约提交资产与完成态。清理器先条件领取为 `cleaning`，再删除外部字节；SQL 清理事务失败或进程中断后，该五分钟清理租约可由后续清理接管。本地最终文件与 MinIO 对象统一保留给重试及现有孤儿回收，旧 worker 失败不再立即删除共享最终路径。现有数据库列可容纳这些状态，无 schema 变更。
 - **验证与限制。** 三轮定向 race 覆盖续租、过期清理、旧 worker 回滚、清理数据库事务失败后的恢复、请求取消/数据库关闭/租约丢失时的心跳退出。最初 300 毫秒时长测试在续租实现后有一次调度相关失败；最终回归改为观察真实心跳，再将清理时刻推进到旧租约之后，保留状态与媒体字节断言。`TestMinIOUploadCompletionCleanupLease` 在 MySQL 8.4 的两套独立连接和临时 MinIO 桶中暂停真实 chunk GET，三轮 race 通过，核对最终对象 SHA-256、单个资产、跨实例完成重试及废弃会话清理；全部 opt-in `TestMySQL*` 平台测试通过。临时数据库、用户和 MinIO 容器已删除。Go 1.27.2 全量普通/race 测试、vet、API/媒体构建、Web 语法、CI YAML 与三套 Compose 配置检查通过；CI 与合并记录见 [PR #13](https://github.com/liuzhouquan/GoStream/pull/13)。测试没有等待真实五分钟传输，也未强杀进程或模拟整个存储服务中断。
+
+
+## 2026-10-29：A06 功能跟进（不改写原审计基线）
+
+原审计中“尚未接入 RabbitMQ”描述的是 `7fe452b` 的历史状态，未被列为缺陷。本轮新增真实 broker 通知链路、发布确认、消费提交后 ACK、唯一投递 outbox、延迟重试/死信、运维回放和独立 CI。隔离 MySQL 8.4/RabbitMQ 4.3.7 的七个 race 子用例、真实 API worker 生命周期与运维命令已通过，包括两消费者同时处理 16 份重复事件只新增一个持久任务。测试环境全部清理。完整命令、最初测试夹具失败和局限见 [`PROGRESS.md`](../PROGRESS.md)；A06 仍需强杀进程、DLQ 目标中断与最终全组件验收。此记录不把新增功能等同于原审计所有待确认风险均已关闭。

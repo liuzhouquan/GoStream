@@ -10,22 +10,26 @@ import (
 )
 
 type serverMetrics struct {
-	registry       *prometheus.Registry
-	requests       *prometheus.CounterVec
-	duration       *prometheus.HistogramVec
-	outbox         *prometheus.CounterVec
-	feedCache      *prometheus.CounterVec
-	rateLimit      *prometheus.CounterVec
-	feedFanout     *prometheus.CounterVec
-	feedFanoutAge  prometheus.Histogram
-	feedFanoutJobs prometheus.Gauge
-	mediaReconcile *prometheus.CounterVec
-	wsConnections  prometheus.Gauge
+	registry        *prometheus.Registry
+	requests        *prometheus.CounterVec
+	duration        *prometheus.HistogramVec
+	outbox          *prometheus.CounterVec
+	brokerMessages  *prometheus.CounterVec
+	brokerConnected *prometheus.GaugeVec
+	feedCache       *prometheus.CounterVec
+	rateLimit       *prometheus.CounterVec
+	feedFanout      *prometheus.CounterVec
+	feedFanoutAge   prometheus.Histogram
+	feedFanoutJobs  prometheus.Gauge
+	mediaReconcile  *prometheus.CounterVec
+	wsConnections   prometheus.Gauge
 }
 
 func newServerMetrics() *serverMetrics {
 	m := &serverMetrics{
-		registry: prometheus.NewRegistry(),
+		registry:        prometheus.NewRegistry(),
+		brokerMessages:  prometheus.NewCounterVec(prometheus.CounterOpts{Name: "gostream_rabbitmq_messages_total", Help: "RabbitMQ notification transport outcomes."}, []string{"result"}),
+		brokerConnected: prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "gostream_rabbitmq_connected", Help: "Last observed RabbitMQ connection state by role."}, []string{"role"}),
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "gostream_http_requests_total", Help: "Completed HTTP requests by method, route and status.",
 		}, []string{"method", "route", "status"}),
@@ -60,6 +64,7 @@ func newServerMetrics() *serverMetrics {
 		}),
 	}
 	m.registry.MustRegister(m.requests, m.duration, m.outbox, m.feedCache, m.rateLimit, m.feedFanout, m.feedFanoutAge, m.feedFanoutJobs, m.mediaReconcile, m.wsConnections)
+	m.registry.MustRegister(m.brokerMessages, m.brokerConnected)
 	m.registry.MustRegister(prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	return m
 }

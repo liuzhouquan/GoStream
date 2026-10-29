@@ -125,7 +125,10 @@ func retryDelay(attempt int) time.Duration {
 }
 
 func (s *Server) dispatchOutbox(ctx context.Context, item OutboxEvent) error {
-	if item.Topic != "notification.created" {
+	if item.Topic == notificationCreatedTopic && s.broker != nil {
+		return s.broker.publish(ctx, item)
+	}
+	if item.Topic != notificationCreatedTopic && item.Topic != notificationDeliverTopic {
 		return fmt.Errorf("unsupported outbox topic %q", item.Topic)
 	}
 	var payload notificationPayload
