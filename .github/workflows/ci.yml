@@ -53,6 +53,12 @@ jobs:
           docker compose config --quiet
           docker compose -f docker-compose.yml -f docker-compose.object.yml config --quiet
           docker compose -f docker-compose.yml -f docker-compose.object.yml -f tests/integration/object-test.compose.yml config --quiet
+          python3 - <<'PY'
+          import json, subprocess
+          command = ['docker', 'compose', '-f', 'docker-compose.yml', '-f', 'docker-compose.object.yml', '-f', 'tests/integration/object-test.compose.yml', 'config', '--format', 'json']
+          config = json.loads(subprocess.check_output(command, text=True))
+          assert not config['services']['rabbitmq'].get('ports'), 'isolated broker must not bind demo host ports'
+          PY
 
   rabbitmq-integration:
     runs-on: ubuntu-24.04
