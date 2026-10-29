@@ -9,7 +9,7 @@
 | 当前状态 | 项目 | 继续工作的标准 |
 | --- | --- | --- |
 | 已有修复及回归 | P0 默认密钥、P1-01–05、P2-01–03、P1-06/07 上传租约与文件保留 | 下文记录原复现、修复及局限；后续改动仍跑相关回归 |
-| 已复现并修复，待 CI | P1-08 群消息低 ID 迟提交与累计 ACK | 真实 MySQL 受控暂停复现未读遗漏；同群行锁及提交/回滚/跨群回归通过，见文末 |
+| 已复现，修复见 [PR #16](https://github.com/liuzhouquan/GoStream/pull/16) | P1-08 群消息低 ID 迟提交与累计 ACK | 真实 MySQL 受控暂停复现未读遗漏；同群行锁及提交/回滚/跨群回归通过，见文末 |
 | 优先修复/确认 | P1-09 群前端补页和累计 ACK；P1-10 成员撤回/发送/ACK 交错（待复现） | 分别以浏览器积压/乱序用例、真实 MySQL 双连接权限竞态验证 |
 | 待补验证 | A03/A04/A06/A07 的剩余故障、性能及最终配置；群前史可见性、已知媒体 URL 的产品边界 | 不将风险当作已证实缺陷，也不以普通测试通过替代外部依赖矩阵 |
 | 文档维护 | 旧开发顺序把已实现模块列成待实现；原审计混有历史与当前状态 | 以工作包退出条件替换旧清单，并保留原始证据，不覆写失败历史 |
@@ -179,7 +179,7 @@ P1-05 本地验证还包括 Go 1.27.2 的全量测试、全量 race、vet、API/
 
 ## 2026-10-29 质量复核与后续小型修复
 
-### P1-08：同群事务迟提交被累计 ACK 跳过（已复现；本分支修复）
+### P1-08：同群事务迟提交被累计 ACK 跳过（已复现；修复及 CI 记录见 [PR #16](https://github.com/liuzhouquan/GoStream/pull/16)）
 
 - **位置与影响**：[`groups.go`](../internal/platform/groups.go) 的 `sendGroupMessage` 分配自增 ID，`ackGroupMessage` 更新累计游标，`groupUnread` 与 [`hub.go`](../internal/platform/hub.go) 的 `replayPendingGroups` 过滤 `id > last_ack_id`。MySQL 多连接并发发送可以让较低 ID 稍后提交，已读设备漏掉其未读和重放；SQL 历史记录仍存在。
 - **复现**：[`TestMySQLGroupCommitOrder`](../internal/platform/group_order_test.go) 在真实 SQL 插入后暂停 ID 1，第二实例提交 ID 2 并由接收者 ACK，然后释放 ID 1。原代码输出 `late row count=1; unread response 200 {"last_ack_id":2,"unread_count":0}`。不是以 race 无报错替代逻辑并发验证。
