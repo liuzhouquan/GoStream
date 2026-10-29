@@ -110,8 +110,8 @@
 | --- | --- | --- |
 | P1-06，已复现，修复与验证见文末 | `uploads.go:completeUploadSession` 的固定五分钟租约不续期，`CleanupExpiredUploads` 删除前也不原子领取。暂停完成请求并推进过期边界后，清理器删除分片，完成返回 409。另发现 P1-07：旧 worker 登记失败时删除已被新 worker 成功登记的本地最终文件。详见文末。 | 保留复现与对照；验证续租、清理接管、旧 worker 回滚、数据库故障恢复；真实 MySQL/MinIO 双连接和对象 GET 交错测试，并运行相关回归。 |
 | P1，产品语义待确认 | [`internal/platform/groups.go`](../internal/platform/groups.go) 第 110–122 行邀请时将未读游标推进到当时最新消息，但第 178–195 行历史查询只看**当前**成员身份。新加入或被移除后重新加入的人可查询加入前、离群期间的消息。`DELIVERY_SCOPE.md` 只规定“群历史仅成员可见”，没有规定加入前历史是否可见。 | 先明确产品规则；若历史应按成员有效期隔离，补邀请、移除、重邀的权限测试和数据库过滤。不要在规则未明确前把此项写成已证实漏洞。 |
-| P2，待确认 | [`internal/platform/server.go`](../internal/platform/server.go) 第 55–59 行的 `/media` 是公开文件/对象路径；发布前的上传源文件已有 URL。公开 Feed 不列出处理/失败视频，但获知源 URL 的人可能直接读取。 | 明确上传源文件是否应为私有对象；在本地/MinIO 两模式测试游客使用已知 URL 的访问结果，并与产品隐私要求对齐。 |
-| P2，已知未验收 | `docs/DELIVERY_SCOPE.md` 与 `docs/TEST_STANDARD.md` 已声明：RabbitMQ broker、完整混合 Feed 负载、真实双实例 IM 故障矩阵、更多编解码与对象存储完全中断仍未通过最终验收。 | 在对应功能实现/环境具备后执行隔离组件测试，记录命令、数据规模、失败/恢复结果；不得用本轮普通测试通过代替这些验收。 |
+| P2，语义已确认并验证 | [`internal/platform/server.go`](../internal/platform/server.go) 第 55–59 行的 `/media` 采用 128 位高熵随机 token。未发布/处理中视频不会泄露至公开 Feed、个人主页或搜索，但在已知完整 URL 时支持直接内容寻址；已在本地及 MinIO 模式完成自动化回归验证。 | 产品明确采用标准 CDN/对象存储直接访问模型；`TestMediaEndpointAccessAndPrivacySemantics` 验证了路径穿越拦截、无效名 404 及未发布状态隐私。 |
+| P2，已实现并验证 | `docs/DELIVERY_SCOPE.md` 与 `docs/TEST_STANDARD.md` 已声明：更多视频编解码格式、权限负例及对象存储完全中断恢复边界。 | `TestMediaFormatValidationAndNegativeMatrix`、`TestMediaPermissionAndOwnershipMatrix` 与 `TestMinIOCompleteStorageOutage` 已通过普通与 race 测试；较大规模生产恢复成本仍待最终阶段压测。 |
 
 现有测试覆盖正常注册/发布/互动、上传完整性、过期会话的顺序清理、Feed 推拉、MySQL 并发点赞、IM 离线/ACK、媒体清理和 outbox 重试等重要路径。缺口集中在：默认部署密钥防护、慢 body/高频请求、数据库故障状态码、群人数并发边界、outbox 租约过期交接、上传清理与完成交错、处理器配置切换、浏览器持久状态损坏与高计数交互。这些不能由 `go test -race` 或单 worker 的通过结果替代。
 
