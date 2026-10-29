@@ -415,9 +415,13 @@ func TestMinIOMediaFormatAndPermissionMatrix(t *testing.T) {
 		cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 		for _, prefix := range []string{"chunks/", "media/"} {
-			_ = store.removePrefix(cleanCtx, prefix)
+			if err := store.removePrefix(cleanCtx, prefix); err != nil {
+				t.Errorf("clean objects: %v", err)
+			}
 		}
-		_ = store.client.RemoveBucket(cleanCtx, bucket)
+		if err := store.client.RemoveBucket(cleanCtx, bucket); err != nil {
+			t.Errorf("remove bucket: %v", err)
+		}
 	})
 
 	s, _, db := testServer(t)

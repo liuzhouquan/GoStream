@@ -12,7 +12,7 @@ function loadStoredAuth() {
   return { token: '', user: null };
 }
 const storedAuth = loadStoredAuth();
-const state = { token: storedAuth.token, user: storedAuth.user, view: 'feed', scene: 'recommend', cursor: '', loading: false, socket: null, notificationCursor: 0, notificationTopID: 0, notificationHasMore: false, notificationLoading: false, notificationLoadID: 0, search: null, chatPeer: '', chatCursor: 0, chatHasMore: false, chatLoadID: 0, chatLoading: false, chatPendingLive: [], seenMessages: new Set(), groupID: '', groupSeenMessages: new Set(), groups: [], groupCursor: 0, groupHasMore: false, groupLoadID: 0, groupLoading: false, groupPendingLive: [], groupLastAckID: 0, groupAckedID: 0, groupSyncing: false, socketRetry: 0, socketTimer: null, heartbeatTimer: null };
+const state = { token: storedAuth.token, user: storedAuth.user, view: 'feed', scene: 'recommend', cursor: '', loading: false, socket: null, notificationCursor: 0, notificationTopID: 0, notificationHasMore: false, notificationLoading: false, notificationLoadID: 0, search: null, chatPeer: '', chatCursor: 0, chatHasMore: false, chatLoadID: 0, chatLoading: false, chatPendingLive: [], seenMessages: new Set(), groupID: '', groupSeenMessages: new Set(), groups: [], groupCursor: 0, groupHasMore: false, groupLoadID: 0, groupLoading: false, groupPendingLive: [], groupLastAckID: 0, groupAckedID: 0, groupSyncing: false, groupSyncRequested: false, groupSyncedID: 0, socketRetry: 0, socketTimer: null, heartbeatTimer: null };
 const $ = (selector, root = document) => root.querySelector(selector);
 const content = $('#content');
 const titles = {feed:'发现灵感',following:'关注动态',hot:'热门视频',search:'发现创作者',upload:'发布作品',notifications:'通知中心',chat:'即时消息',profile:'个人主页'};
@@ -264,6 +264,9 @@ async function openGroup(id){
   state.groupID=String(id);
   const loadID=++state.groupLoadID;
   state.groupLoading=true;
+  state.groupSyncing=false;
+  state.groupSyncRequested=false;
+  state.groupSyncedID=0;
   state.groupPendingLive=[];
   state.groupCursor=0;
   state.groupHasMore=false;
@@ -283,6 +286,7 @@ async function openGroup(id){
     const items=(history.items||[]).reverse();
     state.groupLastAckID=Number(unread?.last_ack_id||0);
     state.groupAckedID=state.groupLastAckID;
+    state.groupSyncedID=Math.max(state.groupLastAckID,...items.map(m=>m.id));
     state.groupCursor=Number(history.next_cursor||(items.length?items[0].id:0));
     state.groupHasMore=Boolean(history.has_more);
     const group=state.groups.find(g=>String(g.id)===String(id));
@@ -330,81 +334,86 @@ async function loadOlderGroupMessages(){
     if(button)button.disabled=false;
   }
 }
+function currentGroupLoad(id,loadID){
+  return loadID===state.groupLoadID&&state.view==='chat'&&String(state.groupID)===String(id);
+}
 async function syncGroupMessages(id){
-  if(state.groupSyncing||!id)return;
+  if(!id||state.groupLoading)return;
+  state.groupSyncRequested=true;
+  if(state.groupSyncing)return;
   state.groupSyncing=true;
   const loadID=state.groupLoadID;
   try{
-    const history=await api(`/api/groups/${id}/messages?limit=100`);
-    if(loadID!==state.groupLoadID||state.view!=='chat'||String(state.groupID)!==String(id))return;
-    const log=$('#group-log');
-    if(!log)return;
-    if(log.firstElementChild?.tagName==='P')log.innerHTML='';
-    const items=(history.items||[]).reverse();
-    const fresh=items.filter(m=>!state.groupSeenMessages.has(m.id));
-    if(fresh.length){
-      for(const m of fresh){
-        state.groupSeenMessages.add(m.id);
-        const rows=[...log.querySelectorAll('.message-row[data-message-id]')];
-        const succ=rows.find(r=>Number(r.dataset.messageId)>m.id);
-        if(succ){
-          succ.insertAdjacentHTML('beforebegin',groupMessageRow(m));
-        }else{
-          log.insertAdjacentHTML('beforeend',groupMessageRow(m));
-        }
+    while(state.groupSyncRequested&&currentGroupLoad(id,loadID)){
+      state.groupSyncRequested=false;
+      const boundary=state.groupSyncedID;
+      let before=0,top=boundary;
+      const recovered=[];
+      for(;;){
+        const history=await api(`/api/groups/${id}/messages?limit=100${before?`&before_id=${before}`:''}`);
+        if(!currentGroupLoad(id,loadID))return;
+        const items=history.items||[];
+        if(!before&&items.length)top=Math.max(top,...items.map(m=>m.id));
+        recovered.push(...items);
+        if(!history.has_more||items.some(m=>m.id<=boundary))break;
+        const next=Number(history.next_cursor||0);
+        if(!next||(before&&next>=before))throw new Error('群消息分页游标没有前进');
+        before=next;
       }
-      log.scrollTop=log.scrollHeight;
+      insertGroupMessages(recovered);
+      state.groupSyncedID=top;
     }
+  }catch(err){
+    if(currentGroupLoad(id,loadID))state.groupSyncRequested=true;
+    throw err;
   }finally{
-    state.groupSyncing=false;
-    syncGroupAck();
+    if(currentGroupLoad(id,loadID)){
+      state.groupSyncing=false;
+      syncGroupAck();
+    }
   }
 }
+function insertGroupMessages(items){
+  const log=$('#group-log');if(!log)return;
+  for(const m of [...items].sort((a,b)=>a.id-b.id)){
+    if(state.groupSeenMessages.has(m.id))continue;
+    state.groupSeenMessages.add(m.id);
+    if(log.firstElementChild?.tagName==='P')log.innerHTML='';
+    const next=[...log.querySelectorAll('[data-message-id]')].find(r=>Number(r.dataset.messageId)>m.id);
+    if(next)next.insertAdjacentHTML('beforebegin',groupMessageRow(m));
+    else log.insertAdjacentHTML('beforeend',groupMessageRow(m));
+  }
+  log.scrollTop=log.scrollHeight;
+}
 function syncGroupAck(){
-  if(state.groupLoading||state.groupSyncing||!state.groupID)return;
+  if(state.groupLoading||state.groupSyncing||state.groupSyncRequested||!state.groupID)return;
   const log=$('#group-log');
   if(!log)return;
   const rows=[...log.querySelectorAll('.message-row[data-message-id]')];
   const ids=rows.map(r=>Number(r.dataset.messageId)).filter(id=>id>0);
   if(!ids.length)return;
-  const oldestLoadedID=ids[0],newestLoadedID=ids[ids.length-1];
+  const oldestLoadedID=ids[0],newestLoadedID=Math.min(ids[ids.length-1],state.groupSyncedID);
   if(state.groupHasMore&&state.groupLastAckID<oldestLoadedID)return;
   if(newestLoadedID>state.groupAckedID){
-    const ackID=newestLoadedID,groupID=state.groupID;
+    const ackID=newestLoadedID,groupID=state.groupID,loadID=state.groupLoadID;
     state.groupAckedID=ackID;
     api(`/api/groups/${groupID}/messages/${ackID}/ack`,{method:'POST'}).then(res=>{
+      if(!currentGroupLoad(groupID,loadID))return;
       if(res?.last_ack_id){
         state.groupLastAckID=Math.max(state.groupLastAckID,Number(res.last_ack_id));
         state.groupAckedID=Math.max(state.groupAckedID,Number(res.last_ack_id));
       }
     }).catch(()=>{
-      if(state.groupAckedID===ackID)state.groupAckedID=state.groupLastAckID;
+      if(currentGroupLoad(groupID,loadID)&&state.groupAckedID===ackID)state.groupAckedID=state.groupLastAckID;
     });
   }
 }
 function appendGroupMessage(m){
   if(state.groupLoading){state.groupPendingLive.push(m);return;}
-  if(m.id&&state.groupSeenMessages.has(m.id))return;
-  if(m.id)state.groupSeenMessages.add(m.id);
-  const log=$('#group-log');
-  if(log){
-    if(log.firstElementChild?.tagName==='P')log.innerHTML='';
-    const rows=[...log.querySelectorAll('.message-row[data-message-id]')];
-    const lastRow=rows[rows.length-1];
-    const lastID=lastRow?Number(lastRow.dataset.messageId):0;
-    const succ=m.id?rows.find(r=>Number(r.dataset.messageId)>m.id):null;
-    if(succ){
-      succ.insertAdjacentHTML('beforebegin',groupMessageRow(m));
-    }else{
-      log.insertAdjacentHTML('beforeend',groupMessageRow(m));
-    }
-    log.scrollTop=log.scrollHeight;
-    if(m.id&&lastID>0&&m.id>lastID+1){
-      syncGroupMessages(state.groupID).catch(()=>{});
-      return;
-    }
-    syncGroupAck();
-  }
+  insertGroupMessages([m]);
+  // IDs are global across groups; verify history rather than inferring gap
+  // completeness from consecutive numbers or best-effort live hints.
+  syncGroupMessages(state.groupID).catch(()=>{});
 }
 function commentForm(videoID, parentID='') {
   if (!state.token) return '<button class="text-button" data-auth="open">登录后参与讨论</button>';

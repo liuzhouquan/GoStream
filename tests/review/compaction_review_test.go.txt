@@ -1,0 +1,39 @@
+package platform
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"testing"
+)
+
+func TestReviewCompactionPreservesNewDeviceUnread(t *testing.T) {
+	s, h, db := testServer(t)
+	recipient, token := registerTestUser(t, h, "compact_review_recipient")
+	sender, _ := registerTestUser(t, h, "compact_review_sender")
+	r := requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, testDeviceA, nil)
+	if r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	msg := ChatMessage{SenderID: sender, RecipientID: recipient, ClientID: "one", Body: "not read by device B"}
+	if err := db.Create(&msg).Error; err != nil {
+		t.Fatal(err)
+	}
+	r = requestOnDevice(t, h, http.MethodPost, "/api/messages/acks", token, testDeviceA, map[string]any{"ids": []uint{msg.ID}})
+	if r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	if n, err := s.CompactActiveDeviceReceipts(context.Background(), 100); err != nil || n != 1 {
+		t.Fatalf("compact n=%d err=%v", n, err)
+	}
+	r = requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, testDeviceB, nil)
+	var page struct {
+		Items []ChatMessage `json:"items"`
+	}
+	if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &page) != nil {
+		t.Fatal(r.Body.String())
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != msg.ID {
+		t.Fatalf("new device lost unread after compaction: %s", r.Body.String())
+	}
+}

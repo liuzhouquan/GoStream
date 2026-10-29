@@ -38,7 +38,7 @@ Local recipients and the sender's other local devices are also reached by the pr
 | Presence | Local hub plus expiring Redis node entries; Redis failure falls back to local visibility | Configured refresh is 30 seconds and node expiry 75 seconds; this test does not wait through a full crashed-node expiry |
 | Device retention | New IDs capped at 32; 30-day idle eviction and 90-day expiry remove device-specific state, retaining messages | Continuously active devices' exact receipts are not compacted yet |
 
-Group removal blocks later sends/history reads and removes that member's device cursors. Remote group hints recheck current SQL membership before dispatch. Data already delivered before removal cannot be recalled. The server commit-order regression below is separate from the process matrix. The web client manages group paging (`loadOlderGroupMessages`), out-of-order gap synchronization (`syncGroupMessages`), and safe cumulative ACK gating (`syncGroupAck`) on branch `fix/web-group-sync-ack`; browser automation in `tests/integration/web_group_sync.py` verifies backlog paging and gap-safe cursors (P1-09).
+Group removal blocks later sends/history reads and removes that member's device cursors. Remote group hints recheck current SQL membership before dispatch. Data already delivered before removal cannot be recalled. The server commit-order regression below is separate from the process matrix. The web client pages older group history before advancing ACK beyond an unread backlog. Every live hint triggers paged SQL-history synchronization back to its verified boundary. Failed synchronization blocks ACK advancement; stale requests and ACK responses are discarded when switching groups. Browser fixtures verify these paths; final combined-deployment browser acceptance remains pending.
 
 ## Same-group transaction ordering
 
@@ -54,7 +54,7 @@ go test -race ./internal/platform -run '^TestMySQLGroupCommitOrder$' -count=3 -v
 
 The test uses two independently connected servers and real WebSocket/HTTP routes. A test-only GORM callback pauses after the first SQL insert; production binaries have no fault switch. It checks commit and rollback blocking, independent groups, unread after ACKing the lower ID, and same-client-ID retries. Existing MySQL CI discovers it via `^TestMySQL`. Without the DSN it skips, which is not acceptance evidence.
 
-A hot group now waits on its own database row; no throughput improvement is claimed. Committed rows can still be delivered in a different order because fanout happens after the transaction. Cumulative group ACK requires the client to have synchronized all earlier rows; this change does not provide exact group receipts. Membership removal and ACK still need their own concurrent transaction tests.
+A hot group now waits on its own database row; no throughput improvement is claimed. Committed rows can still be delivered in a different order because fanout happens after the transaction. Cumulative group ACK requires the client to have synchronized all earlier rows; this change does not provide exact group receipts. Member removal, sends and both ACK variants now take the same group row lock and recheck membership inside their transactions. MySQL tests cover ACK-first and removal-first ordering, require no orphan device cursor after removal, and verify committed sends.
 
 ## Real process verification
 
@@ -98,17 +98,7 @@ Direct invocation of `TestIMProcessRecovery` requires all of `GOSTREAM_TEST_IM_B
 
 Local execution used Go 1.27.2, MySQL 8.4.11, Redis 8.2.9 and WSL2 Linux x86_64; actual run results are in [`PROGRESS.md`](../PROGRESS.md). Test duration is correctness-check runtime, not a message latency or capacity measurement. This work does not claim the 20-client/1,000-message performance gate has passed.
 
-A07 remains partial pending the final two-browser/full-component workflow, concurrent membership revocation, full presence-expiry fault observation, long-lived active-device receipt compaction and the prescribed load run. Device eviction/expiry have separate existing SQLite/MySQL tests; this process matrix does not simulate 90 days. RabbitMQ commit/confirm/ACK kill windows remain separate A06 work. A disconnect can produce duplicate real-time events; SQL history and receipts, with client synchronization, provide recovery.
-
-## Group history membership and unread semantics
-
-Group messaging enforces membership boundaries across all endpoints:
-1. **Non-members**: `GET /api/groups/:id/messages`, `/unread`, and ACK routes return 404; WebSocket sends return a `group not found` error event.
-2. **First invitation**: `GroupRead.LastAckID` initializes to the highest message ID at invitation time. The user starts with `unread_count = 0` (no historic unread backlog).
-3. **Membership removal**: Removes `GroupMember`, `GroupRead`, and `GroupDeviceRead`. The user immediately loses access to all history, unread, and sending routes.
-4. **Re-invitation**: The cursor is advanced to the latest message at the moment of re-invitation. Messages sent while absent do not generate unread notifications. Once re-admitted, the member can query full group history (`groupHistory`), matching the transparent context model of modern messaging platforms (Telegram/Slack).
-
-These boundaries are verified by `TestGroupMembershipLifecycleAndHistorySemantics` in `internal/platform/group_history_semantics_test.go`.
+A07 remains partial pending the final two-browser/full-component workflow, full presence-expiry fault observation, long-lived active-device receipt compaction and the prescribed load run. Device eviction/expiry have separate existing SQLite/MySQL tests; this process matrix does not simulate 90 days. RabbitMQ commit/confirm/ACK kill windows remain separate A06 work. A disconnect can produce duplicate real-time events; SQL history and receipts, with client synchronization, provide recovery.
 
 ## Code reading order
 
@@ -117,3 +107,10 @@ These boundaries are verified by `TestGroupMembershipLifecycleAndHistorySemantic
 3. [`messages.go`](../internal/platform/messages.go), [`groups.go`](../internal/platform/groups.go): pagination and receipt/cursor semantics.
 4. [`device.go`](../internal/platform/device.go): registration cap and idle cleanup.
 5. [`recovery_test.go`](../tests/integration/im/recovery_test.go), [`helpers_test.go`](../tests/integration/im/helpers_test.go), [`im_smoke.py`](../tests/integration/im_smoke.py): public-protocol fault assertions, real process ownership and resource isolation.
+
+
+## Current group history policy
+
+A current member can read the full retained group history, including messages before first invitation and during an absence. Invitation/re-invitation sets the shared unread baseline to the latest committed group message, so older messages remain readable but do not become a new unread backlog. Removal deletes membership and account/device group read state and denies history, unread, ACK and new sends. `TestGroupMembershipLifecycleAndHistorySemantics` verifies the sequential lifecycle; concurrent send/ACK removal is a separate MySQL regression.
+
+The proposed `feat/im-device-lifecycle` compaction is withheld: promoting device receipts to account-wide `acked_at` suppresses unread on a newly registered device, and its device-count check is not serialized with registration. Existing 30/90-day eviction/expiry remains in place. Full default 75-second crash-presence observation and safe active-device receipt compaction are still pending. See [seven-branch review](BRANCH_REVIEW.md).

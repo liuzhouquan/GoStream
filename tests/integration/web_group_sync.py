@@ -62,38 +62,15 @@ class FixtureHandler(SimpleHTTPRequestHandler):
         if path == "/api/groups/1/messages":
             if self.server.delay_group_1:
                 time.sleep(0.4)
+            if self.server.fail_group_1:
+                self.json_response(503, {"error": "injected history outage"})
+                return
             before = int(query.get("before_id", ["0"])[0])
-            if before == 0:
-                # 100 newest messages: 105 down to 6
-                # If gap-filling sync added 106..108, include them up to max_id
-                max_id = self.server.group_1_max_id
-                items = [
-                    {
-                        "id": i,
-                        "group_id": 1,
-                        "sender_id": 99,
-                        "body": f"msg {i}",
-                        "created_at": "2026-10-29T10:00:00Z",
-                    }
-                    for i in range(max_id, 5, -1)
-                ]
-                self.json_response(200, {"items": items, "next_cursor": 6, "has_more": True})
-                return
-            if before == 6:
-                # 5 oldest messages: 5 down to 1
-                items = [
-                    {
-                        "id": i,
-                        "group_id": 1,
-                        "sender_id": 99,
-                        "body": f"msg {i}",
-                        "created_at": "2026-10-29T09:00:00Z",
-                    }
-                    for i in range(5, 0, -1)
-                ]
-                self.json_response(200, {"items": items, "next_cursor": 1, "has_more": False})
-                return
-            self.json_response(200, {"items": [], "next_cursor": 0, "has_more": False})
+            top = min(self.server.group_1_max_id, before - 1) if before else self.server.group_1_max_id
+            low = max(1, top - 99)
+            items = [{"id": i, "group_id": 1, "sender_id": 99, "body": f"msg {i}",
+                      "created_at": "2026-10-29T10:00:00Z"} for i in range(top, low - 1, -1)]
+            self.json_response(200, {"items": items, "next_cursor": low if items else 0, "has_more": low > 1})
             return
         if path == "/api/groups/2/messages":
             items = [
@@ -119,6 +96,8 @@ class FixtureHandler(SimpleHTTPRequestHandler):
             msg_id = int(ack_match.group(2))
             with self.server.lock:
                 self.server.acks.append((group_id, msg_id))
+            if group_id == 1 and self.server.delay_ack:
+                time.sleep(0.8)
             self.json_response(200, {"acked": True, "last_ack_id": msg_id})
             return
         self.json_response(404, {"error": "not found"})
@@ -134,6 +113,8 @@ def main():
     server.lock = threading.Lock()
     server.delay_group_1 = False
     server.group_1_max_id = 105
+    server.fail_group_1 = False
+    server.delay_ack = False
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
 
@@ -269,6 +250,40 @@ def main():
                 f"Expected [106, 107, 108] rendered in order, got {messages_106_108}"
             )
 
+        # A live hint after 242 missed rows must fetch more than one page.
+        server.group_1_max_id = 350
+        cli("eval", "appendGroupMessage({id:350,group_id:1,sender_id:99,body:'msg 350'})")
+        deadline = time.monotonic() + 6
+        while time.monotonic() < deadline:
+            with server.lock:
+                if (1, 350) in server.acks:
+                    break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("multi-page live synchronization did not ACK after filling gap")
+        ids = json.loads(cli("eval", "[...document.querySelectorAll('#group-log [data-message-id]')].map(r=>Number(r.dataset.messageId))"))
+        if ids != list(range(1,351)):
+            raise AssertionError(f"multi-page live sync skipped rows; rendered={len(ids)}")
+
+        # Failed synchronization must leave the verified/ACK boundary at 350.
+        server.fail_group_1 = True
+        server.group_1_max_id = 353
+        cli("eval", "appendGroupMessage({id:353,group_id:1,sender_id:99,body:'msg 353'})")
+        time.sleep(0.4)
+        with server.lock:
+            if any(group==1 and message>350 for group,message in server.acks):
+                raise AssertionError("failed history request advanced cumulative ACK")
+        server.fail_group_1 = False
+        cli("eval", "void syncGroupMessages('1')")
+        deadline = time.monotonic() + 4
+        while time.monotonic() < deadline:
+            with server.lock:
+                if (1,353) in server.acks:
+                    break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("sync did not recover after failed history request")
+
         # Case 3: Group switching race condition
         # When switching to Group 2 while Group 1 load is delayed, Group 1's late response
         # must not overwrite Group 2 or send ACKs for Group 1.
@@ -312,6 +327,16 @@ def main():
                 f"Late response from Group 1 sent ACK while viewing Group 2: {group_1_acks}"
             )
 
+        # An ACK sent by a previous group must not update the new group's state.
+        server.delay_group_1 = False
+        server.delay_ack = True
+        cli("eval", "openGroup(1).then(async()=>{while(state.groupHasMore)await loadOlderGroupMessages();})")
+        cli("eval", "openGroup(2)")
+        time.sleep(1)
+        state_after = json.loads(cli("eval", "({group:state.groupID,ack:state.groupLastAckID,sent:state.groupAckedID})"))
+        if state_after != {"group":"2","ack":5,"sent":5}:
+            raise AssertionError(f"stale ACK crossed group boundary: {state_after}")
+
         print(
             json.dumps(
                 {
@@ -320,6 +345,9 @@ def main():
                     "backlog_safe_ack": True,
                     "out_of_order_gap_sync": True,
                     "group_switch_discard_stale": True,
+                    "multi_page_live_sync": True,
+                    "failed_sync_no_ack": True,
+                    "stale_ack_ignored": True,
                 }
             )
         )

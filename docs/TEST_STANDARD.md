@@ -60,7 +60,7 @@ docker compose -p gostream-object -f docker-compose.yml -f docker-compose.object
 
 `minio_smoke.py` 要求真实 MP4 大于 4 MiB，用两个 API 端口分别发送分片并核对 MySQL 发布态、视频/封面内容、HTTP Range 和 Feed。两个停机脚本均在 `finally` 中启动隔离 MinIO，但仍应在结束后检查容器健康。处理任务停机脚本核对失败尝试期间视频不进入公共 Feed，恢复后完成第二次尝试并发布。Opt-in Go 测试可设置 `GOSTREAM_TEST_MINIO_ENDPOINT`、`GOSTREAM_TEST_MINIO_ACCESS_KEY`、`GOSTREAM_TEST_MINIO_SECRET_KEY` 后执行 `go test ./internal/platform -run '^TestMinIOMediaAcrossInstances$' -count=1`；它创建并删除随机桶。新增的故障矩阵测试同样创建独立桶；MySQL 模式会在隔离数据库留下测试用户和会话，测试结束时应销毁该项目的专用卷。
 
-`TestImageUploadsRejectTruncatedPayloads` 在本地模式检查 JPEG、PNG、WebP 的完整与截断文件、直传与分片完成，以及 WebP 头像所有权。`TestImagePixelBudgetRejectsLargeHeader` 用有效 PNG 头声明 2000 万像素，确认在解码前拒绝且不登记资产。设置上述三个 MinIO 环境变量后运行 `go test ./internal/platform -run '^TestMinIOImagePayloadValidation$' -count=1` 可重复同一矩阵并使用随机对象桶。`TestMediaFormatValidationAndNegativeMatrix` 在本地模式覆盖 MP4、WebM、MOV 的合法上传，以及纯文本、短截断头、EBML/MOV 头损坏、图片伪装视频、视频伪装图片、未支持格式及零字节文件的拒绝，并在分片完成时校验格式完整性；`TestMediaPermissionAndOwnershipMatrix` 覆盖匿名拦截、跨用户会话隔离、禁止使用他人资产发布、禁止非视频资产作为媒体、禁止视频资产作为封面及合法发布的闭环；`TestMediaEndpointAccessAndPrivacySemantics` 覆盖 `/media` 路径穿越、非法格式名及未发布/处理中视频不可见但在持有 128 位随机 token URL 时直接可读的产品语义；配置 MinIO 环境变量时 `TestMinIOMediaFormatAndPermissionMatrix` 重复该全量矩阵。`TestMinIOCompleteStorageOutage` 通过反向代理模拟存储完全中断（503），验证直传、分片上传、分片完成均返回 503 且不留脏数据/保留会话 open 状态，媒体读取返回 503 不崩溃，恢复后重试均能顺利完成并提交资产。`TestMinIOProcessedOutputLostResponse` 用代理让真实 MinIO 成功写入 MP4/封面对象，却向 worker 返回 503；两次失败后核对对象清理、未发布状态和未登记资产，第三次任务尝试核对发布与对象字节。设置 `GOSTREAM_TEST_MINIO_MYSQL_DSN` 可改用已经迁移的隔离 MySQL。该测试直接提供已生成的输出字节来定位对象上传阶段；真实 FFmpeg 转码另由 `minio_smoke.py` 验证。
+`TestImageUploadsRejectTruncatedPayloads` 在本地模式检查 JPEG、PNG、WebP 的完整与截断文件、直传与分片完成，以及 WebP 头像所有权。`TestImagePixelBudgetRejectsLargeHeader` 用有效 PNG 头声明 2000 万像素，确认在解码前拒绝且不登记资产。设置上述三个 MinIO 环境变量后运行 `go test ./internal/platform -run '^TestMinIOImagePayloadValidation$' -count=1` 可重复同一矩阵并使用随机对象桶。`TestMinIOProcessedOutputLostResponse` 用代理让真实 MinIO 成功写入 MP4/封面对象，却向 worker 返回 503；两次失败后核对对象清理、未发布状态和未登记资产，第三次任务尝试核对发布与对象字节。设置 `GOSTREAM_TEST_MINIO_MYSQL_DSN` 可改用已经迁移的隔离 MySQL。该测试直接提供已生成的输出字节来定位对象上传阶段；真实 FFmpeg 转码另由 `minio_smoke.py` 验证。
 
 上传完成与清理由 `TestUploadCompletionKeepsLeaseDuringAssembly`、`TestUploadCleanupRechecksCompletionLease`、`TestUploadCompletionLeaseLossKeepsCommittedMedia`、`TestUploadCleanupRecoversAfterDatabaseFailure` 和 `TestUploadCompletionHeartbeatStopsOnFailure` 覆盖。它们检查暂停后的续租、清理候选状态变更、旧 worker 不删除新 worker 已登记的本地文件、清理事务失败后的租约接管，以及取消/数据库故障时心跳退出。`TestMinIOUploadCompletionCleanupLease` 需要真实 MinIO 和专用、已迁移且没有上传会话的隔离 MySQL 库（`GOSTREAM_TEST_UPLOAD_LEASE_MYSQL_DSN`）；它用两套独立 SQL 连接与代理暂停真实对象 GET，观察续租后推进清理时刻，检查最终对象哈希、唯一资产登记、跨实例完成重试及废弃会话清理。运行命令为 `go test -race ./internal/platform -run '^TestMinIOUploadCompletionCleanupLease$' -count=1 -v`，MinIO 配置沿用上述三个环境变量；CI 会另建专用库。该用例模拟清理时间边界，不代表已测量真实长时间传输、进程强杀或存储完全中断。
 
@@ -76,11 +76,11 @@ IM 双进程故障验证运行 `python3 tests/integration/im_smoke.py --go-bin /
 | --- | --- | --- | --- |
 | A01 启动与持久化 | 空库一键启动后 `/health`、`/ready`、`/metrics` 可访问；重启 API 后账号、视频、互动和消息仍在；依赖故障时 `/ready` 的语义与文档一致 | Compose、真实 MySQL/Redis/RabbitMQ/MinIO、重启记录 | 部分通过：MinIO 覆盖配置可启动，RabbitMQ 独立停机/重启恢复及真实 API worker 生命周期已验；最终全组件 Compose 持久化恢复仍待验 |
 | A02 身份与权限 | 注册、登录、JWT 过期/伪造、资料和头像修改、关注与取消；未登录者和其他用户不能修改私有资源；重复关注结果一致 | API 单元/集成测试 + 两账号浏览器操作 | 部分通过：主路径已有，最终部署权限矩阵待复验 |
-| A03 视频与对象 | 文件和分片上传能在断点后续传；同一会话可跨两 API 实例完成；错块、错哈希、越权、超限均拒绝；FFmpeg 成功后视频/封面可从 MinIO 读取，失败后不进入公共 Feed；重试、删除、孤儿清理无误删 | 真实 MySQL/MinIO/FFmpeg + 视频探测 + 故障测试 | 部分通过：真实 MinIO 双实例续传、FFmpeg、Range、对象清理及停机后上传恢复已验；离线旧媒体导入及隔离 SQL/对象恢复已验；分片与资产负例已在真实 MySQL/MinIO 上验证；输出 PUT 成功响应丢失及 JPEG/PNG/WebP 截断文件已验；MP4/WebM/MOV 格式负例、权限隔离、未发布视频直接 URL 访问语义及存储完全中断恢复边界已验证；较大规模恢复成本待验 |
+| A03 视频与对象 | 文件和分片上传能在断点后续传；同一会话可跨两 API 实例完成；错块、错哈希、越权、超限均拒绝；FFmpeg 成功后视频/封面可从 MinIO 读取，失败后不进入公共 Feed；重试、删除、孤儿清理无误删 | 真实 MySQL/MinIO/FFmpeg + 视频探测 + 故障测试 | 部分通过：真实 MinIO 双实例续传、FFmpeg、Range、对象清理及停机后上传恢复已验；离线旧媒体导入及隔离 SQL/对象恢复已验；分片与资产负例已在真实 MySQL/MinIO 上验证；输出 PUT 成功响应丢失及 JPEG/PNG/WebP 截断文件已验；存储完全中断、更多视频格式/权限场景与较大规模恢复成本待验 |
 | A04 Feed | 时间线、关注、热榜、推荐均正确分页；相同时间戳与新插入记录不造成稳定数据集中的漏项/重复；普通作者推送、高粉作者拉取可配置且结果一致；Redis 中断可回退数据库 | 单元测试 + 真实 MySQL/Redis 双实例 + 压测 | 部分通过：混合推拉、批量幂等、迟到关注及真实 MySQL 同时间戳翻页已局部验证；v004 完整数据集交替读压测只改善约 11% 与 4% 的 P95，未达 20% 门槛；真实 MySQL 双连接接管 130 粉任务且重放无重复，小数据读写混合短跑 1,907 请求无错误；实际进程故障、完整数据集 20 并发/60 秒三轮及持续积压仍未验收 |
 | A05 互动与计数 | 并发重复点赞/收藏、取消及关注只有一次状态转换；计数与明细一致且非负；评论回复层级、权限和通知正确；播放计数策略明确 | 真实 MySQL 并发集成测试，结束后核对表和计数 | 部分通过：真实 MySQL 并发删除曾出现 1213 死锁并返回 500；整笔事务有限重试后，双连接 8×80 次点赞/收藏切换与隔离库混合短跑通过且计数匹配；多用户/多视频、播放量和完整通知矩阵待验 |
-| A06 异步事件 | 业务事务失败不留待发事件；提交成功后 broker 停机也不丢事件；发布确认后重复投递不产生重复通知；消费者重启、失败重试和死信可恢复 | 真实 MySQL/RabbitMQ 故障注入 + outbox/消费者状态核对 | 部分通过：确认发布、不可路由退回、确认后 SQL 状态丢失、提交后 ACK 丢失、双消费者重复投递、SQL 重试/耗尽死信/回放、broker 重启、API SIGKILL 强杀恢复、持续积压排空已在单元测试与真实 API/MySQL/RabbitMQ 验证；DLQ 目标中断及完整最终配置仍待验 |
-| A07 IM | 两实例间单聊/群聊、成员权限、同一 `client_id` 重试、每设备 ACK、离线重放、超过 100 条的历史补页都正确；Redis 中断后重连能补齐；相同会话历史按服务端 ID 排序，重复推送可去重 | 两浏览器配置 + 两 API 实例 + 真实 MySQL/Redis 故障场景 | 部分通过：真实双 API/MySQL/Redis、双方 SIGKILL、Redis 停机/重订阅、重复提示、105 条单聊/群聊补页、逐设备 ACK 和群权限撤回已验证；同群提交行锁另有 MySQL 故障回归；最终两浏览器、群前端补页/安全 ACK、并发成员撤回、presence 完整过期观察、活跃回执压缩与规定压测仍待验 |
+| A06 异步事件 | 业务事务失败不留待发事件；提交成功后 broker 停机也不丢事件；发布确认后重复投递不产生重复通知；消费者重启、失败重试和死信可恢复 | 真实 MySQL/RabbitMQ 故障注入 + outbox/消费者状态核对 | 部分通过：确认发布、不可路由退回、确认后 SQL 状态丢失、提交后 ACK 丢失、双消费者重复投递、SQL 重试/耗尽死信/回放、broker 重启及真实 API worker 已在隔离 MySQL/RabbitMQ 验证；实际强杀进程窗口、DLQ 目标中断及完整最终配置仍待验 |
+| A07 IM | 两实例间单聊/群聊、成员权限、同一 `client_id` 重试、每设备 ACK、离线重放、超过 100 条的历史补页都正确；Redis 中断后重连能补齐；相同会话历史按服务端 ID 排序，重复推送可去重 | 两浏览器配置 + 两 API 实例 + 真实 MySQL/Redis 故障场景 | 部分通过：真实双 API/MySQL/Redis、双方 SIGKILL、Redis 停机/重订阅、重复提示、105 条单聊/群聊补页、逐设备 ACK 和群权限撤回已验证；同群提交行锁另有 MySQL 故障回归；前端补页/安全 ACK（含 350 条缺口/失败/过时响应）与真实 MySQL 成员撤回另有回归；最终两浏览器、默认 presence 完整过期观察、活跃回执压缩与规定压测仍待验 |
 | A08 通知与搜索 | 关注/点赞/评论/私信通知按权限显示，分页和有界已读不吞掉新通知；搜索用户与已发布视频支持独立分页和转义字符，隐藏视频不出现 | 真实 MySQL + 浏览器分页测试 + 查询计划记录 | 部分通过：功能已验证，较大数据量查询计划待补 |
 | A09 Web 全流程 | 两个独立浏览器账号完成注册、续传发布、Feed、互动、主页、搜索、通知、单聊和群聊；刷新/重启后状态一致；手机宽度下主要操作可用 | 最终 Compose 版本的浏览器记录，附账号/数据清理说明 | 部分通过：现有功能分批验证，完整最终配置待验 |
 | A10 数据升级与运维 | 新库安装、从当前 schema 升级、重复运行迁移、失败恢复均有结果；CI 通过；Prometheus 指标可解释；备份与恢复操作有记录 | 版本化迁移测试 + CI 运行记录 + 恢复演练 | 部分通过：v004 本地新库安装、旧库回填和隔离 MySQL 备份/恢复重放已通过；CI 运行 40441635650 的质量、MySQL、MinIO 任务均通过；在线备份一致性与较大规模恢复成本待验 |
@@ -130,3 +130,13 @@ IM 双进程故障验证运行 `python3 tests/integration/im_smoke.py --go-bin /
 ```
 
 发布前由此矩阵逐项复核，任何“部分通过”都需要补证据或明确缩小公开声明的范围。
+
+
+## 七分支复核后的新增验证入口
+
+- `python3 tests/integration/web_group_sync.py`：隔离静态服务/模拟 API 和 Chromium，验证 105 条初始分页、增长至 350 条的多页补读、历史 503 时不推进 ACK、恢复重试、切群丢弃过时历史及 ACK 响应。需要 `agent-browser`；不代替真实 SQL/浏览器端到端。
+- `go test -race ./internal/platform -run '^TestMySQLGroupMemberRevocationRace$' -count=3`：已迁移的隔离 `GOSTREAM_TEST_MYSQL_DSN`，验证 send/ACK/成员移除事务顺序和移除后无残留游标。
+- `go test -race ./internal/platform -run '^TestMinIO(CompleteStorageOutage|MediaFormatAndPermissionMatrix)$' -count=1 -v`：隔离 MinIO 三个环境变量，随机桶。503 由反向代理注入，SQL 为 SQLite；测试检查对象桶清理错误，不是 TCP 断连或 MySQL/MinIO 联合故障。CI 已接入该入口。
+- 媒体矩阵的 WebM/MOV 样本是文件头，验证签名/扩展名和所有权，不证明可解码或真实 FFmpeg 转码/缩略图；真实编解码格式矩阵继续待验。媒体 URL 可公开读取的现状仅由本地测试覆盖，产品隐私边界不据此自动关闭。
+- RabbitMQ 新脚本的 SIGKILL 是一般重启检查，五条静态积压是小批量排空；精确窗口和持续积压仍待验。
+- A12 保持部分通过。未合入的 OpenAPI 路由测试不校验参数/响应 Schema，也不能关闭 WebSocket 帧契约验收。

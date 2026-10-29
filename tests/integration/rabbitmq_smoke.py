@@ -126,7 +126,8 @@ def main():
             actor2 = call("/api/users", {"username": "process_actor2", "nickname": "Actor2", "password": "fixture-password-123"})
             call(f"/api/users/me/following/{owner['user']['id']}", None, actor2["access_token"], "PUT")
             api.send_signal(signal.SIGKILL)
-            api.wait()
+            if api.wait(timeout=10) != -signal.SIGKILL:
+                raise RuntimeError("API did not exit via SIGKILL")
             api = None
 
             api = subprocess.Popen([str(work / "gostream")], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
@@ -135,7 +136,7 @@ def main():
                 f"SELECT COUNT(*) FROM `{schema}`.outbox_events o JOIN `{schema}`.notifications n "
                 f"ON o.event_key=CONCAT('broker-delivery:notification:',n.id) WHERE n.user_id={owner['user']['id']} AND o.published_at IS NOT NULL;") == "2")
 
-            # Scenario 3: Sustained backlog drain while worker is offline
+            # Scenario 3: Small finite backlog drain while worker is offline
             api.send_signal(signal.SIGTERM)
             if api.wait(timeout=10) != 0:
                 raise RuntimeError("API shutdown before backlog drain failed")
@@ -150,7 +151,7 @@ def main():
 
             api = subprocess.Popen([str(work / "gostream")], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
             wait("API readiness for backlog drain", lambda: reachable(base + "/ready"))
-            wait("drain sustained backlog of 5 events", lambda: mysql(
+            wait("drain small backlog of 5 events", lambda: mysql(
                 f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE topic='notification.deliver' AND published_at IS NOT NULL;") == "7")
 
             api.send_signal(signal.SIGTERM)

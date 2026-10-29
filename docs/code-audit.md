@@ -10,8 +10,7 @@
 | --- | --- | --- |
 | 已有修复及回归 | P0 默认密钥、P1-01–05、P2-01–03、P1-06/07 上传租约与文件保留 | 下文记录原复现、修复及局限；后续改动仍跑相关回归 |
 | 已复现，修复见 [PR #16](https://github.com/liuzhouquan/GoStream/pull/16) | P1-08 群消息低 ID 迟提交与累计 ACK | 真实 MySQL 受控暂停复现未读遗漏；同群行锁及提交/回滚/跨群回归通过，见文末 |
-| 已复现，修复见分支 `fix/web-group-sync-ack` | P1-09 群前端补页和累计 ACK | tests/integration/web_group_sync.py 浏览器自动化复现未读跳跃；群会话补页、安全 ACK、缺口同步与切群防竞争回归通过，见文末 |
-| 优先修复/确认 | P1-10 成员撤回/发送/ACK 交错（待复现） | 真实 MySQL 双连接权限竞态验证 |
+| 复核后修正并补回归 | P1-09 群前端补页/累计 ACK；P1-10 成员撤回/发送/ACK | 原候选分支均有遗漏；修复与实际证据见 [七分支审核](BRANCH_REVIEW.md) |
 | 待补验证 | A03/A04/A06/A07 的剩余故障、性能及最终配置；群前史可见性、已知媒体 URL 的产品边界 | 不将风险当作已证实缺陷，也不以普通测试通过替代外部依赖矩阵 |
 | 文档维护 | 旧开发顺序把已实现模块列成待实现；原审计混有历史与当前状态 | 以工作包退出条件替换旧清单，并保留原始证据，不覆写失败历史 |
 
@@ -110,8 +109,8 @@
 | --- | --- | --- |
 | P1-06，已复现，修复与验证见文末 | `uploads.go:completeUploadSession` 的固定五分钟租约不续期，`CleanupExpiredUploads` 删除前也不原子领取。暂停完成请求并推进过期边界后，清理器删除分片，完成返回 409。另发现 P1-07：旧 worker 登记失败时删除已被新 worker 成功登记的本地最终文件。详见文末。 | 保留复现与对照；验证续租、清理接管、旧 worker 回滚、数据库故障恢复；真实 MySQL/MinIO 双连接和对象 GET 交错测试，并运行相关回归。 |
 | P1，产品语义待确认 | [`internal/platform/groups.go`](../internal/platform/groups.go) 第 110–122 行邀请时将未读游标推进到当时最新消息，但第 178–195 行历史查询只看**当前**成员身份。新加入或被移除后重新加入的人可查询加入前、离群期间的消息。`DELIVERY_SCOPE.md` 只规定“群历史仅成员可见”，没有规定加入前历史是否可见。 | 先明确产品规则；若历史应按成员有效期隔离，补邀请、移除、重邀的权限测试和数据库过滤。不要在规则未明确前把此项写成已证实漏洞。 |
-| P2，语义已确认并验证 | [`internal/platform/server.go`](../internal/platform/server.go) 第 55–59 行的 `/media` 采用 128 位高熵随机 token。未发布/处理中视频不会泄露至公开 Feed、个人主页或搜索，但在已知完整 URL 时支持直接内容寻址；已在本地及 MinIO 模式完成自动化回归验证。 | 产品明确采用标准 CDN/对象存储直接访问模型；`TestMediaEndpointAccessAndPrivacySemantics` 验证了路径穿越拦截、无效名 404 及未发布状态隐私。 |
-| P2，已实现并验证 | `docs/DELIVERY_SCOPE.md` 与 `docs/TEST_STANDARD.md` 已声明：更多视频编解码格式、权限负例及对象存储完全中断恢复边界。 | `TestMediaFormatValidationAndNegativeMatrix`、`TestMediaPermissionAndOwnershipMatrix` 与 `TestMinIOCompleteStorageOutage` 已通过普通与 race 测试；较大规模生产恢复成本仍待最终阶段压测。 |
+| P2，待确认 | [`internal/platform/server.go`](../internal/platform/server.go) 第 55–59 行的 `/media` 是公开文件/对象路径；发布前的上传源文件已有 URL。公开 Feed 不列出处理/失败视频，但获知源 URL 的人可能直接读取。 | 明确上传源文件是否应为私有对象；在本地/MinIO 两模式测试游客使用已知 URL 的访问结果，并与产品隐私要求对齐。 |
+| P2，已知未验收 | `docs/DELIVERY_SCOPE.md` 与 `docs/TEST_STANDARD.md` 已声明：RabbitMQ broker、完整混合 Feed 负载、真实双实例 IM 故障矩阵、更多编解码与对象存储完全中断仍未通过最终验收。 | 在对应功能实现/环境具备后执行隔离组件测试，记录命令、数据规模、失败/恢复结果；不得用本轮普通测试通过代替这些验收。 |
 
 现有测试覆盖正常注册/发布/互动、上传完整性、过期会话的顺序清理、Feed 推拉、MySQL 并发点赞、IM 离线/ACK、媒体清理和 outbox 重试等重要路径。缺口集中在：默认部署密钥防护、慢 body/高频请求、数据库故障状态码、群人数并发边界、outbox 租约过期交接、上传清理与完成交错、处理器配置切换、浏览器持久状态损坏与高计数交互。这些不能由 `go test -race` 或单 worker 的通过结果替代。
 
@@ -173,7 +172,7 @@ P1-05 本地验证还包括 Go 1.27.2 的全量测试、全量 race、vet、API/
 
 本轮补充 `tests/integration/im_smoke.py` 和 `tests/integration/im`，用随机 MySQL 库、临时真实 Redis、两个以 Go race 编译的生产 API 执行公开 HTTP/WebSocket 协议；操作系统退出状态确认双方实际 SIGKILL。五个场景覆盖跨实例消息幂等/权限、重复实时提示、Redis 中断后 SQL 补偿与重订阅、进程重启/发送重试、105 条单聊和群聊的重放上限/完整补页、逐设备 ACK 和群权限撤回。已运行结果与环境见 [`PROGRESS.md`](../PROGRESS.md)，保证边界与复现入口见 [`IM.md`](IM.md)。这些场景没有复现新的业务缺陷，不能据此关闭所有历史审计风险。
 
-**仍待确认**：迟提交低 ID 群消息与高 ID ACK 游标的交互未做事务故障注入；完整崩溃节点 presence 过期未等待观察；持续活跃设备回执压缩、两浏览器最终部署及规定 IM 负载仍未验收。重复 Pub/Sub 提示已证实不会新增持久消息行，但可以重复推送同一 ID，客户端仍需去重和未读/历史同步。
+**此段为 PR #15 时的历史状态**：低 ID 迟提交问题后来由 PR #16 复现并修复；完整崩溃节点 presence 过期未等待观察；持续活跃设备回执压缩、两浏览器最终部署及规定 IM 负载仍未验收。重复 Pub/Sub 提示已证实不会新增持久消息行，但可以重复推送同一 ID，客户端仍需去重和未读/历史同步。
 
 测试基础设施跟进：强制 Go 五秒超时复现两个残留 API；超时跳过 `t.Cleanup`，旧外层脚本未拥有子进程生命周期。现已用独立进程组、依赖删除前的 TERM/KILL 和受控临时目录修复，新增 `--check-timeout-cleanup` CI 入口，预期内层十秒超时且外层清理必须成功；清理前可观察到存活 API，之后活动进程/schema/user 均应为零。此问题属于本轮新增测试脚本，未将其描述为生产 IM 服务的进程泄漏。
 
@@ -186,28 +185,20 @@ P1-05 本地验证还包括 Go 1.27.2 的全量测试、全量 race、vet、API/
 - **复现**：[`TestMySQLGroupCommitOrder`](../internal/platform/group_order_test.go) 在真实 SQL 插入后暂停 ID 1，第二实例提交 ID 2 并由接收者 ACK，然后释放 ID 1。原代码输出 `late row count=1; unread response 200 {"last_ack_id":2,"unread_count":0}`。不是以 race 无报错替代逻辑并发验证。
 - **最小修复**：发送事务在插入前锁定 `chat_groups` 对应行，直到提交/回滚；与邀请的群锁一致，无新表、迁移或全局互斥。测试验证提交、回滚释放、跨群独立与幂等。已推进的历史游标不会自动回退；旧数据可从历史读取。热点群写入串行成本待负载测量。
 
-### P1-09：群前端只展示最近 100 条却推进累计 ACK（已复现；修复见分支 `fix/web-group-sync-ack`）
+### P1-09：群前端只展示最近 100 条却推进累计 ACK（代码确认；浏览器复现待做）
 
-- **位置/证据**：[`web/app.js`](../web/app.js) 的 `openGroup` 原仅请求一次 `messages?limit=100`，未消费 `has_more`/`next_cursor`，且立即 ACK 该页最大 ID；WebSocket `group_message` 收到即直接调用 ACK。
-- **复现**：[`tests/integration/web_group_sync.py`](../tests/integration/web_group_sync.py) 启动隔离静态服务、模拟 API 与 Chromium 会话。在原代码上打开积压 105 条消息的群聊时，立即触发断言失败：`AssertionError: Defect reproduced: premature ACK for message 105 before paging unread backlog! acks=[(1, 105)]`。确认未读积压超 100 条时较早消息无法加载且累计游标跨过未读。
-- **最小修复**：
-  1. 在 `web/app.js` 增加群会话分页与同步状态（`groupCursor`、`groupHasMore`、`groupLoadID`、`groupLastAckID`、`groupAckedID` 等）。
-  2. 渲染“加载更早的群消息”按钮（`#group-more`），点击调用 `loadOlderGroupMessages` 向上翻页并维持列表滚动条高度；到达历史起点时隐藏。
-  3. 实现安全累计确认 `syncGroupAck`：检查当前已渲染消息起点与服务端 `groupLastAckID`；若历史仍有更早消息且未读范围未覆盖到起点，严禁推进累计 ACK。仅在向后翻页闭合未读缺口或历史已翻到最前时才推进 ACK。
-  4. 实时乱序与跳跃缺口同步：收到实时消息若发现 ID 跳跃（`m.id > lastID + 1`），暂缓 ACK 并调用 `syncGroupMessages` 补全当前群消息，补全排版后再推进 ACK。
-  5. 代数防竞争：`openGroup` 和补页使用自增 `groupLoadID`，切群或退出群聊时快速使过时异步响应失效，丢弃串包渲染并阻止误发送 ACK。
-- **验证与限制**：`AGENT_BROWSER_ARGS="--no-sandbox" python3 tests/integration/web_group_sync.py` 通过全部场景（105 条积压补页及延迟确认、实时消息跳跃同步、快速切群丢弃过时响应）；原有 `web_action_counts.py` 与 `web_stored_session.py` 均保持通过；Go 1.27.2 全量普通与 race 测试、vet、构建与 JS 语法检查通过。测试基于 Chromium 与模拟 API，真实双实例 IM 多客户端压测仍属 A07 后续范围。
+- **位置/证据**：[`web/app.js`](../web/app.js) 的 `openGroup` 仅请求一次 `messages?limit=100`，没有消费 `has_more`/`next_cursor`，随后 ACK 该页最大 ID。WebSocket `group_message` 回调也直接 ACK 实时 ID；`group_sync_required` 只显示提示。
+- **影响/复现步骤**：离线期间积压 105 条后打开群，较早 5 条没有加载入口，累计游标却跨过全部消息。若较高提示先到、较低提示丢失，同样可能跳过未展示消息。服务端 SQL 历史保留，因此不是持久行被删除。本轮仅源码确认，浏览器操作结果不得写成已测。
+- **最小修复建议**：群会话维护分页/同步状态；同步到上次确认边界后才能推进累计 ACK；切群和重连丢弃过时响应。用隔离浏览器验证 105+ 条补页、实时乱序和切群交错，再跑真实双实例 IM 回归。作为下一个小型 PR，避免把服务端行锁测试当作前端验收。
 
-### P1-10：群成员撤回与发送/ACK 竞态（已修复并验证）
+### P1-10：群成员撤回与发送/ACK 竞态（待确认）
 
-- **位置与影响**：[`groups.go`](../internal/platform/groups.go) 的 `removeGroupMember` 之前未持有群行锁；`sendGroupMessage` 在事务外先查成员，再在事务中锁定群行并插入消息；`ackGroupMessage` 先读取群成员或共享游标，在后续事务中更新或插入设备读游标。在并发场景下，若成员撤回在检查之后、提交之前执行，撤回的成员仍可能成功发送消息，或者 ACK 事务仍会插入/更新已被踢出用户的 `GroupDeviceRead` 记录。
-- **最小修复**：
-  1. `removeGroupMember` 在删除成员记录的事务中，首先执行 `SELECT id FROM chat_groups WHERE id = ? FOR UPDATE` 锁定群行，与群邀请和消息发送串行化。
-  2. `sendGroupMessage` 在群行锁保护的事务内，再次核查发送者是否依然为该群成员（`GroupMember`），若成员已被移除则回滚并返回 `group not found`（保持与非成员访问群相同的错误语义）。
-  3. `ackGroupMessage` 在设备读游标的写入事务（或无设备 ID 时的共享游标更新）中，显式复核当前用户是否仍为群成员；若不存在则回滚并返回 404（`group membership not found`），防止已移除成员通过滞后 ACK 产生孤立游标记录。
-- **验证**：
-  - [`internal/platform/group_member_race_test.go`](../internal/platform/group_member_race_test.go) 添加了 `TestGroupMemberRevocationPermissions`，测试了群主移除成员、非群主/外部用户移除鉴权、群主不能退出自身群、以及被移除成员后续获取历史/未读/发送/ACK 的行为（均被拒绝且不生成游标）。
-  - 添加了 `TestMySQLGroupMemberRevocationRace`（要求 `GOSTREAM_TEST_MYSQL_DSN`），使用真实独立连接模拟踢出与发送/ACK 并发时的群行锁串行化保障。
-
+- **代码线索**：`sendGroupMessage` 的成员查询在消息事务前，`removeGroupMember` 不参与群行锁；设备 ACK 先读成员/共享游标再创建独立读游标。可能出现撤回提交后，已通过旧检查的请求仍写入。
+- **确认与最小修复方向**：在检查与写入之间设测试屏障，实际删除成员后释放发送/ACK，核对 SQL 消息、读游标与响应。若复现，统一群行锁下的成员复核和写入顺序；保留先提交操作有效的语义。当前没有运行该竞态测试，不能宣称已修复或已复现。
 
 修复顺序：本次 P1-08 → P1-09 前端同步 → P1-10 复现/修复 → 设备回执生命周期及剩余 A07 验收。P2 文档偏差已修正开发顺序和当前审计入口；不因代码风格拆分整个平台或降低验收标准。
+
+
+## 七分支审核后的当前状态
+
+详见 [BRANCH_REVIEW.md](BRANCH_REVIEW.md)。P1-09/P1-10 原分支有阻塞问题，已在集成候选修正并补上能失败的回归。设备回执压缩与 OpenAPI 两分支暂缓合并，分别存在新设备未读丢失、契约字段错误及验证不足。A03/A06/A07/A12 保留未验证边界，不采用各分支过早关闭整项验收的描述。历史原始问题记录保留，当前判断以本段、分支审核和测试标准为准。

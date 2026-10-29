@@ -284,6 +284,10 @@ func (s *Server) ackGroupMessage(c *gin.Context) {
 	}
 	if deviceID != "" {
 		err := s.DB.Transaction(func(tx *gorm.DB) error {
+			var locked ChatGroup
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&locked, group.ID).Error; err != nil {
+				return err
+			}
 			var membership GroupMember
 			if err := tx.Where("group_id = ? AND user_id = ?", group.ID, uid(c)).First(&membership).Error; err != nil {
 				return err
@@ -319,6 +323,10 @@ func (s *Server) ackGroupMessage(c *gin.Context) {
 		return
 	}
 	err = s.DB.Transaction(func(tx *gorm.DB) error {
+		var locked ChatGroup
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&locked, group.ID).Error; err != nil {
+			return err
+		}
 		var membership GroupMember
 		if err := tx.Where("group_id = ? AND user_id = ?", group.ID, uid(c)).First(&membership).Error; err != nil {
 			return err

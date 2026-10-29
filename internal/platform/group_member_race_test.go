@@ -50,7 +50,7 @@ func TestGroupMemberRevocationPermissions(t *testing.T) {
 
 	// Non-owner member cannot remove another member (returns 403)
 	if r := request(t, h, http.MethodDelete, fmt.Sprintf("%s/members/%d", base, ownerID), memberToken, nil); r.Code != http.StatusBadRequest {
-		// target is owner, so returns 400
+		t.Fatalf("member removing owner: expected 400, got %d", r.Code)
 	}
 	// Add outsider as second member so member can try to remove outsider
 	if r := request(t, h, http.MethodPost, base+"/members", ownerToken, map[string]any{"user_id": outsiderID}); r.Code != http.StatusOK {
@@ -148,6 +148,7 @@ func TestMySQLGroupMemberRevocationRace(t *testing.T) {
 	}{
 		{name: "send_revocation_race", mode: "send"},
 		{name: "ack_revocation_race", mode: "ack"},
+		{name: "removal_before_inflight_ack", mode: "ack_removed_first"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pools := make([]*gorm.DB, 2)
@@ -269,8 +270,12 @@ func TestMySQLGroupMemberRevocationRace(t *testing.T) {
 					req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/groups/%d/members/%d", webB.URL, group.ID, memberID), nil)
 					req.Header.Set("Authorization", "Bearer "+ownerToken)
 					resp, err := http.DefaultClient.Do(req)
-					if err != nil || resp.StatusCode != http.StatusOK {
-						t.Errorf("remove member on server B: code=%v err=%v", resp.StatusCode, err)
+					if err != nil {
+						t.Errorf("remove member: %v", err)
+						return
+					}
+					if resp.StatusCode != http.StatusOK {
+						t.Errorf("remove member status=%d", resp.StatusCode)
 					}
 					if resp != nil {
 						_ = resp.Body.Close()
@@ -286,14 +291,22 @@ func TestMySQLGroupMemberRevocationRace(t *testing.T) {
 				_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 				for {
 					var frame struct {
-						Type    string `json:"type"`
-						Message string `json:"message"`
+						Type      string          `json:"type"`
+						Message   json.RawMessage `json:"message"`
+						MessageID uint            `json:"message_id"`
 					}
 					if err := conn.ReadJSON(&frame); err != nil {
 						t.Fatalf("socket reply: %v", err)
 					}
 					if frame.Type == "ready" {
 						continue
+					}
+					if frame.Type != "ack" || frame.MessageID == 0 {
+						t.Fatalf("send holding group lock must commit before removal: %+v", frame)
+					}
+					var stored GroupMessage
+					if err := dbB.First(&stored, frame.MessageID).Error; err != nil || stored.SenderID != memberID {
+						t.Fatalf("committed send missing: %+v %v", stored, err)
 					}
 					// If removal committed first, send must be rejected
 					// If send committed first, it had valid membership at commit
@@ -323,7 +336,11 @@ func TestMySQLGroupMemberRevocationRace(t *testing.T) {
 
 				callbackName := "test:mysql_pause_ack_membership_check"
 				if err := dbA.Callback().Query().After("gorm:query").Register(callbackName, func(tx *gorm.DB) {
-					if tx.Statement.Table == "group_reads" {
+					target := "group_reads"
+					if tc.mode == "ack_removed_first" {
+						target = "group_members"
+					}
+					if tx.Statement.Table == target {
 						pauseOnce.Do(func() {
 							entered <- struct{}{}
 							select {
@@ -358,18 +375,45 @@ func TestMySQLGroupMemberRevocationRace(t *testing.T) {
 					t.Fatal("ack never reached read check on Server A")
 				}
 
-				// Owner removes member on Server B
-				req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/groups/%d/members/%d", webB.URL, group.ID, memberID), nil)
-				req.Header.Set("Authorization", "Bearer "+ownerToken)
-				resp, err := http.DefaultClient.Do(req)
-				if err != nil || resp.StatusCode != http.StatusOK {
-					t.Fatalf("remove member on server B: code=%v err=%v", resp.StatusCode, err)
+				// The lock winner defines the operation order. Never allow an ACK
+				// to resurrect device state after removal has completed.
+				removeDone := make(chan error, 1)
+				go func() {
+					req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/groups/%d/members/%d", webB.URL, group.ID, memberID), nil)
+					req.Header.Set("Authorization", "Bearer "+ownerToken)
+					resp, err := http.DefaultClient.Do(req)
+					if err != nil {
+						removeDone <- err
+						return
+					}
+					defer resp.Body.Close()
+					if resp.StatusCode != http.StatusOK {
+						removeDone <- fmt.Errorf("remove status=%d", resp.StatusCode)
+						return
+					}
+					removeDone <- nil
+				}()
+				if tc.mode == "ack_removed_first" {
+					if err := <-removeDone; err != nil {
+						t.Fatal(err)
+					}
+					unblock()
+				} else {
+					select {
+					case err := <-removeDone:
+						t.Fatalf("removal overtook ACK holding membership: %v", err)
+					case <-time.After(75 * time.Millisecond):
+					}
+					unblock()
+					if err := <-removeDone; err != nil {
+						t.Fatal(err)
+					}
 				}
-				_ = resp.Body.Close()
-
-				unblock()
 
 				statusCode := <-ackDone
+				if tc.mode == "ack_removed_first" && statusCode != http.StatusNotFound {
+					t.Fatalf("inflight ACK after removal returned %d", statusCode)
+				}
 				if statusCode != http.StatusNotFound && statusCode != http.StatusOK {
 					t.Fatalf("unexpected ACK status code: %d", statusCode)
 				}
@@ -379,8 +423,8 @@ func TestMySQLGroupMemberRevocationRace(t *testing.T) {
 				if err := dbB.Model(&GroupDeviceRead{}).Where("group_id = ? AND user_id = ?", group.ID, memberID).Count(&dCount).Error; err != nil {
 					t.Fatal(err)
 				}
-				if statusCode == http.StatusNotFound && dCount != 0 {
-					t.Fatalf("resurrected GroupDeviceRead after 404 response: count=%d", dCount)
+				if dCount != 0 {
+					t.Fatalf("resurrected GroupDeviceRead after completed removal: count=%d", dCount)
 				}
 			}
 		})

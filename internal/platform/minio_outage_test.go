@@ -18,7 +18,7 @@ import (
 )
 
 // TestMinIOCompleteStorageOutage tests the end-to-end failure boundaries when
-// the underlying object storage (MinIO) suffers a complete outage (network unreachable / 503).
+// the underlying object storage (MinIO) suffers a complete outage (HTTP 503 at the API storage proxy).
 // It verifies:
 // 1. Direct upload returns 503 and persists no MediaAsset.
 // 2. Chunk upload returns 503, persists no UploadChunk, and leaves the session retriable.
@@ -48,9 +48,15 @@ func TestMinIOCompleteStorageOutage(t *testing.T) {
 	t.Cleanup(func() {
 		cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		_ = directStore.removePrefix(cleanCtx, "media/")
-		_ = directStore.removePrefix(cleanCtx, "chunks/")
-		_ = directStore.client.RemoveBucket(cleanCtx, bucket)
+		if err := directStore.removePrefix(cleanCtx, "media/"); err != nil {
+			t.Errorf("clean media: %v", err)
+		}
+		if err := directStore.removePrefix(cleanCtx, "chunks/"); err != nil {
+			t.Errorf("clean chunks: %v", err)
+		}
+		if err := directStore.client.RemoveBucket(cleanCtx, bucket); err != nil {
+			t.Errorf("remove bucket: %v", err)
+		}
 	})
 
 	// Proxy to inject complete outage
