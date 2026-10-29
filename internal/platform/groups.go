@@ -177,6 +177,10 @@ func (s *Server) removeGroupMember(c *gin.Context) {
 		return
 	}
 	if err := s.DB.Transaction(func(tx *gorm.DB) error {
+		var locked ChatGroup
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&locked, group.ID).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("group_id = ? AND user_id = ?", group.ID, target).Delete(&GroupMember{}).Error; err != nil {
 			return err
 		}
@@ -279,16 +283,19 @@ func (s *Server) ackGroupMessage(c *gin.Context) {
 		return
 	}
 	if deviceID != "" {
-		var shared GroupRead
-		if err := s.DB.Where("group_id = ? AND user_id = ?", group.ID, uid(c)).First(&shared).Error; err != nil {
-			respondError(c, 404, "group membership not found")
-			return
-		}
-		initial := shared.LastAckID
-		if msg.ID > initial {
-			initial = msg.ID
-		}
 		err := s.DB.Transaction(func(tx *gorm.DB) error {
+			var membership GroupMember
+			if err := tx.Where("group_id = ? AND user_id = ?", group.ID, uid(c)).First(&membership).Error; err != nil {
+				return err
+			}
+			var shared GroupRead
+			if err := tx.Where("group_id = ? AND user_id = ?", group.ID, uid(c)).First(&shared).Error; err != nil {
+				return err
+			}
+			initial := shared.LastAckID
+			if msg.ID > initial {
+				initial = msg.ID
+			}
 			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&GroupDeviceRead{GroupID: group.ID, UserID: uid(c), DeviceID: deviceID, LastAckID: initial}).Error; err != nil {
 				return err
 			}
@@ -296,6 +303,10 @@ func (s *Server) ackGroupMessage(c *gin.Context) {
 				UpdateColumn("last_ack_id", gorm.Expr("CASE WHEN last_ack_id < ? THEN ? ELSE last_ack_id END", msg.ID, msg.ID)).Error
 		})
 		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				respondError(c, 404, "group membership not found")
+				return
+			}
 			respondError(c, 500, "could not acknowledge group message")
 			return
 		}
@@ -307,9 +318,19 @@ func (s *Server) ackGroupMessage(c *gin.Context) {
 		c.JSON(200, gin.H{"acked": true, "last_ack_id": deviceRead.LastAckID})
 		return
 	}
-	res := s.DB.Model(&GroupRead{}).Where("group_id = ? AND user_id = ?", group.ID, uid(c)).
-		UpdateColumn("last_ack_id", gorm.Expr("CASE WHEN last_ack_id < ? THEN ? ELSE last_ack_id END", msg.ID, msg.ID))
-	if res.Error != nil {
+	err = s.DB.Transaction(func(tx *gorm.DB) error {
+		var membership GroupMember
+		if err := tx.Where("group_id = ? AND user_id = ?", group.ID, uid(c)).First(&membership).Error; err != nil {
+			return err
+		}
+		return tx.Model(&GroupRead{}).Where("group_id = ? AND user_id = ?", group.ID, uid(c)).
+			UpdateColumn("last_ack_id", gorm.Expr("CASE WHEN last_ack_id < ? THEN ? ELSE last_ack_id END", msg.ID, msg.ID)).Error
+	})
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			respondError(c, 404, "group membership not found")
+			return
+		}
 		respondError(c, 500, "could not acknowledge group message")
 		return
 	}
@@ -334,12 +355,17 @@ func (s *Server) sendGroupMessage(userID uint, client *hubClient, e socketEvent)
 	msg := GroupMessage{GroupID: e.GroupID, SenderID: userID, ClientID: e.ClientID, Body: e.Body}
 	created, conflict := false, false
 	err := s.DB.Transaction(func(tx *gorm.DB) error {
-		// Allocate IDs only after acquiring the same lock used by invitations.
+		// Allocate IDs and serialize against invitations and member removal
+		// using the same group row lock.
 		// A later same-group message must not commit ahead of an earlier insert:
 		// cumulative ACKs would otherwise hide the earlier message on commit.
-		// Keep the lock until commit/rollback; different groups remain independent.
+		// Re-check membership under this lock so in-flight sends fail if member removal committed.
 		var group ChatGroup
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&group, e.GroupID).Error; err != nil {
+			return err
+		}
+		var currentMember GroupMember
+		if err := tx.Where("group_id = ? AND user_id = ?", e.GroupID, userID).First(&currentMember).Error; err != nil {
 			return err
 		}
 		res := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&msg)
@@ -357,6 +383,10 @@ func (s *Server) sendGroupMessage(userID uint, client *hubClient, e socketEvent)
 		return nil
 	})
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			_ = client.send(gin.H{"type": "error", "message": "group not found"})
+			return
+		}
 		_ = client.send(gin.H{"type": "error", "message": "group message could not be saved"})
 		return
 	}

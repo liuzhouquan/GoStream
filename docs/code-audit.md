@@ -198,9 +198,16 @@ P1-05 本地验证还包括 Go 1.27.2 的全量测试、全量 race、vet、API/
   5. 代数防竞争：`openGroup` 和补页使用自增 `groupLoadID`，切群或退出群聊时快速使过时异步响应失效，丢弃串包渲染并阻止误发送 ACK。
 - **验证与限制**：`AGENT_BROWSER_ARGS="--no-sandbox" python3 tests/integration/web_group_sync.py` 通过全部场景（105 条积压补页及延迟确认、实时消息跳跃同步、快速切群丢弃过时响应）；原有 `web_action_counts.py` 与 `web_stored_session.py` 均保持通过；Go 1.27.2 全量普通与 race 测试、vet、构建与 JS 语法检查通过。测试基于 Chromium 与模拟 API，真实双实例 IM 多客户端压测仍属 A07 后续范围。
 
-### P1-10：群成员撤回与发送/ACK 竞态（待确认）
+### P1-10：群成员撤回与发送/ACK 竞态（已修复并验证）
 
-- **代码线索**：`sendGroupMessage` 的成员查询在消息事务前，`removeGroupMember` 不参与群行锁；设备 ACK 先读成员/共享游标再创建独立读游标。可能出现撤回提交后，已通过旧检查的请求仍写入。
-- **确认与最小修复方向**：在检查与写入之间设测试屏障，实际删除成员后释放发送/ACK，核对 SQL 消息、读游标与响应。若复现，统一群行锁下的成员复核和写入顺序；保留先提交操作有效的语义。当前没有运行该竞态测试，不能宣称已修复或已复现。
+- **位置与影响**：[`groups.go`](../internal/platform/groups.go) 的 `removeGroupMember` 之前未持有群行锁；`sendGroupMessage` 在事务外先查成员，再在事务中锁定群行并插入消息；`ackGroupMessage` 先读取群成员或共享游标，在后续事务中更新或插入设备读游标。在并发场景下，若成员撤回在检查之后、提交之前执行，撤回的成员仍可能成功发送消息，或者 ACK 事务仍会插入/更新已被踢出用户的 `GroupDeviceRead` 记录。
+- **最小修复**：
+  1. `removeGroupMember` 在删除成员记录的事务中，首先执行 `SELECT id FROM chat_groups WHERE id = ? FOR UPDATE` 锁定群行，与群邀请和消息发送串行化。
+  2. `sendGroupMessage` 在群行锁保护的事务内，再次核查发送者是否依然为该群成员（`GroupMember`），若成员已被移除则回滚并返回 `group not found`（保持与非成员访问群相同的错误语义）。
+  3. `ackGroupMessage` 在设备读游标的写入事务（或无设备 ID 时的共享游标更新）中，显式复核当前用户是否仍为群成员；若不存在则回滚并返回 404（`group membership not found`），防止已移除成员通过滞后 ACK 产生孤立游标记录。
+- **验证**：
+  - [`internal/platform/group_member_race_test.go`](../internal/platform/group_member_race_test.go) 添加了 `TestGroupMemberRevocationPermissions`，测试了群主移除成员、非群主/外部用户移除鉴权、群主不能退出自身群、以及被移除成员后续获取历史/未读/发送/ACK 的行为（均被拒绝且不生成游标）。
+  - 添加了 `TestMySQLGroupMemberRevocationRace`（要求 `GOSTREAM_TEST_MYSQL_DSN`），使用真实独立连接模拟踢出与发送/ACK 并发时的群行锁串行化保障。
+
 
 修复顺序：本次 P1-08 → P1-09 前端同步 → P1-10 复现/修复 → 设备回执生命周期及剩余 A07 验收。P2 文档偏差已修正开发顺序和当前审计入口；不因代码风格拆分整个平台或降低验收标准。
