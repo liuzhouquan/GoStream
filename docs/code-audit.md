@@ -93,7 +93,7 @@
 
 | 优先级与状态 | 风险/代码证据 | 后续确认标准 |
 | --- | --- | --- |
-| P1，待确认 | [`internal/platform/uploads.go`](../internal/platform/uploads.go) 第 379–406 行先选过期会话，再删分片，删除前没有复核当前租约。若完成操作在 24 小时到期前开始、处理超过五分钟租约，清理器可能在其仍运行时删掉分片。现有测试只覆盖清理时租约仍有效及租约已过的顺序路径。 | 用可暂停的对象读取或受控时钟，在 MySQL/MinIO 双 worker 下把完成与清理交错；核对最终资产、会话与对象一致性。确认后再决定续租还是完成中保护。 |
+| P1-06，已复现，修复与验证见文末 | `uploads.go:completeUploadSession` 的固定五分钟租约不续期，`CleanupExpiredUploads` 删除前也不原子领取。暂停完成请求并推进过期边界后，清理器删除分片，完成返回 409。另发现 P1-07：旧 worker 登记失败时删除已被新 worker 成功登记的本地最终文件。详见文末。 | 保留复现与对照；验证续租、清理接管、旧 worker 回滚、数据库故障恢复；真实 MySQL/MinIO 双连接和对象 GET 交错测试，并运行相关回归。 |
 | P1，产品语义待确认 | [`internal/platform/groups.go`](../internal/platform/groups.go) 第 110–122 行邀请时将未读游标推进到当时最新消息，但第 178–195 行历史查询只看**当前**成员身份。新加入或被移除后重新加入的人可查询加入前、离群期间的消息。`DELIVERY_SCOPE.md` 只规定“群历史仅成员可见”，没有规定加入前历史是否可见。 | 先明确产品规则；若历史应按成员有效期隔离，补邀请、移除、重邀的权限测试和数据库过滤。不要在规则未明确前把此项写成已证实漏洞。 |
 | P2，待确认 | [`internal/platform/server.go`](../internal/platform/server.go) 第 55–59 行的 `/media` 是公开文件/对象路径；发布前的上传源文件已有 URL。公开 Feed 不列出处理/失败视频，但获知源 URL 的人可能直接读取。 | 明确上传源文件是否应为私有对象；在本地/MinIO 两模式测试游客使用已知 URL 的访问结果，并与产品隐私要求对齐。 |
 | P2，已知未验收 | `docs/DELIVERY_SCOPE.md` 与 `docs/TEST_STANDARD.md` 已声明：RabbitMQ broker、完整混合 Feed 负载、真实双实例 IM 故障矩阵、更多编解码与对象存储完全中断仍未通过最终验收。 | 在对应功能实现/环境具备后执行隔离组件测试，记录命令、数据规模、失败/恢复结果；不得用本轮普通测试通过代替这些验收。 |
@@ -140,3 +140,10 @@ P1-05 本地验证还包括 Go 1.27.2 的全量测试、全量 race、vet、API/
 2026-10-28：P2-02 已通过 PR #10 合并到 `main`（`35dedfc`），quality、Redis、MySQL、MinIO 和真实 FFmpeg CI 均通过（run 40616889554）。P2-03 的 `tests/integration/web_stored_session.py` 在隔离静态服务和 Chromium 中复现：原始 `df9f2a4:web/app.js` 遇到损坏的 `gostream.user` JSON 后脚本不再初始化，Feed 卡片数为 0 且损坏缓存保留。`fix/web-stored-session-recovery` 从缓存读取时验证用户 ID、昵称与 token；无效或不完整缓存清理后以游客身份打开 Feed。浏览器测试已覆盖无效 JSON、错误用户结构、缺失/空 token、缺失用户及有效缓存保留。Go 1.27.2 全量测试、race、vet、API/媒体工具构建、Web/Python 语法、原互动计数浏览器回归与三套 Compose 配置检查通过。该测试使用模拟 Feed，不能证明服务端 JWT 有效；CI 与合并状态待记录。
 
 2026-10-28：P2-03 已通过 PR #11 合并到 `main`（`9bd34af`）；quality、Redis、MySQL、MinIO 和真实 FFmpeg CI 均通过（run 40650210463）。原审计问题留作修复前证据。剩余上传完成与清理交错、群历史语义、媒体源文件访问规则仍须按上表确认，不能由本次浏览器回归代替。
+
+### 2026-10-29：P1-06 上传完成与清理竞态；P1-07 过期 worker 删除已提交文件
+
+- **P1-06｜已复现。** 位置：`internal/platform/uploads.go:completeUploadSession`、`CleanupExpiredUploads`。在基线 `ccac936` 上仅加入私有租约时长测试参数，将五分钟缩短为 300 毫秒；`TestUploadCompletionKeepsLeaseDuringAssembly` 暂停真实 HTTP 完成请求，经过三个租约周期后调用清理。连续两轮观察到 `cleaned=1`，恢复请求返回 `409 upload chunk is missing`；相同暂停但不清理的对照为 200。`TestUploadCleanupRechecksCompletionLease` 还复现了候选查询后续租、清理器仍删除分片的行为。影响是接近续传到期时，仍在读取/合并的完成请求丢失分片，无法重试原会话。
+- **P1-07｜已复现。** 位置：`internal/platform/uploads.go:completeUploadSession` 的本地 `registerCompletedUpload` 失败分支。`TestUploadCompletionLeaseLossKeepsCommittedMedia` 暂停旧 worker 的资产登记，令租约过期并由另一请求完成；新请求 200、旧请求 500 后，`UploadSession` 为 `completed`，已登记的本地最终文件却不存在。影响是成功上传的源媒体在租约交接后被旧请求误删。
+- **修复范围。** `upload_lease.go` 每 100 秒条件续租五分钟，停止并等待心跳后用最新未过期租约提交资产与完成态。清理器先条件领取为 `cleaning`，再删除外部字节；SQL 清理事务失败或进程中断后，该五分钟清理租约可由后续清理接管。本地最终文件与 MinIO 对象统一保留给重试及现有孤儿回收，旧 worker 失败不再立即删除共享最终路径。现有数据库列可容纳这些状态，无 schema 变更。
+- **验证与限制。** 三轮定向 race 覆盖续租、过期清理、旧 worker 回滚、清理数据库事务失败后的恢复、请求取消/数据库关闭/租约丢失时的心跳退出。最初 300 毫秒时长测试在续租实现后有一次调度相关失败；最终回归改为观察真实心跳，再将清理时刻推进到旧租约之后，保留状态与媒体字节断言。`TestMinIOUploadCompletionCleanupLease` 在 MySQL 8.4 的两套独立连接和临时 MinIO 桶中暂停真实 chunk GET，三轮 race 通过，核对最终对象 SHA-256、单个资产、跨实例完成重试及废弃会话清理；全部 opt-in `TestMySQL*` 平台测试通过。临时数据库、用户和 MinIO 容器已删除。Go 1.27.2 全量普通/race 测试、vet、API/媒体构建、Web 语法、CI YAML 与三套 Compose 配置检查通过；CI 与合并记录见 [PR #13](https://github.com/liuzhouquan/GoStream/pull/13)。测试没有等待真实五分钟传输，也未强杀进程或模拟整个存储服务中断。

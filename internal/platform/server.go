@@ -28,6 +28,7 @@ type Server struct {
 	ffmpegBin          string
 	ffprobeBin         string
 	fanoutMaxFollowers int
+	uploadRenewEvery   time.Duration
 	upgrader           websocket.Upgrader
 }
 

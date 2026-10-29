@@ -62,6 +62,8 @@ docker compose -p gostream-object -f docker-compose.yml -f docker-compose.object
 
 `TestImageUploadsRejectTruncatedPayloads` 在本地模式检查 JPEG、PNG、WebP 的完整与截断文件、直传与分片完成，以及 WebP 头像所有权。`TestImagePixelBudgetRejectsLargeHeader` 用有效 PNG 头声明 2000 万像素，确认在解码前拒绝且不登记资产。设置上述三个 MinIO 环境变量后运行 `go test ./internal/platform -run '^TestMinIOImagePayloadValidation$' -count=1` 可重复同一矩阵并使用随机对象桶。`TestMinIOProcessedOutputLostResponse` 用代理让真实 MinIO 成功写入 MP4/封面对象，却向 worker 返回 503；两次失败后核对对象清理、未发布状态和未登记资产，第三次任务尝试核对发布与对象字节。设置 `GOSTREAM_TEST_MINIO_MYSQL_DSN` 可改用已经迁移的隔离 MySQL。该测试直接提供已生成的输出字节来定位对象上传阶段；真实 FFmpeg 转码另由 `minio_smoke.py` 验证。
 
+上传完成与清理由 `TestUploadCompletionKeepsLeaseDuringAssembly`、`TestUploadCleanupRechecksCompletionLease`、`TestUploadCompletionLeaseLossKeepsCommittedMedia`、`TestUploadCleanupRecoversAfterDatabaseFailure` 和 `TestUploadCompletionHeartbeatStopsOnFailure` 覆盖。它们检查暂停后的续租、清理候选状态变更、旧 worker 不删除新 worker 已登记的本地文件、清理事务失败后的租约接管，以及取消/数据库故障时心跳退出。`TestMinIOUploadCompletionCleanupLease` 需要真实 MinIO 和专用、已迁移且没有上传会话的隔离 MySQL 库（`GOSTREAM_TEST_UPLOAD_LEASE_MYSQL_DSN`）；它用两套独立 SQL 连接与代理暂停真实对象 GET，观察续租后推进清理时刻，检查最终对象哈希、唯一资产登记、跨实例完成重试及废弃会话清理。运行命令为 `go test -race ./internal/platform -run '^TestMinIOUploadCompletionCleanupLease$' -count=1 -v`，MinIO 配置沿用上述三个环境变量；CI 会另建专用库。该用例模拟清理时间边界，不代表已测量真实长时间传输、进程强杀或存储完全中断。
+
 ## 功能验收矩阵
 
 | 编号 | 最终必须验证的结果 | 最低证据 | 当前判断 |

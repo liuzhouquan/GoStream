@@ -69,7 +69,7 @@ func (s *Server) putObjectChunk(c *gin.Context, session UploadSession, index int
 	c.JSON(200, gin.H{"index": index, "sha256": hash, "uploaded": true})
 }
 
-func (s *Server) completeObjectUploadSession(c *gin.Context, session UploadSession, url string, leaseUntil time.Time, succeeded *bool) {
+func (s *Server) completeObjectUploadSession(c *gin.Context, session UploadSession, url string, lease *uploadCompletionLease, succeeded *bool) {
 	var chunks []UploadChunk
 	if err := s.DB.WithContext(c.Request.Context()).Where("session_id = ?", session.ID).Order("`index` ASC").Find(&chunks).Error; err != nil {
 		respondError(c, 500, "could not load chunks")
@@ -150,7 +150,7 @@ func (s *Server) completeObjectUploadSession(c *gin.Context, session UploadSessi
 		respondError(c, 503, "media storage unavailable")
 		return
 	}
-	if err := s.registerCompletedUpload(c.Request.Context(), uid(c), session, url, kind, total, leaseUntil); err != nil {
+	if err := s.registerCompletedUpload(c.Request.Context(), uid(c), session, url, kind, total, lease); err != nil {
 		// Keep the uploaded object for a retry. The orphan worker reclaims it
 		// after a grace period if the transaction never commits.
 		respondError(c, 500, "could not register completed upload")
