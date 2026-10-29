@@ -120,6 +120,14 @@ jobs:
           --mysql-container "${{ job.services.mysql.id }}"
           --mysql-addr 127.0.0.1:3306
 
+      - name: Verify cleanup when the Go test times out after API startup
+        run: >-
+          python3 tests/integration/im_smoke.py
+          --go-bin go
+          --mysql-container "${{ job.services.mysql.id }}"
+          --mysql-addr 127.0.0.1:3306
+          --check-timeout-cleanup
+
   redis-integration:
     runs-on: ubuntu-24.04
     timeout-minutes: 10

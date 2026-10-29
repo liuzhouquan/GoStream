@@ -53,6 +53,12 @@ func TestIMProcessRecovery(t *testing.T) {
 	secret := randomID(t) + randomID(t)
 	a, b := newProcess(t, binary, dsn, redisAddr, secret), newProcess(t, binary, dsn, redisAddr, secret)
 	a.start(t)
+	if os.Getenv("GOSTREAM_TEST_IM_WAIT_FOR_TIMEOUT") == "1" {
+		t.Log("intentional API cleanup timeout: production API is ready")
+		// Only the test process pauses. The production API has no fault hook.
+		// go test's timeout skips t.Cleanup; the outer launcher must stop it.
+		<-make(chan struct{})
+	}
 	b.start(t)
 	subscribed := func() {
 		t.Helper()

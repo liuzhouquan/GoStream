@@ -62,7 +62,19 @@ The launcher creates a random schema/user and a disposable Redis 8.2.9 container
 | Backlog and ACK | Generate 105 direct and 105 group messages offline; check both 100-row replay caps and sync markers, complete unread/history pages, descending history IDs, device-specific ACKs and the other device's remaining backlog |
 | Membership removal | Confirm a later group hint reaches the owner's remote device; the removed member receives none in the observation window and gets 404 for history/unread and a socket error for sending |
 
-The five subtests combine these rows. Tests initially refuse nonempty SQL schemas and Redis data. Only a container in the explicit `gostream-im-test-` namespace can be stopped. The launcher deletes its Redis container, database, user and binary after the Go test exits, including after failures. It prints remaining schema/user counts. No demonstration tables or Redis keys are used. Ordinary `go test ./...` skips this external matrix when configuration is absent. CI's independent `im-integration` job runs this same entry point.
+The five subtests combine these rows. Tests initially refuse nonempty SQL schemas and Redis data. Only a container in the explicit `gostream-im-test-` namespace can be stopped. The Go command runs in a separate Linux session. The launcher owns that process group and stops surviving descendants before deleting Redis or SQL credentials; it first sends SIGTERM, then uses bounded SIGKILL fallback. All Go temporary directories live inside the owned work directory. It prints remaining active test-process and schema/user counts. This cleanup also handles a Go test timeout, which skips `t.Cleanup`. No demonstration tables or Redis keys are used. Ordinary `go test ./...` skips this external matrix when configuration is absent. CI's independent `im-integration` job runs this same entry point.
+
+CI also deliberately times out after the first production API becomes ready:
+
+```sh
+python3 tests/integration/im_smoke.py \
+  --go-bin /usr/local/go/bin/go \
+  --mysql-container gostream-mysql-1 \
+  --mysql-addr 127.0.0.1:3307 \
+  --check-timeout-cleanup
+```
+
+This mode pauses only the test process, expects Go's ten-second timeout, and verifies the intended startup marker. Successful launcher cleanup leaves zero active test processes, schemas and users. The nonzero inner Go result is intentional; the outer script succeeds only after cleanup. A separate final process-group check rejects surviving descendants. Disabling the cleanup function during local verification made this regression check fail, then the probe explicitly stopped its owned API.
 
 Direct invocation of `TestIMProcessRecovery` requires all of `GOSTREAM_TEST_IM_BINARY`, `GOSTREAM_TEST_IM_MYSQL_DSN`, `GOSTREAM_TEST_IM_REDIS_ADDR`, and `GOSTREAM_TEST_IM_REDIS_CONTAINER`. Prefer the launcher, which constructs all four from disposable resources. Running tests against an active demonstration database is not supported.
 
