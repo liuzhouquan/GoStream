@@ -90,6 +90,36 @@ jobs:
           --mysql-container "${{ job.services.mysql.id }}"
           --mysql-addr 127.0.0.1:3306
 
+  im-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root-im-ci-only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="MYSQL_PWD=root-im-ci-only mysqladmin ping -h 127.0.0.1 -uroot --silent"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Install the declared Go version
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Exercise real API process kills, Redis outage, device ACKs and replay
+        run: >-
+          python3 tests/integration/im_smoke.py
+          --go-bin go
+          --mysql-container "${{ job.services.mysql.id }}"
+          --mysql-addr 127.0.0.1:3306
+
   redis-integration:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
