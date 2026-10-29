@@ -83,7 +83,7 @@ The final local matrix passed all seven subcases in 48.12 seconds; API lifecycle
 
 ## Remaining acceptance work
 
-The tests recreate commit/confirm/ACK uncertainty by closing connections and withholding state updates. Actual producer/consumer process kills at every boundary, unavailable/full DLQ targets, sustained backlog, multi-node quorum availability and the final combined MySQL/Redis/RabbitMQ/MinIO browser workflow remain unverified. No MQ throughput or exactly-once real-time delivery claim is made. Broker transport currently handles notifications; IM message history/ACK and group real-time hints retain their existing SQL/Redis implementation.
+Actual producer/consumer process kills with SIGKILL and worker recovery, burst duplicate handling, and sustained backlog drain while workers are offline have been verified in the real API smoke and unit test suite. Unavailable/full DLQ targets, multi-node quorum availability and the final combined MySQL/Redis/RabbitMQ/MinIO browser workflow remain unverified. No MQ throughput or exactly-once real-time delivery claim is made. Broker transport currently handles notifications; IM message history/ACK and group real-time hints retain their existing SQL/Redis implementation.
 
 ## Primary references
 
