@@ -10,7 +10,8 @@
 | --- | --- | --- |
 | 已有修复及回归 | P0 默认密钥、P1-01–05、P2-01–03、P1-06/07 上传租约与文件保留 | 下文记录原复现、修复及局限；后续改动仍跑相关回归 |
 | 已复现，修复见 [PR #16](https://github.com/liuzhouquan/GoStream/pull/16) | P1-08 群消息低 ID 迟提交与累计 ACK | 真实 MySQL 受控暂停复现未读遗漏；同群行锁及提交/回滚/跨群回归通过，见文末 |
-| 优先修复/确认 | P1-09 群前端补页和累计 ACK；P1-10 成员撤回/发送/ACK 交错（待复现） | 分别以浏览器积压/乱序用例、真实 MySQL 双连接权限竞态验证 |
+| 已复现，修复见分支 `fix/web-group-sync-ack` | P1-09 群前端补页和累计 ACK | tests/integration/web_group_sync.py 浏览器自动化复现未读跳跃；群会话补页、安全 ACK、缺口同步与切群防竞争回归通过，见文末 |
+| 优先修复/确认 | P1-10 成员撤回/发送/ACK 交错（待复现） | 真实 MySQL 双连接权限竞态验证 |
 | 待补验证 | A03/A04/A06/A07 的剩余故障、性能及最终配置；群前史可见性、已知媒体 URL 的产品边界 | 不将风险当作已证实缺陷，也不以普通测试通过替代外部依赖矩阵 |
 | 文档维护 | 旧开发顺序把已实现模块列成待实现；原审计混有历史与当前状态 | 以工作包退出条件替换旧清单，并保留原始证据，不覆写失败历史 |
 
@@ -185,11 +186,17 @@ P1-05 本地验证还包括 Go 1.27.2 的全量测试、全量 race、vet、API/
 - **复现**：[`TestMySQLGroupCommitOrder`](../internal/platform/group_order_test.go) 在真实 SQL 插入后暂停 ID 1，第二实例提交 ID 2 并由接收者 ACK，然后释放 ID 1。原代码输出 `late row count=1; unread response 200 {"last_ack_id":2,"unread_count":0}`。不是以 race 无报错替代逻辑并发验证。
 - **最小修复**：发送事务在插入前锁定 `chat_groups` 对应行，直到提交/回滚；与邀请的群锁一致，无新表、迁移或全局互斥。测试验证提交、回滚释放、跨群独立与幂等。已推进的历史游标不会自动回退；旧数据可从历史读取。热点群写入串行成本待负载测量。
 
-### P1-09：群前端只展示最近 100 条却推进累计 ACK（代码确认；浏览器复现待做）
+### P1-09：群前端只展示最近 100 条却推进累计 ACK（已复现；修复见分支 `fix/web-group-sync-ack`）
 
-- **位置/证据**：[`web/app.js`](../web/app.js) 的 `openGroup` 仅请求一次 `messages?limit=100`，没有消费 `has_more`/`next_cursor`，随后 ACK 该页最大 ID。WebSocket `group_message` 回调也直接 ACK 实时 ID；`group_sync_required` 只显示提示。
-- **影响/复现步骤**：离线期间积压 105 条后打开群，较早 5 条没有加载入口，累计游标却跨过全部消息。若较高提示先到、较低提示丢失，同样可能跳过未展示消息。服务端 SQL 历史保留，因此不是持久行被删除。本轮仅源码确认，浏览器操作结果不得写成已测。
-- **最小修复建议**：群会话维护分页/同步状态；同步到上次确认边界后才能推进累计 ACK；切群和重连丢弃过时响应。用隔离浏览器验证 105+ 条补页、实时乱序和切群交错，再跑真实双实例 IM 回归。作为下一个小型 PR，避免把服务端行锁测试当作前端验收。
+- **位置/证据**：[`web/app.js`](../web/app.js) 的 `openGroup` 原仅请求一次 `messages?limit=100`，未消费 `has_more`/`next_cursor`，且立即 ACK 该页最大 ID；WebSocket `group_message` 收到即直接调用 ACK。
+- **复现**：[`tests/integration/web_group_sync.py`](../tests/integration/web_group_sync.py) 启动隔离静态服务、模拟 API 与 Chromium 会话。在原代码上打开积压 105 条消息的群聊时，立即触发断言失败：`AssertionError: Defect reproduced: premature ACK for message 105 before paging unread backlog! acks=[(1, 105)]`。确认未读积压超 100 条时较早消息无法加载且累计游标跨过未读。
+- **最小修复**：
+  1. 在 `web/app.js` 增加群会话分页与同步状态（`groupCursor`、`groupHasMore`、`groupLoadID`、`groupLastAckID`、`groupAckedID` 等）。
+  2. 渲染“加载更早的群消息”按钮（`#group-more`），点击调用 `loadOlderGroupMessages` 向上翻页并维持列表滚动条高度；到达历史起点时隐藏。
+  3. 实现安全累计确认 `syncGroupAck`：检查当前已渲染消息起点与服务端 `groupLastAckID`；若历史仍有更早消息且未读范围未覆盖到起点，严禁推进累计 ACK。仅在向后翻页闭合未读缺口或历史已翻到最前时才推进 ACK。
+  4. 实时乱序与跳跃缺口同步：收到实时消息若发现 ID 跳跃（`m.id > lastID + 1`），暂缓 ACK 并调用 `syncGroupMessages` 补全当前群消息，补全排版后再推进 ACK。
+  5. 代数防竞争：`openGroup` 和补页使用自增 `groupLoadID`，切群或退出群聊时快速使过时异步响应失效，丢弃串包渲染并阻止误发送 ACK。
+- **验证与限制**：`AGENT_BROWSER_ARGS="--no-sandbox" python3 tests/integration/web_group_sync.py` 通过全部场景（105 条积压补页及延迟确认、实时消息跳跃同步、快速切群丢弃过时响应）；原有 `web_action_counts.py` 与 `web_stored_session.py` 均保持通过；Go 1.27.2 全量普通与 race 测试、vet、构建与 JS 语法检查通过。测试基于 Chromium 与模拟 API，真实双实例 IM 多客户端压测仍属 A07 后续范围。
 
 ### P1-10：群成员撤回与发送/ACK 竞态（待确认）
 
