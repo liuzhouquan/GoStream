@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -173,5 +174,82 @@ func TestDeadOutboxReplayOnlyChangesDeadUnpublishedRows(t *testing.T) {
 	}
 	if err := s.RequeueDeadOutbox(context.Background(), source.EventKey); err == nil {
 		t.Fatal("operator reset a published event")
+	}
+}
+
+func TestBrokerNotificationBacklogDrain(t *testing.T) {
+	s, _, db := testServer(t)
+	ctx := context.Background()
+
+	u := User{Username: "backlog-target", PasswordHash: "fixture", Nickname: "Target"}
+	if err := db.Create(&u).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	items := make([]OutboxEvent, 10)
+	bodies := make([][]byte, 10)
+	for i := 0; i < 10; i++ {
+		key := fmt.Sprintf("backlog-event-%d", i)
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			return enqueueNotification(tx, Notification{UserID: u.ID, ActorID: u.ID, Kind: "follow", EventKey: key, Text: "backlog " + key})
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var n Notification
+		if err := db.Where("event_key = ?", key).First(&n).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Where("event_key = ?", fmt.Sprintf("notification:%d", n.ID)).First(&items[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		bodies[i], err = marshalBrokerNotification(items[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i := 0; i < 10; i++ {
+		duplicate, err := s.acceptBrokerNotification(ctx, bodies[i], items[i].EventKey)
+		if err != nil || duplicate {
+			t.Fatalf("backlog item %d: duplicate=%v err=%v", i, duplicate, err)
+		}
+	}
+
+	var deliveryCount int64
+	if err := db.Model(&OutboxEvent{}).Where("topic = ?", notificationDeliverTopic).Count(&deliveryCount).Error; err != nil || deliveryCount != 10 {
+		t.Fatalf("expected 10 delivery events, got %d", deliveryCount)
+	}
+
+	var noticeCount int64
+	if err := db.Model(&Notification{}).Where("user_id = ?", u.ID).Count(&noticeCount).Error; err != nil || noticeCount != 10 {
+		t.Fatalf("expected 10 notifications, got %d", noticeCount)
+	}
+}
+
+func TestBrokerNotificationBurstAndIdempotency(t *testing.T) {
+	s, _, db := testServer(t)
+	item := brokerEventFixture(t, db)
+	body, err := marshalBrokerNotification(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for attempt := 0; attempt < 10; attempt++ {
+		duplicate, err := s.acceptBrokerNotification(context.Background(), body, item.EventKey)
+		if err != nil {
+			t.Fatalf("delivery attempt %d failed: %v", attempt, err)
+		}
+		if attempt == 0 && duplicate {
+			t.Fatal("first delivery misclassified as duplicate")
+		}
+		if attempt > 0 && !duplicate {
+			t.Fatalf("attempt %d should be duplicate", attempt)
+		}
+	}
+
+	var jobCount int64
+	if err := db.Model(&OutboxEvent{}).Where("event_key = ?", "broker-delivery:"+item.EventKey).Count(&jobCount).Error; err != nil || jobCount != 1 {
+		t.Fatalf("expected exactly 1 delivery job, got %d", jobCount)
 	}
 }

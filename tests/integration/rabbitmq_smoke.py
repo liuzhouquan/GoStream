@@ -121,6 +121,38 @@ def main():
             wait("automatic source and delivery worker completion", lambda: mysql(
                 f"SELECT COUNT(*) FROM `{schema}`.outbox_events o JOIN `{schema}`.notifications n "
                 f"ON o.event_key=CONCAT('broker-delivery:notification:',n.id) WHERE n.user_id={owner['user']['id']} AND o.published_at IS NOT NULL;") == "1")
+
+            # Scenario 2: SIGKILL fault injection and worker recovery
+            actor2 = call("/api/users", {"username": "process_actor2", "nickname": "Actor2", "password": "fixture-password-123"})
+            call(f"/api/users/me/following/{owner['user']['id']}", None, actor2["access_token"], "PUT")
+            api.send_signal(signal.SIGKILL)
+            api.wait()
+            api = None
+
+            api = subprocess.Popen([str(work / "gostream")], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
+            wait("restarted API readiness", lambda: reachable(base + "/ready"))
+            wait("recovery of event after SIGKILL", lambda: mysql(
+                f"SELECT COUNT(*) FROM `{schema}`.outbox_events o JOIN `{schema}`.notifications n "
+                f"ON o.event_key=CONCAT('broker-delivery:notification:',n.id) WHERE n.user_id={owner['user']['id']} AND o.published_at IS NOT NULL;") == "2")
+
+            # Scenario 3: Sustained backlog drain while worker is offline
+            api.send_signal(signal.SIGTERM)
+            if api.wait(timeout=10) != 0:
+                raise RuntimeError("API shutdown before backlog drain failed")
+            api = None
+
+            for i in range(5):
+                mysql(f"INSERT INTO `{schema}`.notifications(user_id,actor_id,kind,text,event_key,created_at) "
+                      f"VALUES({owner['user']['id']},{actor['user']['id']},'follow','backlog-{i}','backlog-key-{tag}-{i}',UTC_TIMESTAMP(3));")
+                nid = mysql(f"SELECT id FROM `{schema}`.notifications WHERE event_key='backlog-key-{tag}-{i}';")
+                mysql(f"INSERT INTO `{schema}`.outbox_events(event_key,topic,payload,attempts,available_at,created_at) "
+                      f"VALUES('notification:{nid}','notification.created','{{\"notification_id\":{nid}}}',0,UTC_TIMESTAMP(3),UTC_TIMESTAMP(3));")
+
+            api = subprocess.Popen([str(work / "gostream")], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
+            wait("API readiness for backlog drain", lambda: reachable(base + "/ready"))
+            wait("drain sustained backlog of 5 events", lambda: mysql(
+                f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE topic='notification.deliver' AND published_at IS NOT NULL;") == "7")
+
             api.send_signal(signal.SIGTERM)
             if api.wait(timeout=10) != 0:
                 raise RuntimeError("API graceful shutdown failed")
