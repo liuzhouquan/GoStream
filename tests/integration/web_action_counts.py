@@ -120,9 +120,11 @@ def main():
 
     def click(video_id, action):
         selector, _ = button(video_id, action)
-        cli("eval", f"document.querySelector({json.dumps(selector)}).click()")
+        cli("scrollintoview", selector)
+        cli("click", selector)
 
     try:
+        cli("set", "viewport", "1280", "577")
         cli("open", f"http://127.0.0.1:{server.server_port}/")
         cli(
             "eval",

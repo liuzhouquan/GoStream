@@ -57,6 +57,11 @@ class BrowserSession:
         self.env["AGENT_BROWSER_ARGS"] = "--no-sandbox,--disable-dev-shm-usage,--disable-gpu"
 
     def cli(self, *args, timeout=45):
+        if args and args[0] == "click":
+            # A separate scroll command completes layout before the CLI computes
+            # the mouse point. Its combined auto-scroll/click can miss a footer
+            # below a short viewport without reporting a blocked target.
+            self.cli("scrollintoview", args[1], timeout=timeout)
         cmd = [self.browser_bin, "--session", self.session, *args]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=self.env)
         if res.returncode != 0:
