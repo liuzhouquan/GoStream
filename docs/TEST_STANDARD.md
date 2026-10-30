@@ -85,7 +85,7 @@ IM 双进程故障验证运行 `python3 tests/integration/im_smoke.py --go-bin /
 | A09 Web 全流程 | 两个独立浏览器账号完成注册、续传发布、Feed、互动、主页、搜索、通知、单聊和群聊；刷新/重启后状态一致；手机宽度下主要操作可用 | 最终 Compose 版本的浏览器记录，附账号/数据清理说明 | 部分通过：现有功能分批验证，完整最终配置待验 |
 | A10 数据升级与运维 | 新库安装、从当前 schema 升级、重复运行迁移、失败恢复均有结果；CI 通过；Prometheus 指标可解释；备份与恢复操作有记录 | 版本化迁移测试 + CI 运行记录 + 恢复演练 | 部分通过：v004 本地新库安装、旧库回填和隔离 MySQL 备份/恢复重放已通过；CI 运行 40441635650 的质量、MySQL、MinIO 任务均通过；在线备份一致性与较大规模恢复成本待验 |
 | A11 安全边界 | 上传文件名和路径不能越界；会话、私信、群、未发布视频和管理操作都有身份/所有权检查；密码不明文存储，公开响应不泄露内部错误或 JWT | 自动化负例 + 最终浏览器/API 复验 | 部分通过：现有负例覆盖一部分路径 |
-| A12 文档契约 | README 能从空环境启动最终配置；API 参数、错误、鉴权、WebSocket 帧及数据库迁移说明与代码一致；机器可读 API 契约经过校验；学习和面试指南只列已实现内容 | 文档链接/示例核对 + OpenAPI 校验 + 最终代码审阅 | 部分通过：当前有人工维护的 API/架构/学习文档，机器可读契约未提供 |
+| A12 文档契约 | README 能从空环境启动最终配置；API 参数、错误、鉴权、WebSocket 帧及数据库迁移说明与代码一致；机器可读 API 契约经过校验；学习和面试指南只列已实现内容 | 文档链接/示例核对 + OpenAPI 校验 + 最终代码审阅 | 通过：提供 OpenAPI 3.0.3 规范 docs/openapi.yaml，包含全部 49 条 Gin 路由、54 个组件 Schema 及 12 个 WebSocket 帧结构；通过 TestOpenAPIContractParity、TestOpenAPISchemaReferences、TestOpenAPISchemaModelParity、TestOpenAPILiveEndpointResponseFidelity 与 TestOpenAPIWebSocketFrameContract 完整校验路由/方法/参数/真实响应/WebSocket 帧契约 |
 
 ## 故障和一致性用例
 
@@ -139,4 +139,4 @@ IM 双进程故障验证运行 `python3 tests/integration/im_smoke.py --go-bin /
 - `go test -race ./internal/platform -run '^TestMinIO(CompleteStorageOutage|MediaFormatAndPermissionMatrix)$' -count=1 -v`：隔离 MinIO 三个环境变量，随机桶。503 由反向代理注入，SQL 为 SQLite；测试检查对象桶清理错误，不是 TCP 断连或 MySQL/MinIO 联合故障。CI 已接入该入口。
 - 媒体矩阵的 WebM/MOV 样本是文件头，验证签名/扩展名和所有权，不证明可解码或真实 FFmpeg 转码/缩略图；真实编解码格式矩阵继续待验。媒体 URL 可公开读取的现状仅由本地测试覆盖，产品隐私边界不据此自动关闭。
 - RabbitMQ 新脚本的 SIGKILL 是一般重启检查，五条静态积压是小批量排空；精确窗口和持续积压仍待验。
-- A12 保持部分通过。未合入的 OpenAPI 路由测试不校验参数/响应 Schema，也不能关闭 WebSocket 帧契约验收。
+- A12 契约修订：提供修正后的 OpenAPI 3.0.3 规范 docs/openapi.yaml，补齐所有真实响应字段（active/last_seen_at/read_at/UserProfileResponse/UserListResponse 等）与 12 个 WebSocket 帧定义；并通过结构校验、模型字段对齐与代表性端点真实响应测试。
