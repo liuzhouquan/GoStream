@@ -442,14 +442,27 @@ func TestRabbitMQNotificationIntegration(t *testing.T) {
 			t.Fatal(err)
 		}
 		awaitRabbit(t, "consumer rejected poison while target unbound", 10*time.Second, func() bool { return testutil.ToFloat64(b.metrics.brokerMessages.WithLabelValues("dead")) >= before+1 })
-		q, err := session.ch.QueueInspect(queue + ".dead")
-		if err != nil || q.Messages != 0 {
-			t.Fatalf("unbound target received message: %+v %v", q, err)
+		// The launcher verifies a one-second broker retry interval. Keep the
+		// target absent through multiple retries, and preserve same-ID recovery.
+		for until := time.Now().Add(2 * time.Second); time.Now().Before(until); {
+			q, err := session.ch.QueueInspect(queue + ".dead")
+			if err != nil || q.Messages != 0 {
+				t.Fatalf("unbound target received message: %+v %v", q, err)
+			}
+			time.Sleep(100 * time.Millisecond)
 		}
 		if err := session.ch.QueueBind(queue+".dead", notificationCreatedTopic, queue+".dlx", false, nil); err != nil {
 			t.Fatal(err)
 		}
-		dead := rabbitGet(t, session, queue+".dead", 45*time.Second)
+		wait := 210 * time.Second // RabbitMQ 4.3.7 default retry is 180 seconds.
+		if raw := os.Getenv("GOSTREAM_TEST_RABBITMQ_DLQ_WAIT"); raw != "" {
+			var err error
+			wait, err = time.ParseDuration(raw)
+			if err != nil || wait <= 0 {
+				t.Fatal("invalid DLQ wait duration")
+			}
+		}
+		dead := rabbitGet(t, session, queue+".dead", wait)
 		if dead.MessageId != "dlq-outage-test-1" || dead.Headers["x-first-death-reason"] != "rejected" || dead.DeliveryMode != amqp.Persistent {
 			t.Fatalf("lost or changed original poison: id=%q headers=%v", dead.MessageId, dead.Headers)
 		}

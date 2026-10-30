@@ -66,6 +66,15 @@ func TestGroupMembershipLifecycleAndHistorySemantics(t *testing.T) {
 		if err := conn.ReadJSON(&ready); err != nil || ready["type"] != "ready" {
 			t.Fatalf("socket ready: %v %v", ready, err)
 		}
+		// ready precedes offline replay. A normal ping is handled only after
+		// replay, making later live-message assertions deterministic.
+		if err := conn.WriteJSON(socketEvent{Type: "ping"}); err != nil {
+			t.Fatal(err)
+		}
+		var pong map[string]any
+		if err := conn.ReadJSON(&pong); err != nil || pong["type"] != "pong" {
+			t.Fatalf("replay barrier: %v %v", pong, err)
+		}
 		return conn
 	}
 
@@ -79,6 +88,15 @@ func TestGroupMembershipLifecycleAndHistorySemantics(t *testing.T) {
 	}
 	if err := ownerWS.ReadJSON(&ack1); err != nil || ack1.Type != "ack" || ack1.MessageID == 0 {
 		t.Fatalf("ack 1: %+v %v", ack1, err)
+	}
+
+	// Wait for the sender's post-commit fanout before changing membership.
+	if err := ownerWS.WriteJSON(socketEvent{Type: "ping"}); err != nil {
+		t.Fatal(err)
+	}
+	var ownerPong map[string]any
+	if err := ownerWS.ReadJSON(&ownerPong); err != nil || ownerPong["type"] != "pong" {
+		t.Fatalf("sender fanout barrier: %v %v", ownerPong, err)
 	}
 
 	// 4. Owner invites member

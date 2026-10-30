@@ -57,7 +57,7 @@ Presence 修订已取消不安全压缩；其余价值以实际测试和本轮�
 - 原 50 条 broker 轮询误将 `Count()` 返回的 `*gorm.DB` 当 `error`，条件恒真导致永远等待；已改 `.Error`。DLQ 新流程在未绑定时观察生产消费者拒绝计数，再恢复目标并核对原始 poison1，随后核对 poison2。SQL claim 仍不冒充 confirm 屏障，50 条仍是有限积压。
 - Web 脚本使用 `ExitStack` 管理临时目录、日志、API 进程组及两浏览器；构建失败/提前退出也清理。API 只获得显式本地配置，不继承共享服务凭据。真实 FFmpeg 生成可播放片段，经 UI 上传和后台处理，浏览器检查解码/播放；资料保存从服务端查询确认，另执行实际 API 重启及历史读取。移动宽度和原导航布局条件保留并增加横向溢出检查。
 - Presence 配置要求 `0 < renew < lease`，默认仍 75/30 秒。IM matrix 不再缩短租约，核对新 Redis score 约 75 秒，SIGKILL 后真实等待到离线；存活发送者正常心跳。CI 才能完成该真实 MySQL/Redis 观察。
-- MySQL 索引探针布置每表 500 行，在事务结束回滚；原索引断言保留。没有虚构原始 MySQL EXPLAIN 或收益，也未增加/删除生产索引。
+- MySQL 索引探针布置每表 500 行，在事务结束回滚；索引存在/指定索引能力和排序断言保留，并增加精确结果 ID/顺序/计数断言；非提示计划按实记录。v001 时间线索引不承诺完整二元降序无需 filesort，不为该探针新增生产索引。没有虚构原始 MySQL EXPLAIN 或收益，也未增加/删除生产索引。
 
 ## 验证和剩余范围
 
@@ -66,3 +66,15 @@ Presence 修订已取消不安全压缩；其余价值以实际测试和本轮�
 CI 新增 `browser-workflow`：固定 agent-browser 0.37.1、Node 24 和真实 FFmpeg，执行四项浏览器回归；原七任务继续覆盖质量/MySQL/Redis/RabbitMQ/MinIO/视频恢复/IM。CI 资源按隔离 schema、容器和子进程回收。本轮没有重建本地演示容器。
 
 A01–A12 保持证据驱动；未完成的最终全组件配置、完整浏览器断点续传、实际精确 broker 强杀窗口、持续流量、Feed 性能收益、真实 WebM/MOV 转码、安全活跃回执压缩和完整契约变体仍在原门槛中。
+
+
+## 首轮 CI 失败及修正记录
+
+Run `41037890462` 的 IM、MinIO、Redis、视频恢复通过；IM 真实默认租约观察约 75 秒并清理全部进程/库/用户。质量、MySQL、浏览器和 broker 失败，均保留了原输出：
+
+1. 既有群历史测试把 ready 当作重放结束，偶尔把重复重放当成移除后的响应。测试现用正常 ping/pong 屏障等待初始化重放结束，原错误帧与权限断言保持；定向 30 次通过。
+2. 浏览器 CI 的 Go 安装路径不同，本机绝对路径不存在。任务显式用 setup-go 的 `go`，脚本仍检查精确版本，没有回退到旧版本。
+3. MySQL 实际选择 PRIMARY、其他索引及 filesort，揭示原分支“必选某索引/必不排序”的空表假设。现保留真实计划，分别验证声明索引及指定索引的能力，并增加查询结果 ID、顺序和计数断言；完整生产性能门槛保持未通过。v001 时间线索引缺显式 `id DESC` 是待优化成本，不通过修改测试宣称已优化。
+4. DLQ 45 秒超时：核查 RabbitMQ 4.3.7 源码后确认默认内部重试间隔为 180,000 ms。隔离测试 broker 显式配置并验证 1,000 ms，目标保持未绑定跨多次重试，再要求原消息恢复；生产 Compose 默认未变，不把缩短的测试间隔当生产恢复时间。直接 Go 运行默认等待 210 秒；launcher 提供已验证间隔下的有界等待。
+
+重试间隔来源：[RabbitMQ 4.3.7 Makefile](https://github.com/rabbitmq/rabbitmq-server/blob/v4.3.7/deps/rabbit/Makefile) 与 [内部 DLQ worker](https://github.com/rabbitmq/rabbitmq-server/blob/v4.3.7/deps/rabbit/src/rabbit_fifo_dlx_worker.erl)。这次调查确认原队列参数支持 at-least-once，没有在缺少证据时改动生产队列拓扑。

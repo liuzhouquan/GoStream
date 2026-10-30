@@ -88,14 +88,21 @@ def main():
         run(["docker", "run", "-d", "--name", container, "--hostname", "rabbit-test",
              "-p", f"127.0.0.1:{amqp_port}:5672", "-p", f"127.0.0.1:{http_port}:15672",
              "-e", "RABBITMQ_DEFAULT_USER=gostream-test", "-e", "RABBITMQ_DEFAULT_PASS=" + broker_password,
-             "-e", "RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=+S 2:2", "rabbitmq:4.3.7-management"], capture_output=True)
+             "-e", "RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS=+S 2:2 -rabbit dead_letter_worker_publisher_confirm_timeout 1000", "rabbitmq:4.3.7-management"], capture_output=True)
         started = True
         wait("broker management HTTP", lambda: reachable(f"http://127.0.0.1:{http_port}"))
+        retry_setting = run(["docker", "exec", container, "rabbitmqctl", "eval",
+                             "application:get_env(rabbit, dead_letter_worker_publisher_confirm_timeout)."],
+                            capture_output=True).stdout.strip()
+        if retry_setting != "{ok,1000}":
+            raise RuntimeError("isolated broker DLQ retry setting did not apply")
+        print("isolated_dlq_retry_ms=1000", flush=True)
         dsn = f"{user}:{password}@tcp({args.mysql_addr})/{schema}?charset=utf8mb4&parseTime=True&loc=Local"
         broker_url = f"amqp://gostream-test:{broker_password}@127.0.0.1:{amqp_port}/"
         env = dict(os.environ)
         env.update(GOSTREAM_TEST_MYSQL_DSN=dsn, GOSTREAM_TEST_RABBITMQ_MYSQL_DSN=dsn,
-                   GOSTREAM_TEST_RABBITMQ_URL=broker_url, GOSTREAM_TEST_RABBITMQ_CONTAINER=container)
+                   GOSTREAM_TEST_RABBITMQ_URL=broker_url, GOSTREAM_TEST_RABBITMQ_CONTAINER=container,
+                   GOSTREAM_TEST_RABBITMQ_DLQ_WAIT="15s")
         run([args.go_bin, "test", "./internal/migrations", "-run", "^TestApplyMySQLIntegration$", "-count=1"], env=env)
         run([args.go_bin, "test", "-race", "./internal/platform", "-run", "^TestRabbitMQNotificationIntegration$", "-count=1", "-v", "-timeout=4m"], env=env)
         env.update(DB_DRIVER="mysql", DB_DSN=dsn, RABBITMQ_URL=broker_url,

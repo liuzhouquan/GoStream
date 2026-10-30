@@ -362,6 +362,8 @@ jobs:
           npm install -g agent-browser@0.37.1
           agent-browser install --with-deps
       - name: Run browser regression and real SQLite FFmpeg workflow
+        env:
+          GOSTREAM_GO_BIN: go
         run: |
           python3 tests/integration/web_action_counts.py
           python3 tests/integration/web_stored_session.py

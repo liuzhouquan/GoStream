@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -342,8 +343,8 @@ func TestMySQLQueryPlans(t *testing.T) {
 		},
 		{
 			name:      "video_feed_timeline",
-			query:     "SELECT * FROM videos WHERE status = ? AND created_at < ? ORDER BY created_at DESC, id DESC LIMIT 21",
-			args:      []any{"published", now},
+			query:     "SELECT * FROM videos WHERE status = ? AND created_at < ? AND author_id IN (?, ?) ORDER BY created_at DESC, id DESC LIMIT 21",
+			args:      []any{"published", now, user.ID, peer.ID},
 			wantIndex: "idx_video_feed",
 		},
 		{
@@ -373,7 +374,7 @@ func TestMySQLQueryPlans(t *testing.T) {
 		{
 			name:      "user_search_keyset",
 			query:     "SELECT * FROM users WHERE (username LIKE ? ESCAPE '!' OR nickname LIKE ? ESCAPE '!') AND id < ? ORDER BY id DESC LIMIT 21",
-			args:      []any{"%QP%", "%QP%", peer.ID + 1},
+			args:      []any{fmt.Sprintf("%%%d%%", now.UnixNano()), fmt.Sprintf("%%%d%%", now.UnixNano()), peer.ID + 1},
 			wantIndex: "PRIMARY",
 		},
 	}
@@ -392,15 +393,118 @@ func TestMySQLQueryPlans(t *testing.T) {
 			t.Logf("MySQL Plan for %s: table=%s type=%s key=%s rows=%d extra=%s",
 				tc.name, r.Table, r.Type, keyUsed, r.Rows, r.Extra)
 
-			if !strings.EqualFold(keyUsed, tc.wantIndex) {
-				t.Fatalf("MySQL query plan for %s used key %q, want %q", tc.name, keyUsed, tc.wantIndex)
+			// Preserve the real cost-based choice above; it is not an index-name
+			// contract. Separately prove declared index capability with FORCE INDEX.
+			if !db.Migrator().HasIndex(r.Table, tc.wantIndex) {
+				t.Fatalf("missing required index %s on %s", tc.wantIndex, r.Table)
 			}
-			if r.Type == "ALL" && !tc.allowScan {
-				t.Fatalf("MySQL query plan for %s did full table scan (type=ALL)", tc.name)
+			hinted := strings.Replace(tc.query, " FROM "+r.Table, " FROM "+r.Table+" FORCE INDEX (`"+tc.wantIndex+"`)", 1)
+			if hinted == tc.query {
+				t.Fatal("could not build capability probe")
 			}
-			if strings.Contains(r.Extra, "Using filesort") {
-				t.Fatalf("MySQL query plan for %s used filesort: %s", tc.name, r.Extra)
+			forced := explainMySQL(t, db, hinted, tc.args...)
+			if len(forced) != 1 || !forced[0].Key.Valid || forced[0].Key.String != tc.wantIndex || forced[0].Type == "ALL" {
+				t.Fatalf("index capability failure %s: %+v", tc.wantIndex, forced)
 			}
+			// v001's timeline index has created_at DESC plus an implicit PK;
+			// it does not promise both created_at DESC and id DESC on MySQL.
+			if tc.name != "video_feed_timeline" && strings.Contains(forced[0].Extra, "Using filesort") {
+				t.Fatalf("index ordering capability %s: %s", tc.wantIndex, forced[0].Extra)
+			}
+			t.Logf("forced index capability: key=%s extra=%s", forced[0].Key.String, forced[0].Extra)
+			if tc.name == "notification_unread_count" {
+				var got int64
+				if err := db.Raw(tc.query, tc.args...).Scan(&got).Error; err != nil || got != count/2 {
+					t.Fatalf("unread count=%d err=%v", got, err)
+				}
+				return
+			}
+			var expected []uint
+			limit, descending := 31, true
+			switch tc.name {
+			case "notification_keyset_page":
+				for _, x := range notices {
+					if x.UserID == user.ID {
+						expected = append(expected, x.ID)
+					}
+				}
+			case "direct_message_history_page":
+				for _, x := range messages {
+					if x.SenderID == user.ID && x.RecipientID == peer.ID {
+						expected = append(expected, x.ID)
+					}
+				}
+			case "direct_message_unacked":
+				limit, descending = 101, false
+				for _, x := range messages {
+					if x.RecipientID == user.ID {
+						expected = append(expected, x.ID)
+					}
+				}
+			case "video_feed_timeline":
+				limit, descending = 21, false
+				for _, x := range videos {
+					expected = append(expected, x.ID)
+				}
+			case "video_feed_author":
+				limit, descending = 50, false
+				for _, x := range videos {
+					if x.AuthorID == user.ID {
+						expected = append(expected, x.ID)
+					}
+				}
+			case "video_action_recent":
+				limit = 200
+				for _, x := range actions {
+					if x.UserID == user.ID {
+						expected = append(expected, x.ID)
+					}
+				}
+			case "comment_thread_roots":
+				descending = false
+				for _, x := range comments {
+					if x.VideoID == videos[0].ID {
+						expected = append(expected, x.ID)
+					}
+				}
+			case "feed_inbox_page":
+				limit, descending = 21, false
+				for _, x := range inboxes {
+					if x.UserID == user.ID {
+						expected = append(expected, x.VideoID)
+					}
+				}
+			case "user_search_keyset":
+				limit = 21
+				expected = []uint{user.ID, peer.ID}
+			default:
+				t.Fatalf("missing semantic assertion for %s", tc.name)
+			}
+			slices.Sort(expected)
+			if descending {
+				slices.Reverse(expected)
+			}
+			if len(expected) > limit {
+				expected = expected[:limit]
+			}
+			var actual []struct {
+				ID      uint
+				VideoID uint
+			}
+			if err := db.Raw(tc.query, tc.args...).Scan(&actual).Error; err != nil {
+				t.Fatal(err)
+			}
+			ids := make([]uint, len(actual))
+			for i, row := range actual {
+				ids[i] = row.ID
+				if tc.name == "feed_inbox_page" {
+					ids[i] = row.VideoID
+				}
+			}
+			if !slices.Equal(ids, expected) {
+				t.Fatalf("query %s returned IDs=%v want=%v", tc.name, ids, expected)
+			}
+
 		})
 	}
 }

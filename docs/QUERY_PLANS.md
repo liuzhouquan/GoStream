@@ -4,7 +4,7 @@
 
 SQLite：`go test ./internal/platform -run '^TestQueryPlansSQLite$' -count=1 -v`。
 
-MySQL：将 `GOSTREAM_TEST_MYSQL_DSN` 指向已迁移的隔离库，执行 `go test ./internal/platform -run '^TestMySQLQueryPlans$' -count=1 -v`。MySQL CI 的 `^TestMySQL` 会执行该用例。它在一个最终回滚的事务内创建两用户，每张通知、私信、视频、互动、评论、Feed inbox 表 500 行；结果从当前 MySQL 实际 `EXPLAIN` 读取并打印索引、估算扫描行和 Extra。最初分支只有一个用户和空业务表，本次已修正。
+MySQL：将 `GOSTREAM_TEST_MYSQL_DSN` 指向已迁移的隔离库，执行 `go test ./internal/platform -run '^TestMySQLQueryPlans$' -count=1 -v`。MySQL CI 的 `^TestMySQL` 会执行该用例。它在一个最终回滚的事务内创建两用户，每张通知、私信、视频、互动、评论、Feed inbox 表 500 行；结果从当前 MySQL 实际 `EXPLAIN` 读取并打印索引、估算扫描行和 Extra。另用 `FORCE INDEX` 验证声明索引可用及其排序能力，并核对每个查询的精确行 ID/顺序或计数。优化器可以在该分布上选择 PRIMARY/其他有效路径，不以索引名称猜测生产缺陷。v001 时间线索引没有显式 `id DESC`，其完整二元排序可能需要 filesort，此成本仍待实际规模优化。最初分支只有一个用户和空业务表，本次已修正。
 
 这些查询是有界索引探针。私信探针只查单向关系，未覆盖生产双向 OR；Feed 探针也不等于完整推拉 UNION、同时间戳谓词和互动状态加载。它们不能证明生产查询无 filesort、吞吐恒定或较大规模验收通过。
 
