@@ -1,8 +1,16 @@
 # GoStream development progress
 
-Last updated: 2026-10-29
+Last updated: 2026-10-30
 
 The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs/DELIVERY_SCOPE.md); the test matrix and pass criteria are in [`docs/TEST_STANDARD.md`](docs/TEST_STANDARD.md). Checked items below record individual features or local verification; they do not mean the whole project has met those release gates.
+
+2026-10-30 A07 crashed node presence expiry and device lifecycle invariants (`feat/im-presence-lifecycle`): resolved review findings from `docs/BRANCH_REVIEW.md` for deferred `feat/im-device-lifecycle`.
+- Configured presence lease duration and renewal interval via `PRESENCE_LEASE` and `PRESENCE_RENEW` (default 75s/30s; 2s/1s in integration testing).
+- Verified crashed node presence expiry in `TestRedisCrashedNodePresenceExpiry`: after node 1 crashes without sending clean disconnect, node 2 observes presence expiring from online to offline once the lease duration elapses, and recovery restores it.
+- Verified crashed node presence expiry in real 2-API SIGKILL recovery matrix (`tests/integration/im/recovery_test.go`): recipient SIGKILL without TCP clean disconnect leaves Redis presence lease valid initially, expires to offline after the 2s lease, and reconnects back online upon process restart.
+- Preserved device lifecycle unread invariants (`TestNewDeviceRetainsUnreadAcrossDeviceLifecycle`): newly registered device B retains full unread access to messages even after earlier device A has acknowledged them, maintaining exact per-device isolation.
+- Verified device registration and idle/expiration cleanup interleaving (`TestMessageDeviceRegistrationAndCleanupInterleaving`) and MySQL concurrent registration serialization under the user row lock (`TestMySQLConcurrentDeviceRegistration`).
+- Global receipt compaction remains deferred until versioned per-device cursor migration is designed.
 
 2026-10-29 seven-branch review (baseline `876b4b6`): independent Standards/Spec reviews and actual reproduction are in [`docs/BRANCH_REVIEW.md`](docs/BRANCH_REVIEW.md). Five branches are included with review fixes: web group synchronization, group revocation, RabbitMQ restart tests, media header/permissions/outage tests and group history lifecycle. `feat/im-device-lifecycle` and `feat/openapi-spec` are withheld; new-device unread loss and incorrect/insufficiently validated contracts block them. Their original code and premature acceptance claims are not part of the integrated runtime.
 

@@ -30,6 +30,8 @@ type Server struct {
 	ffprobeBin         string
 	fanoutMaxFollowers int
 	uploadRenewEvery   time.Duration
+	presenceLease      time.Duration
+	presenceRenew      time.Duration
 	upgrader           websocket.Upgrader
 }
 

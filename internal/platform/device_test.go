@@ -486,3 +486,176 @@ func TestGroupDeviceReadIsolationAndReplay(t *testing.T) {
 	unread(testDeviceA, 0, ids[1])
 	unread(testDeviceB, 0, ids[1])
 }
+
+func TestNewDeviceRetainsUnreadAcrossDeviceLifecycle(t *testing.T) {
+	_, h, db := testServer(t)
+	recipient, token := registerTestUser(t, h, "devicelifecycle_recipient")
+	sender, _ := registerTestUser(t, h, "devicelifecycle_sender")
+
+	// 1. Recipient uses device A to check unread (registers device A)
+	r := requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, testDeviceA, nil)
+	if r.Code != http.StatusOK {
+		t.Fatalf("register device A: %d %s", r.Code, r.Body.String())
+	}
+
+	// 2. Sender creates 2 direct messages to recipient
+	msg1 := ChatMessage{SenderID: sender, RecipientID: recipient, ClientID: "lifecycle-client-1", Body: "message one"}
+	if err := db.Create(&msg1).Error; err != nil {
+		t.Fatal(err)
+	}
+	msg2 := ChatMessage{SenderID: sender, RecipientID: recipient, ClientID: "lifecycle-client-2", Body: "message two"}
+	if err := db.Create(&msg2).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 3. Device A fetches unread and sees both messages
+	r = requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, testDeviceA, nil)
+	var pageA struct {
+		Items []ChatMessage `json:"items"`
+	}
+	if r.Code != http.StatusOK || json.Unmarshal(r.Body.Bytes(), &pageA) != nil {
+		t.Fatalf("device A unread: %d %s", r.Code, r.Body.String())
+	}
+	if len(pageA.Items) != 2 || pageA.Items[0].ID != msg1.ID || pageA.Items[1].ID != msg2.ID {
+		t.Fatalf("device A initial items want [1, 2], got: %+v", pageA.Items)
+	}
+
+	// 4. Device A ACKs message 1 only
+	r = requestOnDevice(t, h, http.MethodPost, "/api/messages/acks", token, testDeviceA, map[string]any{"ids": []uint{msg1.ID}})
+	if r.Code != http.StatusOK {
+		t.Fatalf("device A ACK: %d %s", r.Code, r.Body.String())
+	}
+
+	// 5. Device A unread now only contains message 2
+	r = requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, testDeviceA, nil)
+	if r.Code != http.StatusOK || json.Unmarshal(r.Body.Bytes(), &pageA) != nil {
+		t.Fatalf("device A unread after ACK: %d %s", r.Code, r.Body.String())
+	}
+	if len(pageA.Items) != 1 || pageA.Items[0].ID != msg2.ID {
+		t.Fatalf("device A unread want [2], got: %+v", pageA.Items)
+	}
+
+	// 6. Device B registers for the first time.
+	// Invariant: Device B MUST retain unread access to message 1 despite Device A's earlier ACK.
+	r = requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, testDeviceB, nil)
+	var pageB struct {
+		Items []ChatMessage `json:"items"`
+	}
+	if r.Code != http.StatusOK || json.Unmarshal(r.Body.Bytes(), &pageB) != nil {
+		t.Fatalf("device B unread: %d %s", r.Code, r.Body.String())
+	}
+	if len(pageB.Items) != 2 || pageB.Items[0].ID != msg1.ID || pageB.Items[1].ID != msg2.ID {
+		t.Fatalf("newly registered device B lost unread messages acknowledged by device A: items=%+v", pageB.Items)
+	}
+
+	// 7. Device B ACKs both message 1 and message 2
+	r = requestOnDevice(t, h, http.MethodPost, "/api/messages/acks", token, testDeviceB, map[string]any{"ids": []uint{msg1.ID, msg2.ID}})
+	if r.Code != http.StatusOK {
+		t.Fatalf("device B ACK: %d %s", r.Code, r.Body.String())
+	}
+
+	// 8. Device B unread is now empty
+	r = requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, testDeviceB, nil)
+	if r.Code != http.StatusOK || json.Unmarshal(r.Body.Bytes(), &pageB) != nil {
+		t.Fatalf("device B unread: %d %s", r.Code, r.Body.String())
+	}
+	if len(pageB.Items) != 0 {
+		t.Fatalf("device B unread want 0 items, got: %+v", pageB.Items)
+	}
+
+	// 9. Device A unread still has message 2 pending (Device B's ACK didn't affect Device A)
+	r = requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, testDeviceA, nil)
+	if r.Code != http.StatusOK || json.Unmarshal(r.Body.Bytes(), &pageA) != nil {
+		t.Fatalf("device A unread: %d %s", r.Code, r.Body.String())
+	}
+	if len(pageA.Items) != 1 || pageA.Items[0].ID != msg2.ID {
+		t.Fatalf("device A unread want [2], got: %+v", pageA.Items)
+	}
+
+	// 10. Device A ACKs message 2
+	r = requestOnDevice(t, h, http.MethodPost, "/api/messages/acks", token, testDeviceA, map[string]any{"ids": []uint{msg2.ID}})
+	if r.Code != http.StatusOK {
+		t.Fatalf("device A ACK msg 2: %d %s", r.Code, r.Body.String())
+	}
+
+	// 11. Device A unread is now empty as well
+	r = requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, testDeviceA, nil)
+	if r.Code != http.StatusOK || json.Unmarshal(r.Body.Bytes(), &pageA) != nil {
+		t.Fatalf("device A unread: %d %s", r.Code, r.Body.String())
+	}
+	if len(pageA.Items) != 0 {
+		t.Fatalf("device A unread want 0 items, got: %+v", pageA.Items)
+	}
+}
+
+func TestMessageDeviceRegistrationAndCleanupInterleaving(t *testing.T) {
+	s, h, db := testServer(t)
+	userID, token := registerTestUser(t, h, "interleavedev")
+
+	// Register 32 devices (up to the limit)
+	for i := 1; i <= maxMessageDevices; i++ {
+		id := fmt.Sprintf("00000000-0000-4000-8000-%012x", i)
+		res := requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, id, nil)
+		if res.Code != http.StatusOK {
+			t.Fatalf("register device %d: %d %s", i, res.Code, res.Body.String())
+		}
+	}
+
+	// Age 5 devices past 90-day expiration, and 5 devices past 30-day eviction
+	expiredThreshold := time.Now().UTC().Add(-deviceExpirationAge - time.Hour)
+	evictThreshold := time.Now().UTC().Add(-deviceEvictionAge - time.Hour)
+
+	for i := 1; i <= 5; i++ {
+		id := fmt.Sprintf("00000000-0000-4000-8000-%012x", i)
+		if err := db.Model(&MessageDevice{}).Where("user_id = ? AND device_id = ?", userID, id).UpdateColumn("last_seen_at", expiredThreshold).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 6; i <= 10; i++ {
+		id := fmt.Sprintf("00000000-0000-4000-8000-%012x", i)
+		if err := db.Model(&MessageDevice{}).Where("user_id = ? AND device_id = ?", userID, id).UpdateColumn("last_seen_at", evictThreshold).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 1. Run cleanupExpiredMessageDevices: should clean up the 5 expired (>90 days) devices
+	removed, err := s.cleanupExpiredMessageDevices(context.Background(), time.Now().UTC(), 100)
+	if err != nil || removed != 5 {
+		t.Fatalf("cleanup expired devices: removed=%d err=%v", removed, err)
+	}
+
+	var count int64
+	if err := db.Model(&MessageDevice{}).Where("user_id = ?", userID).Count(&count).Error; err != nil || count != 27 {
+		t.Fatalf("device count after expiration cleanup: %d want 27", count)
+	}
+
+	// 2. Register 5 new devices (using freed slots)
+	for i := 33; i <= 37; i++ {
+		id := fmt.Sprintf("00000000-0000-4000-8000-%012x", i)
+		res := requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, id, nil)
+		if res.Code != http.StatusOK {
+			t.Fatalf("register new device %d into freed slot: %d %s", i, res.Code, res.Body.String())
+		}
+	}
+
+	if err := db.Model(&MessageDevice{}).Where("user_id = ?", userID).Count(&count).Error; err != nil || count != 32 {
+		t.Fatalf("device count after refilling to cap: %d want 32", count)
+	}
+
+	// 3. Registering 1 more device triggers idle eviction of the oldest device (from 6..10, which are >30 days old)
+	newDev := fmt.Sprintf("00000000-0000-4000-8000-%012x", 38)
+	res := requestOnDevice(t, h, http.MethodGet, "/api/messages/unread", token, newDev, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("register new device %s via eviction: %d %s", newDev, res.Code, res.Body.String())
+	}
+
+	if err := db.Model(&MessageDevice{}).Where("user_id = ?", userID).Count(&count).Error; err != nil || count != 32 {
+		t.Fatalf("device count after eviction: %d want 32", count)
+	}
+
+	// Device 6 was the oldest, so it should have been evicted
+	evictedDev := fmt.Sprintf("00000000-0000-4000-8000-%012x", 6)
+	if err := db.Model(&MessageDevice{}).Where("user_id = ? AND device_id = ?", userID, evictedDev).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("expected device 6 to be evicted, found count=%d", count)
+	}
+}
