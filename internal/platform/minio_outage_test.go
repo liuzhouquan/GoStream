@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
@@ -48,14 +49,17 @@ func TestMinIOCompleteStorageOutage(t *testing.T) {
 	t.Cleanup(func() {
 		cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := directStore.removePrefix(cleanCtx, "media/"); err != nil {
-			t.Errorf("clean media: %v", err)
-		}
-		if err := directStore.removePrefix(cleanCtx, "chunks/"); err != nil {
-			t.Errorf("clean chunks: %v", err)
+		var cleanupErrs []error
+		for _, prefix := range []string{"media/", "chunks/"} {
+			if err := directStore.removePrefix(cleanCtx, prefix); err != nil {
+				cleanupErrs = append(cleanupErrs, fmt.Errorf("clean %s: %w", prefix, err))
+			}
 		}
 		if err := directStore.client.RemoveBucket(cleanCtx, bucket); err != nil {
-			t.Errorf("remove bucket: %v", err)
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("remove bucket: %w", err))
+		}
+		for _, err := range cleanupErrs {
+			t.Errorf("minio outage cleanup failure: %v", err)
 		}
 	})
 

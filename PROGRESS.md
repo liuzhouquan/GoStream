@@ -1,8 +1,22 @@
 # GoStream development progress
 
-Last updated: 2026-10-29
+Last updated: 2026-10-30
 
 The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs/DELIVERY_SCOPE.md); the test matrix and pass criteria are in [`docs/TEST_STANDARD.md`](docs/TEST_STANDARD.md). Checked items below record individual features or local verification; they do not mean the whole project has met those release gates.
+
+2026-10-30 Work Package 4 - A03 media format, privacy matrix and storage outage (`test/media-matrix-and-storage-outage`, baseline `1f29008`):
+- Addressed audit findings from `docs/BRANCH_REVIEW.md`:
+  1. Media format detection & container headers scope:
+     - Clarified scope: `sampleWebM` and `sampleMOV` test HTTP multipart format detection, MIME magic bytes, and extension matching at the upload boundary. Full decoding/transcoding/thumbnail extraction is tested in the asynchronous FFmpeg worker pipeline (`video_processing_test.go`, `video_recovery_restart.py`).
+  2. Complete privacy semantics across feeds, profile, and search:
+     - Extended `testMediaAccessAndPrivacySemantics`: asserted that unpublished videos (processing or failed) are strictly hidden from `/api/feed` (timeline, hot, recommend), from guest author profiles (`/api/users/:id/videos`), and from search queries (`/api/search?q=...&type=videos` / `type=all`).
+     - Verified that published videos remain discoverable in search.
+     - Verified that direct media access via unguessable 128-bit nonce URL functions consistently.
+     - Enhanced `jsonContainsVideo` to support both `{"items":[...]}` and `{"videos":[...]}` API response envelopes.
+     - Executed the entire privacy, search, and path-traversal suite against both local disk mode (`TestMediaEndpointAccessAndPrivacySemantics`) and real MinIO mode (`TestMinIOMediaFormatAndPermissionMatrix`).
+  3. Storage outage & resource cleanup robustness:
+     - Checked and propagated all cleanup errors for `removePrefix` and `RemoveBucket` in `TestMinIOMediaFormatAndPermissionMatrix` and `TestMinIOCompleteStorageOutage`.
+     - Explicitly closed proxy listeners and tracked cleanup failures.
 
 2026-10-29 seven-branch review (baseline `876b4b6`): independent Standards/Spec reviews and actual reproduction are in [`docs/BRANCH_REVIEW.md`](docs/BRANCH_REVIEW.md). Five branches are included with review fixes: web group synchronization, group revocation, RabbitMQ restart tests, media header/permissions/outage tests and group history lifecycle. `feat/im-device-lifecycle` and `feat/openapi-spec` are withheld; new-device unread loss and incorrect/insufficiently validated contracts block them. Their original code and premature acceptance claims are not part of the integrated runtime.
 
