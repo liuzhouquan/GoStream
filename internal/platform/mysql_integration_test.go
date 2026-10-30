@@ -931,3 +931,184 @@ func TestMySQLCommentThreadsIntegration(t *testing.T) {
 		t.Fatalf("second MySQL page: %d %s", second.Code, second.Body.String())
 	}
 }
+
+func TestMySQLMultiUserConcurrentInteractionsAndCounters(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to a migrated disposable MySQL database")
+	}
+	dbA, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbB, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prefix := fmt.Sprintf("mxct%x", time.Now().UnixNano()&0xffffff)
+	var userIDs []uint
+	var videoIDs []uint
+
+	t.Cleanup(func() {
+		_ = dbA.Transaction(func(tx *gorm.DB) error {
+			if len(videoIDs) > 0 {
+				_ = tx.Where("video_id IN ?", videoIDs).Delete(&VideoAction{}).Error
+				_ = tx.Where("video_id IN ?", videoIDs).Delete(&Comment{}).Error
+				_ = tx.Where("id IN ?", videoIDs).Delete(&Video{}).Error
+			}
+			if len(userIDs) > 0 {
+				_ = tx.Where("id IN ?", userIDs).Delete(&User{}).Error
+			}
+			return nil
+		})
+	})
+
+	sA := NewServer(dbA, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	sB := NewServer(dbB, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	handlers := []http.Handler{sA.Router(), sB.Router()}
+
+	// Register 1 author
+	author := User{Username: prefix + "_author", Nickname: "Author", PasswordHash: "unused"}
+	if err := dbA.Create(&author).Error; err != nil {
+		t.Fatal(err)
+	}
+	userIDs = append(userIDs, author.ID)
+
+	// Create 3 videos
+	for i := 1; i <= 3; i++ {
+		v := Video{
+			AuthorID: author.ID,
+			Title:    fmt.Sprintf("%s-video-%d", prefix, i),
+			MediaURL: fmt.Sprintf("/media/%s-%d.mp4", prefix, i),
+			Status:   "published",
+		}
+		if err := dbA.Create(&v).Error; err != nil {
+			t.Fatal(err)
+		}
+		videoIDs = append(videoIDs, v.ID)
+	}
+
+	// Register 4 interacting users
+	const numUsers = 4
+	tokens := make([]string, numUsers)
+	for i := 0; i < numUsers; i++ {
+		u := User{Username: fmt.Sprintf("%s_u%d", prefix, i), Nickname: fmt.Sprintf("User %d", i), PasswordHash: "unused"}
+		if err := dbA.Create(&u).Error; err != nil {
+			t.Fatal(err)
+		}
+		userIDs = append(userIDs, u.ID)
+		tok, err := sA.issueToken(u.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tokens[i] = tok
+	}
+
+	// Concurrently perform like, unlike, favorite, unfavorite, and comments across videos
+	const opsPerUser = 20
+	failures := make(chan string, numUsers*opsPerUser)
+	var wg sync.WaitGroup
+
+	for uIdx, token := range tokens {
+		wg.Add(1)
+		go func(userToken string, u int) {
+			defer wg.Done()
+			for op := 0; op < opsPerUser; op++ {
+				vid := videoIDs[(u+op)%len(videoIDs)]
+				router := handlers[(u+op)%len(handlers)]
+
+				switch op % 5 {
+				case 0:
+					req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/videos/%d/like", vid), nil)
+					req.Header.Set("Authorization", "Bearer "+userToken)
+					res := httptest.NewRecorder()
+					router.ServeHTTP(res, req)
+					if res.Code != http.StatusOK {
+						failures <- fmt.Sprintf("u=%d op=%d PUT like vid=%d: %d %s", u, op, vid, res.Code, res.Body.String())
+					}
+				case 1:
+					req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/videos/%d/like", vid), nil)
+					req.Header.Set("Authorization", "Bearer "+userToken)
+					res := httptest.NewRecorder()
+					router.ServeHTTP(res, req)
+					if res.Code != http.StatusOK {
+						failures <- fmt.Sprintf("u=%d op=%d DELETE like vid=%d: %d %s", u, op, vid, res.Code, res.Body.String())
+					}
+				case 2:
+					req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/videos/%d/favorite", vid), nil)
+					req.Header.Set("Authorization", "Bearer "+userToken)
+					res := httptest.NewRecorder()
+					router.ServeHTTP(res, req)
+					if res.Code != http.StatusOK {
+						failures <- fmt.Sprintf("u=%d op=%d PUT fav vid=%d: %d %s", u, op, vid, res.Code, res.Body.String())
+					}
+				case 3:
+					req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/videos/%d/favorite", vid), nil)
+					req.Header.Set("Authorization", "Bearer "+userToken)
+					res := httptest.NewRecorder()
+					router.ServeHTTP(res, req)
+					if res.Code != http.StatusOK {
+						failures <- fmt.Sprintf("u=%d op=%d DELETE fav vid=%d: %d %s", u, op, vid, res.Code, res.Body.String())
+					}
+				case 4:
+					body := fmt.Sprintf(`{"body":"mysql comment u%d op%d"}`, u, op)
+					req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/videos/%d/comments", vid), strings.NewReader(body))
+					req.Header.Set("Authorization", "Bearer "+userToken)
+					req.Header.Set("Content-Type", "application/json")
+					res := httptest.NewRecorder()
+					router.ServeHTTP(res, req)
+					if res.Code != http.StatusCreated {
+						failures <- fmt.Sprintf("u=%d op=%d POST comment vid=%d: %d %s", u, op, vid, res.Code, res.Body.String())
+					}
+				}
+			}
+		}(token, uIdx)
+	}
+
+	wg.Wait()
+	close(failures)
+
+	var failed []string
+	for f := range failures {
+		if len(failed) < 5 {
+			failed = append(failed, f)
+		}
+	}
+	if len(failed) > 0 {
+		t.Fatalf("MySQL concurrent interaction failures: %v", failed)
+	}
+
+	// Verify row-counter parity and non-negative counters on MySQL
+	for _, vid := range videoIDs {
+		var v Video
+		if err := dbA.First(&v, vid).Error; err != nil {
+			t.Fatal(err)
+		}
+		var actualLikes int64
+		if err := dbB.Model(&VideoAction{}).Where("video_id = ? AND kind = ?", vid, "like").Count(&actualLikes).Error; err != nil {
+			t.Fatal(err)
+		}
+		var actualFavs int64
+		if err := dbB.Model(&VideoAction{}).Where("video_id = ? AND kind = ?", vid, "favorite").Count(&actualFavs).Error; err != nil {
+			t.Fatal(err)
+		}
+		var actualComments int64
+		if err := dbB.Model(&Comment{}).Where("video_id = ?", vid).Count(&actualComments).Error; err != nil {
+			t.Fatal(err)
+		}
+
+		if v.LikeCount < 0 || v.FavoriteCount < 0 || v.CommentCount < 0 {
+			t.Fatalf("negative counter for video %d: likes=%d favs=%d cmts=%d", vid, v.LikeCount, v.FavoriteCount, v.CommentCount)
+		}
+		if v.LikeCount != actualLikes {
+			t.Fatalf("video %d like_count mismatch: counter=%d rows=%d", vid, v.LikeCount, actualLikes)
+		}
+		if v.FavoriteCount != actualFavs {
+			t.Fatalf("video %d favorite_count mismatch: counter=%d rows=%d", vid, v.FavoriteCount, actualFavs)
+		}
+		if v.CommentCount != actualComments {
+			t.Fatalf("video %d comment_count mismatch: counter=%d rows=%d", vid, v.CommentCount, actualComments)
+		}
+	}
+}

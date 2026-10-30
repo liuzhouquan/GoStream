@@ -1,8 +1,21 @@
 # GoStream development progress
 
-Last updated: 2026-10-29
+Last updated: 2026-10-30
 
 The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs/DELIVERY_SCOPE.md); the test matrix and pass criteria are in [`docs/TEST_STANDARD.md`](docs/TEST_STANDARD.md). Checked items below record individual features or local verification; they do not mean the whole project has met those release gates.
+
+2026-10-30 A04/A05 混合 Feed 与多用户并发互动计数矩阵 (`test/feed-and-interaction-matrix`):
+- 关注 Feed 0 关注快速路径优化：在 `followingVideos` 中新增 `SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = ?)` 极速前置检查，避免 0 关注用户执行高昂的 3-subquery UNION 查询。
+- 社交关系事务防死锁：在 `unfollow` 接口中引入 `transactionWithDeadlockRetry`，防止高并发下取消关注与新增关注引发 MySQL 1213 deadlock 报错 500。
+- 矩阵测试验证 (`internal/platform/feed_matrix_test.go`)：
+  1. `TestFeedScenePaginationAndSameTimestampTiebreaker`: 验证 25 条完全相同 `CreatedAt` 时间戳视频在 timeline、following、hot、recommend 4 种 Feed 场景下，依赖 `(created_at, id)` 复合游标无缝且确定性分页，无任何漏项或重复项。
+  2. `TestHybridFeedEdgeCases`: 覆盖 0 关注极速返回、普通作者推信箱、大 V 作者拉取、迟到关注补页、取消关注即时过滤、软删视频即时排除等完整边缘场景。
+  3. `TestFeedRedisCacheFallbackAndRecovery`: 验证 miniredis 正常时 Prometheus 指标缓存命中递增、Redis 宕机时自动降级查询数据库且熔断器生效不抛 500、Redis 恢复后自动重新恢复缓存读写。
+  4. `TestConcurrentMultiUserMultiVideoInteractionsAndCounters`: 8 个独立用户对 3 个视频并发执行 200 次点赞、取消点赞、收藏、取消收藏、发表评论和播放量记录，验证在高并发行级更新下，视频缓存列计数（like_count, favorite_count, comment_count, play_count）与明细表行数完全一致，无任何负数产生。
+  5. `TestNotificationMatrixAndPermissions`: 覆盖 follow、like、favorite、comment、reply 全部 5 类通知，验证作者自身行为抑制、重复操作幂等去重、outbox 事件生成、跨用户通知严格隔离，以及基于 `up_to_id` 的有界标记已读逻辑。
+- MySQL 多实例集成测试 (`internal/platform/mysql_integration_test.go`):
+  新增 `TestMySQLMultiUserConcurrentInteractionsAndCounters`，在双 server 实例上模拟多用户并发互动与行锁竞争，验证计数缓存列与真实行数的一致性与事务清理。
+- 全库验证通过：Go 1.27.2 下 `go test -count=1 ./...`、`-race` 检查、`go vet ./...`、三二进制构建 (`cmd/...`)、`git diff --check` 及 `node --check web/app.js` 全部通过。
 
 2026-10-29 seven-branch review (baseline `876b4b6`): independent Standards/Spec reviews and actual reproduction are in [`docs/BRANCH_REVIEW.md`](docs/BRANCH_REVIEW.md). Five branches are included with review fixes: web group synchronization, group revocation, RabbitMQ restart tests, media header/permissions/outage tests and group history lifecycle. `feat/im-device-lifecycle` and `feat/openapi-spec` are withheld; new-device unread loss and incorrect/insufficiently validated contracts block them. Their original code and premature acceptance claims are not part of the integrated runtime.
 
