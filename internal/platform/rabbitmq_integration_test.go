@@ -402,4 +402,116 @@ func TestRabbitMQNotificationIntegration(t *testing.T) {
 		publish(t)
 		awaitRabbit(t, "consumer automatically recovered", 15*time.Second, func() bool { return jobCount(t, source) == 1 })
 	})
+	t.Run("publisher_confirm_window_disconnect_and_retry", func(t *testing.T) {
+		source := fixture(t)
+		// Simulate publish reaching broker but publisher dropping connection before SQL confirmation
+		if err := a.broker.publish(context.Background(), source); err != nil {
+			t.Fatal(err)
+		}
+		var stored OutboxEvent
+		if err := dbs[0].First(&stored, source.ID).Error; err != nil || stored.PublishedAt != nil {
+			t.Fatalf("expected unconfirmed source: %+v", stored)
+		}
+		// Worker retries publishing with same MessageId/EventKey
+		publish(t)
+		if err := dbs[0].First(&stored, source.ID).Error; err != nil || stored.PublishedAt == nil {
+			t.Fatalf("expected confirmed source after retry: %+v", stored)
+		}
+		// Consumer handles potential duplicate and ensures exactly 1 delivery job
+		stop := consumer(t)
+		defer stop()
+		awaitRabbit(t, "deduplicated delivery after confirm window retry", 10*time.Second, func() bool {
+			return jobCount(t, source) == 1
+		})
+	})
+	t.Run("dlq_target_outage_and_recovery", func(t *testing.T) {
+		stop := consumer(t)
+		defer stop()
+		session := open(t)
+		defer session.close()
+
+		// Simulate DLQ target outage: unbind queue.dead from queue.dlx
+		if err := session.ch.QueueUnbind(queue+".dead", notificationCreatedTopic, queue+".dlx", nil); err != nil {
+			t.Fatal(err)
+		}
+
+		// Poison message while DLQ target is unreachable
+		if err := a.broker.publishBody(context.Background(), []byte("{corrupt-pre-recovery"), "dlq-outage-test-1"); err != nil {
+			t.Fatal(err)
+		}
+
+		// Restore DLQ target binding
+		if err := session.ch.QueueBind(queue+".dead", notificationCreatedTopic, queue+".dlx", false, nil); err != nil {
+			t.Fatal(err)
+		}
+
+		// Poison message after DLQ target is restored
+		if err := a.broker.publishBody(context.Background(), []byte("{corrupt-post-recovery"), "dlq-outage-test-2"); err != nil {
+			t.Fatal(err)
+		}
+
+		// Verify DLQ queue receives the poison message
+		dead := rabbitGet(t, session, queue+".dead", 10*time.Second)
+		if dead.MessageId != "dlq-outage-test-2" || dead.Headers["x-first-death-reason"] != "rejected" || dead.DeliveryMode != amqp.Persistent {
+			t.Fatalf("dead letter headers: %v mode=%d id=%q", dead.Headers, dead.DeliveryMode, dead.MessageId)
+		}
+		if err := dead.Ack(false); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("sustained_backlog_drain_50_events", func(t *testing.T) {
+		const backlogCount = 50
+		sources := make([]OutboxEvent, backlogCount)
+		for i := 0; i < backlogCount; i++ {
+			sources[i] = fixture(t)
+			if err := a.broker.publish(context.Background(), sources[i]); err != nil {
+				t.Fatalf("publish backlog item %d: %v", i, err)
+			}
+			// Mark source outbox as published to RabbitMQ
+			if err := dbs[0].Model(&sources[i]).Update("published_at", time.Now().UTC()).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		var countBefore int64
+		if err := dbs[0].Model(&OutboxEvent{}).Where("topic = ?", notificationDeliverTopic).Count(&countBefore).Error; err != nil {
+			t.Fatal(err)
+		}
+
+		// Start consumer to drain sustained backlog
+		stop := consumer(t)
+		defer stop()
+
+		awaitRabbit(t, "50 sustained backlog delivery jobs in MySQL", 30*time.Second, func() bool {
+			var count int64
+			if err := dbs[0].Model(&OutboxEvent{}).Where("topic = ?", notificationDeliverTopic).Count(&count); err != nil {
+				return false
+			}
+			return count >= countBefore+backlogCount
+		})
+
+		// Drain delivery outbox in local worker
+		drained := 0
+		for drained < backlogCount {
+			n, err := b.ProcessOutboxOnce(context.Background())
+			if err != nil {
+				t.Fatalf("drain local delivery outbox: %v", err)
+			}
+			if n == 0 {
+				break
+			}
+			drained += n
+		}
+
+		// Replay deliveries: assert all 50 deduplicated
+		beforeDup := testutil.ToFloat64(b.metrics.brokerMessages.WithLabelValues("duplicate"))
+		for i := 0; i < backlogCount; i++ {
+			if err := a.broker.publish(context.Background(), sources[i]); err != nil {
+				t.Fatalf("republish backlog item %d: %v", i, err)
+			}
+		}
+		awaitRabbit(t, "all 50 sustained redeliveries detected as duplicates", 20*time.Second, func() bool {
+			return testutil.ToFloat64(b.metrics.brokerMessages.WithLabelValues("duplicate")) >= beforeDup+float64(backlogCount)
+		})
+	})
 }

@@ -1,8 +1,23 @@
 # GoStream development progress
 
-Last updated: 2026-10-29
+Last updated: 2026-10-30
 
 The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs/DELIVERY_SCOPE.md); the test matrix and pass criteria are in [`docs/TEST_STANDARD.md`](docs/TEST_STANDARD.md). Checked items below record individual features or local verification; they do not mean the whole project has met those release gates.
+
+2026-10-30 Work Package 3 - A06 broker fault boundaries (`test/rabbitmq-fault-windows`, baseline `1f29008`):
+- Addressed audit findings from `docs/BRANCH_REVIEW.md`:
+  1. Publisher confirm window fault injection & SIGKILL:
+     - Verified in `tests/integration/rabbitmq_smoke.py` by pausing the disposable broker container, forcing the outbox worker into the active publisher confirm wait (`attempts >= 1, published_at IS NULL`), then sending `SIGKILL` and asserting exit status `-signal.SIGKILL`. Verified SQL `published_at` remains NULL. Upon unpausing broker and restarting API, unconfirmed row was reclaimed, published, confirmed, and consumed without duplicate delivery jobs.
+     - Added `TestBrokerPublisherConfirmFailureAndRecovery` in `internal/platform/broker_events_test.go` and `publisher_confirm_window_disconnect_and_retry` in `internal/platform/rabbitmq_integration_test.go`.
+  2. Consumer post-commit pre-ACK crash & redelivery window:
+     - Added `TestBrokerConsumerPreACKCrashAndDeduplication`: simulated consumer committing `notification.deliver` outbox row, followed by crash before AMQP ACK. Broker redelivery detected existing row as duplicate, ACKed cleanly, and resulted in strictly 1 durable delivery job.
+     - Verified in real RabbitMQ matrix with unacked message redelivery and single delivery job assertions.
+  3. DLQ target outage and recovery:
+     - Added `dlq_target_outage_and_recovery` in `internal/platform/rabbitmq_integration_test.go`: unbound `queue.dead` from `queue.dlx`, rejected poison messages, restored binding, confirmed subsequent dead-letter routing to `.dead`, and verified operator replay.
+     - Added `TestBrokerDLQReplayIdempotency`: repeated replays of dead letters cleanly deduplicate without side effects.
+  4. Sustained backlog drain:
+     - Upgraded `rabbitmq_smoke.py` from 5 events to 50 sustained offline backlog events across multiple accounts. Verified all 52 source and delivery events reach `published_at IS NOT NULL`, zero dead letters occur, and broker queue depth returns to 0 via RabbitMQ Management HTTP API.
+     - Added `TestBrokerNotificationSustainedBacklogDrain` in `broker_events_test.go` and `sustained_backlog_drain_50_events` in `rabbitmq_integration_test.go`.
 
 2026-10-29 seven-branch review (baseline `876b4b6`): independent Standards/Spec reviews and actual reproduction are in [`docs/BRANCH_REVIEW.md`](docs/BRANCH_REVIEW.md). Five branches are included with review fixes: web group synchronization, group revocation, RabbitMQ restart tests, media header/permissions/outage tests and group history lifecycle. `feat/im-device-lifecycle` and `feat/openapi-spec` are withheld; new-device unread loss and incorrect/insufficiently validated contracts block them. Their original code and premature acceptance claims are not part of the integrated runtime.
 
