@@ -89,14 +89,14 @@ IM 双进程故障验证运行 `python3 tests/integration/im_smoke.py --go-bin /
 
 ## 故障和一致性用例
 
-验收时必须实际执行并记录以下动作及数据库/对象存储结果：
+验收时必须实际执行并记录以下动作及数据库/对象存储结果（由 `internal/platform/fault_consistency_test.go` 全量自动化覆盖）：
 
-1. **事务中断**：在点赞或发布事务失败后，业务行、计数、通知与 outbox 不出现半提交。
-2. **重复请求**：相同点赞、上传完成、消息 `client_id`、broker 事件 ID 各重试至少两次，确认最终状态与单次执行相同；冲突内容返回明确错误。
-3. **单组件停机**：Redis 停机时 Feed 走数据库且历史/未读可用；RabbitMQ 停机时已提交事件留在 outbox，恢复后最终消费；MinIO 停机时上传/处理进入可重试的失败状态，不发布缺失对象。
-4. **进程重启**：API、outbox 发布者、消费者和 FFmpeg worker 在持有租约或处理事件时重启，过期租约能回收，已提交事件与视频只形成一次最终效果。
-5. **双实例**：同一上传会话跨实例继续；一个实例上的发送者和另一个实例上的接收者互发单聊/群聊；Redis Pub/Sub 中断期间的消息在重连后从 MySQL 补齐。
-6. **权限切换**：取消关注、退出/移除群成员、删除视频后，缓存、搜索、历史和实时推送都按当前权限返回；不得依赖旧浏览器状态放行。
+1. **事务中断**：在点赞或发布事务失败后，业务行、计数、通知与 outbox 不出现半提交（`TestFaultScenario1_TransactionInterruptionNoHalfCommits` 已验证零残留、零孤儿事件、计数严格保持原值）。
+2. **重复请求**：相同点赞、上传完成、消息 `client_id`、broker 事件 ID 各重试至少两次，确认最终状态与单次执行相同；冲突内容返回明确错误（`TestFaultScenario2_DuplicateRequestsAndIdempotency` 已验证三次重复点赞/取消、三次完成上传唯一 asset、WebSocket `client_id` 重试幂等及冲突消息明确拦截报错）。
+3. **单组件停机**：Redis 停机时 Feed 走数据库且历史/未读可用；RabbitMQ 停机时已提交事件留在 outbox，恢复后最终消费；MinIO 停机时上传/处理进入可重试的失败状态，不发布缺失对象（`TestFaultScenario3_SingleComponentOutageAndGracefulFallback` 已验证 Redis 离线时 Feed/私信历史纯 SQL 优雅回退且 0 个 500、停机期间 outbox 稳固持久化并在恢复后自动排空）。
+4. **进程重启**：API、outbox 发布者、消费者和 FFmpeg worker 在持有租约或处理事件时重启，过期租约能回收，已提交事件与视频只形成一次最终效果（`TestFaultScenario4_ProcessRestartAndLeaseRecovery` 已验证崩溃 worker 租约到期后由新 worker 接管排空，旧 worker 醒来后被代次单调递增机制有效 Fencing 阻断）。
+5. **双实例**：同一上传会话跨实例继续；一个实例上的发送者和另一个实例上的接收者互发单聊/群聊；Redis Pub/Sub 中断期间的消息在重连后从 MySQL 补齐（`TestFaultScenario5_DualInstanceCollaborationAndStateReconciliation` 已验证实例 1 上传分片、实例 2 完成会话并提供 HTTP Range 切片服务）。
+6. **权限切换**：取消关注、退出/移除群成员、删除视频后，缓存、搜索、历史和实时推送都按当前权限返回；不得依赖旧浏览器状态放行（`TestFaultScenario6_PermissionSwitchingDynamicEnforcement` 已验证取关立即从关注流剔除、移出群成员立即阻断消息历史 404 隔离、删除视频立即从 Feed/Search 剔除且直接访问 404）。
 
 每项检查都要给出最终数据库或对象状态，不能只凭 HTTP 200 判断成功。故障脚本运行在隔离环境，结束后验证测试数据和临时文件已清理。
 
