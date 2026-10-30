@@ -931,3 +931,100 @@ func TestMySQLCommentThreadsIntegration(t *testing.T) {
 		t.Fatalf("second MySQL page: %d %s", second.Code, second.Body.String())
 	}
 }
+
+// TestMySQLRestartPersistenceLifecycle verifies that real MySQL data, counters,
+// and state persist across server instances (A01).
+func TestMySQLRestartPersistenceLifecycle(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to run the MySQL integration test")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	defer tx.Rollback()
+
+	secret := "mysql-restart-persistence-secret-at-least-32-bytes"
+	unique := time.Now().UnixNano()
+
+	// Instance 1 writes state
+	s1 := NewServer(tx, secret, t.TempDir())
+	h1 := s1.Router()
+
+	u1Name := fmt.Sprintf("myuser1_%d", unique)
+	u2Name := fmt.Sprintf("myuser2_%d", unique)
+	u1ID, u1Token := registerTestUser(t, h1, u1Name)
+	u2ID, u2Token := registerTestUser(t, h1, u2Name)
+
+	video := Video{AuthorID: u1ID, Title: "MySQL Persist Video", MediaURL: "/media/myvid.mp4", Status: "published"}
+	if err := tx.Create(&video).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// Like, comment, follow on Instance 1
+	if res := request(t, h1, http.MethodPut, fmt.Sprintf("/api/videos/%d/like", video.ID), u2Token, nil); res.Code != http.StatusOK {
+		t.Fatalf("like on instance 1: %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, h1, http.MethodPost, fmt.Sprintf("/api/videos/%d/comments", video.ID), u2Token, map[string]string{"body": "mysql comment"}); res.Code != http.StatusCreated {
+		t.Fatalf("comment on instance 1: %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, h1, http.MethodPut, fmt.Sprintf("/api/users/me/following/%d", u1ID), u2Token, nil); res.Code != http.StatusOK {
+		t.Fatalf("follow on instance 1: %d %s", res.Code, res.Body.String())
+	}
+
+	// Direct message
+	dm := ChatMessage{SenderID: u1ID, RecipientID: u2ID, ClientID: fmt.Sprintf("my-dm-%d", unique), Body: "hello mysql restart"}
+	if err := tx.Create(&dm).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// Instance 2 boots on same MySQL state
+	s2 := NewServer(tx, secret, t.TempDir())
+	h2 := s2.Router()
+
+	// Verify /health and /ready on Instance 2
+	if res := request(t, h2, http.MethodGet, "/health", "", nil); res.Code != http.StatusOK {
+		t.Fatalf("instance 2 /health: %d", res.Code)
+	}
+	if res := request(t, h2, http.MethodGet, "/ready", "", nil); res.Code != http.StatusOK {
+		t.Fatalf("instance 2 /ready: %d", res.Code)
+	}
+
+	// Pre-restart tokens still authenticate
+	if res := request(t, h2, http.MethodGet, "/api/users/me", u1Token, nil); res.Code != http.StatusOK {
+		t.Fatalf("u1 token on instance 2: %d %s", res.Code, res.Body.String())
+	}
+
+	// Video counters persist on real MySQL
+	resVid := request(t, h2, http.MethodGet, fmt.Sprintf("/api/videos/%d", video.ID), "", nil)
+	if resVid.Code != http.StatusOK {
+		t.Fatalf("get video on instance 2: %d %s", resVid.Code, resVid.Body.String())
+	}
+	var vRec Video
+	if err := json.Unmarshal(resVid.Body.Bytes(), &vRec); err != nil || vRec.LikeCount != 1 || vRec.CommentCount != 1 {
+		t.Fatalf("video counters on instance 2: %+v", vRec)
+	}
+
+	// Comment persists
+	resComms := request(t, h2, http.MethodGet, fmt.Sprintf("/api/videos/%d/comments", video.ID), "", nil)
+	if resComms.Code != http.StatusOK || !strings.Contains(resComms.Body.String(), "mysql comment") {
+		t.Fatalf("comments on instance 2: %d %s", resComms.Code, resComms.Body.String())
+	}
+
+	// Follow feed persists
+	resFeed := request(t, h2, http.MethodGet, "/api/feed?scene=following", u2Token, nil)
+	if resFeed.Code != http.StatusOK || !strings.Contains(resFeed.Body.String(), "MySQL Persist Video") {
+		t.Fatalf("following feed on instance 2: %d %s", resFeed.Code, resFeed.Body.String())
+	}
+
+	// Direct message history persists
+	resMsg := request(t, h2, http.MethodGet, fmt.Sprintf("/api/messages?user_id=%d", u1ID), u2Token, nil)
+	if resMsg.Code != http.StatusOK || !strings.Contains(resMsg.Body.String(), "hello mysql restart") {
+		t.Fatalf("messages on instance 2: %d %s", resMsg.Code, resMsg.Body.String())
+	}
+}
