@@ -233,7 +233,7 @@ def main():
             alice.wait_for(lambda: "Bob Builder" in alice.eval_js("document.querySelector('#content')?.textContent||''"))
             results["notifications_received"] = True
             alice.cli("click", '[data-read-all]')
-            alice.wait_for(lambda: alice.eval_js("api('/api/notifications').then(n=>n.unread_count===0)"))
+            alice.wait_for(lambda: alice.eval_js("api('/api/notifications/unread').then(n=>n.unread_count===0)"))
             results["notifications_marked_read"] = True
 
             # Step 7: Search and Follow via UI

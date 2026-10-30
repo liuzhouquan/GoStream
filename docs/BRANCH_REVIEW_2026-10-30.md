@@ -78,3 +78,7 @@ Run `41037890462` 的 IM、MinIO、Redis、视频恢复通过；IM 真实默认�
 4. DLQ 45 秒超时：核查 RabbitMQ 4.3.7 源码后确认默认内部重试间隔为 180,000 ms。隔离测试 broker 显式配置并验证 1,000 ms，目标保持未绑定跨多次重试，再要求原消息恢复；生产 Compose 默认未变，不把缩短的测试间隔当生产恢复时间。直接 Go 运行默认等待 210 秒；launcher 提供已验证间隔下的有界等待。
 
 重试间隔来源：[RabbitMQ 4.3.7 Makefile](https://github.com/rabbitmq/rabbitmq-server/blob/v4.3.7/deps/rabbit/Makefile) 与 [内部 DLQ worker](https://github.com/rabbitmq/rabbitmq-server/blob/v4.3.7/deps/rabbit/src/rabbit_fifo_dlx_worker.erl)。这次调查确认原队列参数支持 at-least-once，没有在缺少证据时改动生产队列拓扑。
+
+第二轮 run `41040441660` 已通过真实 MySQL、Redis、IM、RabbitMQ 和视频恢复。浏览器已完成真实上传、转码、播放、资料保存与互动，在新增的未读归零断言处失败：测试误从通知列表读取 `unread_count`，该字段实际由 `/api/notifications/unread` 提供。修正为读取真实计数接口，保留归零条件，不能把此次部分流程当作全部通过。
+
+集成与最终检查统一记录在 [PR #18](https://github.com/liuzhouquan/GoStream/pull/18)；只有该 PR 最后提交的八项检查全部通过才可合并。以上失败运行属于保留的调查证据。
