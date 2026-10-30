@@ -1,8 +1,22 @@
 # GoStream development progress
 
-Last updated: 2026-10-29
+Last updated: 2026-10-30
 
 The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs/DELIVERY_SCOPE.md); the test matrix and pass criteria are in [`docs/TEST_STANDARD.md`](docs/TEST_STANDARD.md). Checked items below record individual features or local verification; they do not mean the whole project has met those release gates.
+
+2026-10-30 A02/A11 权限与安全边界自动化测试矩阵 (`test/security-boundaries-and-permissions`):
+- 新增 `internal/platform/security_boundary_test.go`，覆盖全部身份、越权与安全防护边界：
+  1. `TestJWTSecurityAndTampering`: 验证空 Token、畸形 Authorization 头（缺失 Bearer、非 JWT 字符串、Basic 认证、两段或四段格式）、伪造密钥签名、过期 Token（exp < now）及 `alg=none` 签名绕过攻击均严格被中间件拦截并返回 401。
+  2. `TestStaticMediaServingAndPathTraversal`: 验证静态目录 `/media/` 访问合法媒体文件成功返回 200，并针对 `../`、`%2e%2e/`、`..%2f`、`....//` 等多种路径遍历攻击进行验证，确保无法越界读取父级敏感文件（如数据库与配置）或列出目录。
+  3. `TestUploadPathTraversalAndOwnership`: 验证分片上传与单文件上传中，客户端传入的恶意路径文件名（`../../../../etc/passwd.mp4`、`..\..\..\windows\system32\cmd.mp4`）均被剥离原始路径并转换为隔离目录下的 32 位随机 hex nonce；跨用户查询、追加分片与完成上传会话均严格返回 404，阻断会话注入与枚举。
+  4. `TestVideoAndResourceOwnershipIsolation`: 验证非作者尝试通过 PUT/DELETE 修改或删除他人视频返回 404/403 拒绝且底层数据保持原样；验证状态为 `processing` 或 `failed` 的未发布视频对外严格保密（陌生人直接 GET 与主页用户视频列表均无法查见），作者自身可查看。
+  5. `TestChatAndGroupSecurityBoundaries`: 验证非群成员无法读取群历史与发送群消息；普通成员无法拉取陌生人进群（仅群主可邀），无法踢出其他成员（仅群主可删，普通成员仅允许退出自身），且任何人无法踢出群主。
+  6. `TestSensitiveDataSanitizationAndInformationLeakage`: 验证用户自身资料、公开用户查询、搜索列表、视频作者预加载及评论作者预加载响应中，`password_hash`、明文密码和 bcrypt 散列前缀绝对被排除，不发生任何内部信息泄露。
+  7. `TestDirectMessagePrivacyAndReceiptIsolation`: 验证第三方用户无法查见其他两方的私聊历史；第三方尝试针对他人私信发起消息 ACK 确认严格返回 404。
+  8. `TestFollowSelfAndRepeatFollowIdempotency`: 验证禁止用户关注自身（返回 400）；重复关注与重复取消关注严格保持幂等性。
+  9. `TestAccountValidationBoundaries`: 验证注册用户名合法字符（不支持点、符号、空格）、密码长度（8-72 字节）边界；个人资料更新昵称（<=48）、简介（<=280）长度限制，以及头像必须绑定当前用户拥有的 `image` 类型 MediaAsset，禁止绑定视频资产或他人图片。
+  10. `TestMySQLSecurityAndOwnershipBoundaries`: 在真实 MySQL 环境下验证视频所有权校验、自关注防护及跨用户私聊收条拦截。
+- 全库验证通过：Go 1.27.2 下 `go test -count=1 ./...`、`-race` 检查、`go vet ./...`、三二进制构建 (`cmd/...`)、`git diff --check` 及 `node --check web/app.js` 全部通过。
 
 2026-10-29 seven-branch review (baseline `876b4b6`): independent Standards/Spec reviews and actual reproduction are in [`docs/BRANCH_REVIEW.md`](docs/BRANCH_REVIEW.md). Five branches are included with review fixes: web group synchronization, group revocation, RabbitMQ restart tests, media header/permissions/outage tests and group history lifecycle. `feat/im-device-lifecycle` and `feat/openapi-spec` are withheld; new-device unread loss and incorrect/insufficiently validated contracts block them. Their original code and premature acceptance claims are not part of the integrated runtime.
 
