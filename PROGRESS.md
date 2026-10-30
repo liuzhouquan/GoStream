@@ -1,8 +1,26 @@
 # GoStream development progress
 
-Last updated: 2026-10-29
+Last updated: 2026-10-30
 
 The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs/DELIVERY_SCOPE.md); the test matrix and pass criteria are in [`docs/TEST_STANDARD.md`](docs/TEST_STANDARD.md). Checked items below record individual features or local verification; they do not mean the whole project has met those release gates.
+
+2026-10-30 A09 Web full-flow end-to-end acceptance (`test/web-full-flow-e2e`): added `tests/integration/web_full_flow.py` exercising two independent headless Chromium sessions (Alice and Bob) via `agent-browser` against an ephemeral GoStream production server instance on a disposable SQLite database and isolated media storage. The test suite verifies 15 end-to-end acceptance checks:
+1. Alice registration and session state rendering
+2. Bob registration and session state rendering
+3. Alice resumable video chunk upload, completion, and publishing to Feed
+4. Alice creator profile viewing, video listing under "我的作品", and bio update
+5. Bob Feed browsing and interaction: like video (`♥` active class and counter)
+6. Bob interaction: favorite video (`★` active class and counter)
+7. Bob interaction: comment on video and instant rendering in comments slot
+8. Alice notification center reception of like, favorite, and comment notifications
+9. Bob creator search for "Alice" and follow via UI button
+10. Bob user follow button transition to disabled "已关注"
+11. Bob Following Feed dynamic query displaying Alice's published video
+12. Alice & Bob bidirectional real-time direct chat over WebSocket
+13. Alice group creation ("Creators Team"), member invitation of Bob, and group bidirectional chat
+14. Mobile viewport (390×844) responsive layout rendering and sidebar navigation
+15. Page reload and stored authentication session persistence without re-login
+The suite passed all 15 acceptance checks in 11.2 seconds, cleanly shut down the server and browser sessions, and deleted all temporary directories. Go ordinary tests, `-race`, vet, API/media binary builds, Python/JS syntax, and diff checks passed.
 
 2026-10-29 seven-branch review (baseline `876b4b6`): independent Standards/Spec reviews and actual reproduction are in [`docs/BRANCH_REVIEW.md`](docs/BRANCH_REVIEW.md). Five branches are included with review fixes: web group synchronization, group revocation, RabbitMQ restart tests, media header/permissions/outage tests and group history lifecycle. `feat/im-device-lifecycle` and `feat/openapi-spec` are withheld; new-device unread loss and incorrect/insufficiently validated contracts block them. Their original code and premature acceptance claims are not part of the integrated runtime.
 
