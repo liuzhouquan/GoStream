@@ -138,6 +138,9 @@ def main():
         stack.callback(alice.close)
         bob = BrowserSession(browser_bin,f"gostream-e2e-bob-{pid}")
         stack.callback(bob.close)
+        # Keep the formerly broken short-desktop boundary deterministic.
+        alice.cli("set", "viewport", "1280", "577")
+        bob.cli("set", "viewport", "1280", "577")
         results = {}
         try:
             # Step 1: Alice Registration
@@ -316,7 +319,9 @@ def main():
 
             # Verify login and real API restart, retaining this fixture's SQL/media.
             bob.cli("click", "#auth-open")
+            bob.wait_for(lambda: bob.eval_js("!state.user && !localStorage.getItem('gostream.token')"))
             bob.cli("click", "#auth-open")
+            bob.wait_for(lambda: bob.eval_js("document.querySelector('#auth-dialog').matches(':modal')"))
             if bob.eval_js("document.querySelector('#auth-submit').dataset.mode") == "register":
                 bob.cli("click", "#auth-switch")
             bob.cli("fill", '#auth-form input[name="username"]', "bob_e2e")
