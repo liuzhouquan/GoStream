@@ -125,3 +125,25 @@ func TestSQLiteDSNEnablesWALBusyTimeoutAndForeignKeys(t *testing.T) {
 		t.Fatalf("foreign_keys=%d err=%v", foreignKeys, err)
 	}
 }
+
+func TestPresenceDurationConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		lease, renew string
+		valid        bool
+	}{
+		{"", "", true}, {"2s", "", true}, {"2s", "1s", true}, {"", "1s", true},
+		{"bad", "", false}, {"2s", "bad", false}, {"0s", "", false}, {"2s", "0s", false}, {"2s", "2s", false}, {"2s", "5s", false}, {"1ns", "", false},
+	} {
+		lease, renew, err := presenceDurations(tc.lease, tc.renew)
+		if (err == nil) != tc.valid {
+			t.Fatalf("%q/%q: lease=%v renew=%v err=%v", tc.lease, tc.renew, lease, renew, err)
+		}
+		if tc.valid && (renew <= 0 || renew >= lease) {
+			t.Fatalf("unsafe timing %v/%v", lease, renew)
+		}
+	}
+	lease, renew, err := presenceDurations("", "")
+	if err != nil || lease != 75*time.Second || renew != 30*time.Second {
+		t.Fatalf("changed defaults: %v/%v %v", lease, renew, err)
+	}
+}

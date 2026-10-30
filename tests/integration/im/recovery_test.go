@@ -218,18 +218,37 @@ func TestIMProcessRecovery(t *testing.T) {
 		_ = secondDevice.conn.Close()
 	})
 	check("recipient_sigkill_reconnect_and_sender_ack_retry", func(t *testing.T) {
+		// A fresh real connection renews this node's production-default lease.
+		freshPresence := open(b.base, member, randomID(t))
+		_ = freshPresence
+		scores, err := rc.ZRangeWithScores(ctx, fmt.Sprintf("gostream:presence:%d", member.User.ID), 0, -1).Result()
+		if err != nil || len(scores) != 1 {
+			t.Fatalf("presence scores: %v %v", scores, err)
+		}
+		remaining := time.Until(time.UnixMilli(int64(scores[0].Score)))
+		if remaining < 70*time.Second || remaining > 76*time.Second {
+			t.Fatalf("expected 75-second production lease, remaining=%v", remaining)
+		}
+		started := time.Now()
 		b.stop(t, true)
 		// Process b was SIGKILL'd, so clearPresence was never called.
 		// Immediately after crash, member should still be reported online via Redis.
 		presence(t, a.base, true)
-		// After the 2-second presence lease expires, member should transition to offline.
-		eventually(t, "crashed node presence expiry", 5*time.Second, func() bool {
+		// After the production 75-second presence lease expires, member should transition to offline.
+		lastHeartbeat := time.Now()
+		eventually(t, "crashed node presence expiry", 85*time.Second, func() bool {
+			if time.Since(lastHeartbeat) > 10*time.Second {
+				ownerA.write(t, map[string]any{"type": "ping"})
+				ownerA.next(t, "pong", nil)
+				lastHeartbeat = time.Now()
+			}
 			var result struct {
 				Online bool `json:"online"`
 			}
 			call(t, a.base, "GET", fmt.Sprintf("/api/users/%d/presence", member.User.ID), account{}, "", nil, 200, &result)
 			return !result.Online
 		})
+		t.Logf("observed production presence expiry after %v", time.Since(started))
 		offline := send(t, ownerA, "message", "recipient-killed", "recipient process is down", member.User.ID)
 		offlineGroup := send(t, ownerA, "group_message", "recipient-killed-group", "recipient group process is down", group.ID)
 		b.start(t)

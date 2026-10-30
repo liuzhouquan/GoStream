@@ -76,9 +76,14 @@ func (s *Server) presenceRenewDuration() time.Duration {
 	return defaultPresenceRenew
 }
 
-func (s *Server) SetPresenceLease(lease, renew time.Duration) {
+// SetPresenceLease must be called before starting workers or accepting requests.
+func (s *Server) SetPresenceLease(lease, renew time.Duration) error {
+	if lease <= 0 || renew <= 0 || renew >= lease {
+		return fmt.Errorf("presence requires 0 < renewal < lease")
+	}
 	s.presenceLease = lease
 	s.presenceRenew = renew
+	return nil
 }
 
 func (s *Server) refreshPresence(ctx context.Context, userID uint) {

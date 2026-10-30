@@ -2,19 +2,19 @@ openapi: 3.0.3
 info:
   title: GoStream API
   version: 1.0.0
-  description: >-
-    Machine-readable API contract for GoStream short-video social platform,
-    providing accounts, resumable video uploads, FFmpeg processing, hybrid Feed,
-    social interactions, notifications, and real-time/historical IM messaging.
+  description: Machine-readable API contract for GoStream short-video social platform,
+    providing accounts, resumable video uploads, FFmpeg processing, hybrid Feed, social
+    interactions, notifications, and real-time/historical IM messaging.
 servers:
-  - url: http://127.0.0.1:8080
-    description: Local API server
+- url: http://127.0.0.1:8080
+  description: Local API server
 paths:
   /health:
     get:
       summary: Liveness probe
       operationId: getHealth
-      tags: [System]
+      tags:
+      - System
       responses:
         '200':
           description: Service is alive
@@ -22,12 +22,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
-
   /ready:
     get:
       summary: Readiness probe
       operationId: getReady
-      tags: [System]
+      tags:
+      - System
       responses:
         '200':
           description: Database is ready
@@ -41,12 +41,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /metrics:
     get:
       summary: Prometheus metrics
       operationId: getMetrics
-      tags: [System]
+      tags:
+      - System
       responses:
         '200':
           description: Prometheus text exposition format
@@ -54,25 +54,26 @@ paths:
             text/plain:
               schema:
                 type: string
-
   /media/{name}:
     get:
       summary: Serve uploaded or processed media file
       operationId: getMedia
-      tags: [Media]
+      tags:
+      - Media
       parameters:
-        - name: name
-          in: path
-          required: true
-          description: 32-hex content name with extension (mp4, mov, webm, jpg, png, webp)
-          schema:
-            type: string
-        - name: Range
-          in: header
-          required: false
-          description: HTTP byte range request
-          schema:
-            type: string
+      - name: name
+        in: path
+        required: true
+        description: 32-hex content name with extension (mp4, mov, webm, jpg, png,
+          webp)
+        schema:
+          type: string
+      - name: Range
+        in: header
+        required: false
+        description: HTTP byte range request
+        schema:
+          type: string
       responses:
         '200':
           description: Full media content
@@ -102,12 +103,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /api/users:
     post:
       summary: Register a new user
       operationId: register
-      tags: [Accounts]
+      tags:
+      - Accounts
       requestBody:
         required: true
         content:
@@ -139,12 +140,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /api/sessions:
     post:
       summary: Login with username and password
       operationId: login
-      tags: [Accounts]
+      tags:
+      - Accounts
       requestBody:
         required: true
         content:
@@ -170,14 +171,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /api/users/me:
     get:
       summary: Get current authenticated user profile
       operationId: getCurrentUser
-      tags: [Accounts]
+      tags:
+      - Accounts
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       responses:
         '200':
           description: Current user profile
@@ -187,12 +188,17 @@ paths:
                 $ref: '#/components/schemas/User'
         '401':
           description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     patch:
       summary: Update profile details or avatar
       operationId: updateCurrentUser
-      tags: [Accounts]
+      tags:
+      - Accounts
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -208,20 +214,28 @@ paths:
                 $ref: '#/components/schemas/User'
         '400':
           description: Invalid fields or avatar not owned by caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '401':
           description: Unauthorized
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/users/{id}:
     get:
       summary: Get public user profile by ID
       operationId: getUserByID
-      tags: [Accounts]
+      tags:
+      - Accounts
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       responses:
         '200':
           description: Public user profile
@@ -231,18 +245,22 @@ paths:
                 $ref: '#/components/schemas/UserProfileResponse'
         '404':
           description: User not found
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/users/{id}/presence:
     get:
       summary: Get user presence and online status
       operationId: getUserPresence
-      tags: [Presence]
+      tags:
+      - Presence
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       responses:
         '200':
           description: Presence information
@@ -250,21 +268,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PresenceResponse'
-
   /api/users/{id}/videos:
     get:
       summary: Get creator published videos (owner also sees processing/failed)
       operationId: getUserVideos
-      tags: [Videos]
+      tags:
+      - Videos
       security:
-        - {}
-        - BearerAuth: []
+      - {}
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       responses:
         '200':
           description: List of videos
@@ -277,14 +295,14 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/VideoCard'
-
   /api/users/me/following:
     get:
       summary: Get list of users the caller follows
       operationId: getFollowing
-      tags: [Relationships]
+      tags:
+      - Relationships
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       responses:
         '200':
           description: List of followed users
@@ -292,14 +310,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserListResponse'
-
   /api/users/me/followers:
     get:
       summary: Get list of followers of the caller
       operationId: getFollowers
-      tags: [Relationships]
+      tags:
+      - Relationships
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       responses:
         '200':
           description: List of followers
@@ -307,20 +325,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserListResponse'
-
   /api/users/me/following/{id}:
     put:
       summary: Follow a user
       operationId: followUser
-      tags: [Relationships]
+      tags:
+      - Relationships
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       responses:
         '200':
           description: Follow relationship established
@@ -331,15 +349,16 @@ paths:
     delete:
       summary: Unfollow a user
       operationId: unfollowUser
-      tags: [Relationships]
+      tags:
+      - Relationships
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       responses:
         '200':
           description: Follow relationship removed
@@ -347,21 +366,22 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FollowToggleResponse'
-
   /api/uploads:
     post:
       summary: Direct single-file upload (<= 250 MiB)
       operationId: uploadDirect
-      tags: [Uploads]
+      tags:
+      - Uploads
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
-              required: [file]
+              required:
+              - file
               properties:
                 file:
                   type: string
@@ -383,18 +403,30 @@ paths:
                     type: string
         '400':
           description: Unsupported extension or invalid media magic bytes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '413':
           description: File exceeds 250 MiB or is 0 bytes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           description: Media storage unavailable
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/uploads/sessions:
     post:
       summary: Create resumable upload session
       operationId: createUploadSession
-      tags: [Uploads]
+      tags:
+      - Uploads
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -410,20 +442,24 @@ paths:
                 $ref: '#/components/schemas/UploadSession'
         '400':
           description: Invalid size or unsupported filename extension
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/uploads/sessions/{id}:
     get:
       summary: Get resumable upload session status and uploaded chunks
       operationId: getUploadSession
-      tags: [Uploads]
+      tags:
+      - Uploads
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
       responses:
         '200':
           description: Upload session state
@@ -433,25 +469,29 @@ paths:
                 $ref: '#/components/schemas/UploadSession'
         '404':
           description: Session not found or not owned by caller
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/uploads/sessions/{id}/chunks/{index}:
     put:
       summary: Upload a raw 4 MiB chunk
       operationId: putUploadChunk
-      tags: [Uploads]
+      tags:
+      - Uploads
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-        - name: index
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: index
+        in: path
+        required: true
+        schema:
+          type: integer
       requestBody:
         required: true
         content:
@@ -475,26 +515,42 @@ paths:
                     type: boolean
         '400':
           description: Chunk index out of range or size mismatch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Session not found or not owned by caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: Chunk uploaded with conflicting content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           description: Media storage unavailable
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/uploads/sessions/{id}/complete:
     post:
       summary: Assemble and finalize resumable upload session
       operationId: completeUploadSession
-      tags: [Uploads]
+      tags:
+      - Uploads
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
       responses:
         '200':
           description: Assembly succeeded and media registered
@@ -504,20 +560,36 @@ paths:
                 $ref: '#/components/schemas/UploadSessionCompleteResponse'
         '400':
           description: Assembled file content does not match supported type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Session not found or not owned by caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: Incomplete chunks, integrity mismatch, or expired lease
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '503':
           description: Media storage unavailable
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/videos:
     post:
       summary: Publish a video referencing an uploaded media URL
       operationId: createVideo
-      tags: [Videos]
+      tags:
+      - Videos
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       requestBody:
         required: true
         content:
@@ -533,21 +605,25 @@ paths:
                 $ref: '#/components/schemas/Video'
         '400':
           description: Missing title, unowned media, or invalid cover asset
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/videos/{id}:
     get:
       summary: Get video details
       operationId: getVideo
-      tags: [Videos]
+      tags:
+      - Videos
       security:
-        - {}
-        - BearerAuth: []
+      - {}
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       responses:
         '200':
           description: Video information
@@ -557,18 +633,23 @@ paths:
                 $ref: '#/components/schemas/Video'
         '404':
           description: Video not found or processing details hidden from non-author
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     patch:
       summary: Edit video metadata or update source file
       operationId: updateVideo
-      tags: [Videos]
+      tags:
+      - Videos
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       requestBody:
         required: true
         content:
@@ -584,41 +665,59 @@ paths:
                 $ref: '#/components/schemas/Video'
         '400':
           description: Invalid fields or media not owned by caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '404':
           description: Video not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '409':
-          description: Cannot change source of failed/processing video without FFmpeg enabled
+          description: Cannot change source of failed/processing video without FFmpeg
+            enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       summary: Delete a video
       operationId: deleteVideo
-      tags: [Videos]
+      tags:
+      - Videos
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       responses:
         '204':
           description: Video deleted
         '404':
           description: Video not found
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/videos/{id}/like:
     put:
       summary: Like a video
       operationId: likeVideo
-      tags: [Interactions]
+      tags:
+      - Interactions
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       responses:
         '200':
           description: Video liked
@@ -629,15 +728,16 @@ paths:
     delete:
       summary: Unlike a video
       operationId: unlikeVideo
-      tags: [Interactions]
+      tags:
+      - Interactions
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       responses:
         '200':
           description: Video unliked
@@ -645,20 +745,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InteractionToggleResponse'
-
   /api/videos/{id}/favorite:
     put:
       summary: Favorite a video
       operationId: favoriteVideo
-      tags: [Interactions]
+      tags:
+      - Interactions
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       responses:
         '200':
           description: Video favorited
@@ -669,15 +769,16 @@ paths:
     delete:
       summary: Unfavorite a video
       operationId: unfavoriteVideo
-      tags: [Interactions]
+      tags:
+      - Interactions
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       responses:
         '200':
           description: Video unfavorited
@@ -685,18 +786,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InteractionToggleResponse'
-
   /api/videos/{id}/views:
     post:
       summary: Increment accepted play request count
       operationId: recordView
-      tags: [Interactions]
+      tags:
+      - Interactions
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       responses:
         '204':
           description: Accepted and play count incremented
@@ -712,29 +813,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
-
   /api/videos/{id}/comments:
     get:
       summary: List top-level comments on a video
       operationId: getComments
-      tags: [Comments]
+      tags:
+      - Comments
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 20
-        - name: cursor
-          in: query
-          required: false
-          schema:
-            type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
       responses:
         '200':
           description: Page of comments
@@ -745,15 +846,16 @@ paths:
     post:
       summary: Create a top-level comment or reply to a top-level comment
       operationId: createComment
-      tags: [Comments]
+      tags:
+      - Comments
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       requestBody:
         required: true
         content:
@@ -769,34 +871,38 @@ paths:
                 $ref: '#/components/schemas/Comment'
         '400':
           description: Invalid body, reply to reply rejected, or parent not found
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/videos/{id}/comments/{comment_id}/replies:
     get:
       summary: List replies to a top-level comment
       operationId: getCommentReplies
-      tags: [Comments]
+      tags:
+      - Comments
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: comment_id
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 20
-        - name: cursor
-          in: query
-          required: false
-          schema:
-            type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: comment_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
       responses:
         '200':
           description: Page of replies
@@ -804,35 +910,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommentPageResponse'
-
   /api/feed:
     get:
       summary: Fetch video feed (timeline, following, recommend, hot)
       operationId: getFeed
-      tags: [Feed]
+      tags:
+      - Feed
       security:
-        - {}
-        - BearerAuth: []
+      - {}
+      - BearerAuth: []
       parameters:
-        - name: scene
-          in: query
-          required: false
-          description: Feed scene (timeline, following, recommend, hot)
-          schema:
-            type: string
-            enum: [timeline, following, recommend, hot]
-            default: timeline
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 10
-        - name: cursor
-          in: query
-          required: false
-          schema:
-            type: string
+      - name: scene
+        in: query
+        required: false
+        description: Feed scene (timeline, following, recommend, hot)
+        schema:
+          type: string
+          enum:
+          - timeline
+          - following
+          - recommend
+          - hot
+          default: timeline
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 10
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
       responses:
         '200':
           description: Feed page
@@ -840,45 +950,48 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FeedResponse'
-
   /api/search:
     get:
       summary: Search users and published video titles/descriptions
       operationId: search
-      tags: [Search]
+      tags:
+      - Search
       security:
-        - {}
-        - BearerAuth: []
+      - {}
+      - BearerAuth: []
       parameters:
-        - name: q
-          in: query
-          required: true
-          description: Search keyword (2-80 characters)
-          schema:
-            type: string
-        - name: type
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [all, users, videos]
-            default: all
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 20
-        - name: users_before_id
-          in: query
-          required: false
-          schema:
-            type: integer
-        - name: videos_before_id
-          in: query
-          required: false
-          schema:
-            type: integer
+      - name: q
+        in: query
+        required: true
+        description: Search keyword (2-80 characters)
+        schema:
+          type: string
+      - name: type
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - all
+          - users
+          - videos
+          default: all
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: users_before_id
+        in: query
+        required: false
+        schema:
+          type: integer
+      - name: videos_before_id
+        in: query
+        required: false
+        schema:
+          type: integer
       responses:
         '200':
           description: Search results
@@ -886,26 +999,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SearchResponse'
-
   /api/notifications:
     get:
       summary: Get notifications for authenticated user
       operationId: getNotifications
-      tags: [Notifications]
+      tags:
+      - Notifications
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: before_id
-          in: query
-          required: false
-          schema:
-            type: integer
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 30
+      - name: before_id
+        in: query
+        required: false
+        schema:
+          type: integer
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 30
       responses:
         '200':
           description: Notification page
@@ -913,14 +1026,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NotificationPageResponse'
-
   /api/notifications/unread:
     get:
       summary: Get unread notification count
       operationId: getUnreadNotifications
-      tags: [Notifications]
+      tags:
+      - Notifications
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       responses:
         '200':
           description: Unread notification count
@@ -928,21 +1041,21 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UnreadCountResponse'
-
   /api/notifications/read:
     patch:
       summary: Mark notifications as read up to a given ID
       operationId: markNotificationsRead
-      tags: [Notifications]
+      tags:
+      - Notifications
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: up_to_id
-          in: query
-          required: false
-          description: Highest notification ID to mark read (omitted marks all)
-          schema:
-            type: integer
+      - name: up_to_id
+        in: query
+        required: false
+        description: Highest notification ID to mark read (omitted marks all)
+        schema:
+          type: integer
       responses:
         '200':
           description: Count of notifications marked read
@@ -950,32 +1063,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MarkReadResponse'
-
   /api/messages:
     get:
       summary: Get direct message conversation history with a peer
       operationId: getDirectMessages
-      tags: [Messaging]
+      tags:
+      - Messaging
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: user_id
-          in: query
-          required: true
-          description: Peer user ID
-          schema:
-            type: integer
-        - name: before_id
-          in: query
-          required: false
-          schema:
-            type: integer
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 50
+      - name: user_id
+        in: query
+        required: true
+        description: Peer user ID
+        schema:
+          type: integer
+      - name: before_id
+        in: query
+        required: false
+        schema:
+          type: integer
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
       responses:
         '200':
           description: Page of messages ordered newest first
@@ -983,32 +1096,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DirectMessageHistoryResponse'
-
   /api/messages/unread:
     get:
       summary: Page through unacknowledged direct messages
       operationId: getUnreadMessages
-      tags: [Messaging]
+      tags:
+      - Messaging
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: after_id
-          in: query
-          required: false
-          schema:
-            type: integer
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 50
-        - name: X-GoStream-Device-ID
-          in: header
-          required: false
-          description: Device UUID for per-device isolated unread tracking
-          schema:
-            type: string
+      - name: after_id
+        in: query
+        required: false
+        schema:
+          type: integer
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 100
+      - name: X-GoStream-Device-ID
+        in: header
+        required: false
+        description: Device UUID for per-device isolated unread tracking
+        schema:
+          type: string
       responses:
         '200':
           description: Page of unread messages
@@ -1016,25 +1129,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DirectMessageUnreadResponse'
-
   /api/messages/{id}/ack:
     post:
       summary: Acknowledge a single direct message
       operationId: ackMessage
-      tags: [Messaging]
+      tags:
+      - Messaging
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: X-GoStream-Device-ID
-          in: header
-          required: false
-          schema:
-            type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: X-GoStream-Device-ID
+        in: header
+        required: false
+        schema:
+          type: string
       responses:
         '200':
           description: Message acknowledged
@@ -1046,20 +1159,20 @@ paths:
                   acked:
                     type: boolean
                     example: true
-
   /api/messages/acks:
     post:
       summary: Batch acknowledge up to 100 direct messages
       operationId: ackMessages
-      tags: [Messaging]
+      tags:
+      - Messaging
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: X-GoStream-Device-ID
-          in: header
-          required: false
-          schema:
-            type: string
+      - name: X-GoStream-Device-ID
+        in: header
+        required: false
+        schema:
+          type: string
       requestBody:
         required: true
         content:
@@ -1075,36 +1188,40 @@ paths:
                 $ref: '#/components/schemas/BatchAckResponse'
         '400':
           description: Foreign ID in batch or invalid list
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/groups:
     get:
       summary: List groups the authenticated caller belongs to
       operationId: listGroups
-      tags: [Groups]
+      tags:
+      - Groups
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       responses:
         '200':
           description: List of groups
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/ChatGroup'
+                $ref: '#/components/schemas/GroupListResponse'
     post:
       summary: Create a new chat group
       operationId: createGroup
-      tags: [Groups]
+      tags:
+      - Groups
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [name]
+              required:
+              - name
               properties:
                 name:
                   type: string
@@ -1116,20 +1233,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChatGroup'
-
   /api/groups/{id}/members:
     post:
       summary: Group owner invites a member (capped at 200 members)
       operationId: addGroupMember
-      tags: [Groups]
+      tags:
+      - Groups
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
       requestBody:
         required: true
         content:
@@ -1149,27 +1266,35 @@ paths:
                     example: true
         '403':
           description: Only group owner can invite
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: Group has reached its 200-member limit
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/groups/{id}/members/{user_id}:
     delete:
       summary: Owner removes member, or member voluntarily leaves group
       operationId: removeGroupMember
-      tags: [Groups]
+      tags:
+      - Groups
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: user_id
-          in: path
-          required: true
-          schema:
-            type: integer
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: integer
       responses:
         '200':
           description: Member removed
@@ -1179,31 +1304,35 @@ paths:
                 $ref: '#/components/schemas/GroupMemberToggleResponse'
         '403':
           description: Caller cannot remove another member
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/groups/{id}/messages:
     get:
       summary: Get group message history
       operationId: getGroupHistory
-      tags: [Groups]
+      tags:
+      - Groups
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: before_id
-          in: query
-          required: false
-          schema:
-            type: integer
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 50
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: before_id
+        in: query
+        required: false
+        schema:
+          type: integer
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
       responses:
         '200':
           description: Page of group messages
@@ -1213,25 +1342,29 @@ paths:
                 $ref: '#/components/schemas/GroupHistoryResponse'
         '404':
           description: Group not found or caller is not a member
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/groups/{id}/unread:
     get:
       summary: Get count of unread group messages for caller device
       operationId: getGroupUnread
-      tags: [Groups]
+      tags:
+      - Groups
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: X-GoStream-Device-ID
-          in: header
-          required: false
-          schema:
-            type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: X-GoStream-Device-ID
+        in: header
+        required: false
+        schema:
+          type: string
       responses:
         '200':
           description: Unread count and last acknowledged message ID
@@ -1239,30 +1372,30 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GroupUnreadResponse'
-
   /api/groups/{id}/messages/{message_id}/ack:
     post:
       summary: Advance group read cursor up to message ID
       operationId: ackGroupMessage
-      tags: [Groups]
+      tags:
+      - Groups
       security:
-        - BearerAuth: []
+      - BearerAuth: []
       parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: message_id
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: X-GoStream-Device-ID
-          in: header
-          required: false
-          schema:
-            type: string
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: message_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: X-GoStream-Device-ID
+        in: header
+        required: false
+        schema:
+          type: string
       responses:
         '200':
           description: Group cursor advanced
@@ -1270,45 +1403,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GroupAckResponse'
-
   /api/ws:
     get:
       summary: Realtime bidirectional WebSocket connection
       operationId: connectWebSocket
-      tags: [Realtime]
-      description: >-
-        Bidirectional WebSocket connection for real-time IM direct and group messaging,
-        online presence refresh, and unread replay hints.
+      tags:
+      - Realtime
+      description: 'Bidirectional WebSocket connection for real-time IM direct and
+        group messaging, online presence refresh, and unread replay hints.
 
         Authentication is established during the initial WebSocket handshake via the
-        `Sec-WebSocket-Protocol` header:
-        - `gostream.jwt.<token>` (required, Bearer JWT)
-        - `gostream.device.<deviceID>` (optional, device UUID)
+        `Sec-WebSocket-Protocol` header: - `gostream.jwt.<token>` (required, Bearer
+        JWT) - `gostream.device.<deviceID>` (optional, device UUID)
 
-        Client events:
-        - `WSClientPing`: Heartbeat ping (`{"type": "ping"}`)
-        - `WSClientDirectMessage`: Send direct message (`{"type": "message", "recipient_id": ..., "client_id": "...", "body": "..."}`)
-        - `WSClientGroupMessage`: Send group message (`{"type": "group_message", "group_id": ..., "client_id": "...", "body": "..."}`)
+        Client events: - `WSClientPing`: Heartbeat ping (`{"type": "ping"}`) - `WSClientDirectMessage`:
+        Send direct message (`{"type": "message", "recipient_id": ..., "client_id":
+        "...", "body": "..."}`) - `WSClientGroupMessage`: Send group message (`{"type":
+        "group_message", "group_id": ..., "client_id": "...", "body": "..."}`)
 
-        Server events:
-        - `WSServerReady`: Initial handshake complete (`{"type": "ready"}`)
-        - `WSServerPong`: Heartbeat response (`{"type": "pong"}`)
-        - `WSServerError`: Error notification (`{"type": "error", "message": "..."}`)
-        - `WSServerDirectAck`: Sender delivery ACK (`{"type": "ack", "client_id": "...", "message_id": ...}`)
-        - `WSServerGroupAck`: Sender group delivery ACK (`{"type": "ack", "client_id": "...", "message_id": ..., "group_id": ...}`)
-        - `WSServerDirectMessage`: Inbound direct message (`{"type": "message", "message": {...}}`)
-        - `WSServerGroupMessage`: Inbound group message (`{"type": "group_message", "message": {...}}`)
-        - `WSServerSyncRequired`: Replay buffer overflow hint (`{"type": "sync_required"}`)
-        - `WSServerGroupSyncRequired`: Group replay buffer overflow hint (`{"type": "group_sync_required"}`)
+        Server events: - `WSServerReady`: Initial handshake complete (`{"type": "ready"}`)
+        - `WSServerPong`: Heartbeat response (`{"type": "pong"}`) - `WSServerError`:
+        Error notification (`{"type": "error", "message": "..."}`) - `WSServerDirectAck`:
+        Sender delivery ACK (`{"type": "ack", "client_id": "...", "message_id": ...}`)
+        - `WSServerGroupAck`: Sender group delivery ACK (`{"type": "ack", "client_id":
+        "...", "message_id": ..., "group_id": ...}`) - `WSServerDirectMessage`: Inbound
+        direct message (`{"type": "message", "message": {...}}`) - `WSServerGroupMessage`:
+        Inbound group message (`{"type": "group_message", "message": {...}}`) - `WSServerSyncRequired`:
+        Replay buffer overflow hint (`{"type": "sync_required"}`) - `WSServerGroupSyncRequired`:
+        Group replay buffer overflow hint (`{"type": "group_sync_required"}`) Server
+        notification frames use WSServerNotification with a durable SQL inbox record.'
       parameters:
-        - name: Sec-WebSocket-Protocol
-          in: header
-          required: true
-          description: >-
-            Subprotocol list including 'gostream', 'gostream.jwt.<token>',
-            and optionally 'gostream.device.<uuid>'.
-          schema:
-            type: string
+      - name: Sec-WebSocket-Protocol
+        in: header
+        required: true
+        description: Subprotocol list including 'gostream', 'gostream.jwt.<token>',
+          and optionally 'gostream.device.<uuid>'.
+        schema:
+          type: string
       responses:
         '101':
           description: Switching Protocols to WebSocket
@@ -1320,7 +1451,10 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '429':
           description: Exceeded 8 simultaneous active sockets per account
-
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
   securitySchemes:
     BearerAuth:
@@ -1331,7 +1465,6 @@ components:
       type: apiKey
       in: header
       name: X-GoStream-Device-ID
-
   schemas:
     HealthResponse:
       type: object
@@ -1339,24 +1472,23 @@ components:
         status:
           type: string
           example: ok
-
     ReadyResponse:
       type: object
       properties:
         status:
           type: string
           example: ready
-
     ErrorResponse:
       type: object
       properties:
         error:
           type: string
           example: record not found
-
     RegisterRequest:
       type: object
-      required: [username, password]
+      required:
+      - username
+      - password
       properties:
         username:
           type: string
@@ -1368,10 +1500,11 @@ components:
         nickname:
           type: string
           example: Alice In Wonderland
-
     LoginRequest:
       type: object
-      required: [username, password]
+      required:
+      - username
+      - password
       properties:
         username:
           type: string
@@ -1380,20 +1513,24 @@ components:
           type: string
           format: password
           example: securepassword123
-
     SessionResponse:
       type: object
-      required: [user, access_token]
+      required:
+      - user
+      - access_token
       properties:
         user:
           $ref: '#/components/schemas/User'
         access_token:
           type: string
           example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-
     User:
       type: object
-      required: [id, username, nickname, created_at]
+      required:
+      - id
+      - username
+      - nickname
+      - created_at
       properties:
         id:
           type: integer
@@ -1417,10 +1554,13 @@ components:
         created_at:
           type: string
           format: date-time
-
     UserProfileResponse:
       type: object
-      required: [user, video_count, follower_count, following_count]
+      required:
+      - user
+      - video_count
+      - follower_count
+      - following_count
       properties:
         user:
           $ref: '#/components/schemas/User'
@@ -1433,52 +1573,54 @@ components:
         following_count:
           type: integer
           example: 23
-
     UserListResponse:
       type: object
-      required: [items]
+      required:
+      - items
       properties:
         items:
           type: array
           items:
             $ref: '#/components/schemas/User'
-
+          nullable: true
     FollowToggleResponse:
       type: object
-      required: [following]
+      required:
+      - following
       properties:
         following:
           type: boolean
           example: true
-
     InteractionToggleResponse:
       type: object
-      required: [active]
+      required:
+      - active
       properties:
         active:
           type: boolean
           example: true
-
     GroupMemberToggleResponse:
       type: object
-      required: [member]
+      required:
+      - member
       properties:
         member:
           type: boolean
           example: true
-
     GroupListResponse:
       type: object
-      required: [items]
+      required:
+      - items
       properties:
         items:
           type: array
           items:
             $ref: '#/components/schemas/ChatGroup'
-
     GroupAckResponse:
       type: object
-      required: [acked, last_ack_id]
+      required:
+      - acked
+      - last_ack_id
       properties:
         acked:
           type: boolean
@@ -1486,20 +1628,20 @@ components:
         last_ack_id:
           type: integer
           example: 42
-
     VideoCard:
       allOf:
-        - $ref: '#/components/schemas/Video'
-        - type: object
-          required: [liked, favorited]
-          properties:
-            liked:
-              type: boolean
-              example: false
-            favorited:
-              type: boolean
-              example: false
-
+      - $ref: '#/components/schemas/Video'
+      - type: object
+        required:
+        - liked
+        - favorited
+        properties:
+          liked:
+            type: boolean
+            example: false
+          favorited:
+            type: boolean
+            example: false
     UpdateProfileRequest:
       type: object
       properties:
@@ -1509,10 +1651,11 @@ components:
           type: string
         avatar_url:
           type: string
-
     PresenceResponse:
       type: object
-      required: [user_id, online]
+      required:
+      - user_id
+      - online
       properties:
         user_id:
           type: integer
@@ -1524,10 +1667,11 @@ components:
           type: string
           format: date-time
           nullable: true
-
     UploadSessionCreateRequest:
       type: object
-      required: [filename, size]
+      required:
+      - filename
+      - size
       properties:
         filename:
           type: string
@@ -1538,7 +1682,6 @@ components:
         sha256:
           type: string
           example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
-
     UploadSession:
       type: object
       properties:
@@ -1553,7 +1696,11 @@ components:
           example: 4194304
         status:
           type: string
-          enum: [open, completing, completed, cleaning]
+          enum:
+          - open
+          - completing
+          - completed
+          - cleaning
         uploaded_chunks:
           type: array
           items:
@@ -1561,7 +1708,6 @@ components:
         expires_at:
           type: string
           format: date-time
-
     UploadSessionCompleteResponse:
       type: object
       properties:
@@ -1571,10 +1717,11 @@ components:
           type: integer
         sha256:
           type: string
-
     VideoPublishRequest:
       type: object
-      required: [title, media_url]
+      required:
+      - title
+      - media_url
       properties:
         title:
           type: string
@@ -1588,7 +1735,6 @@ components:
         cover_url:
           type: string
           example: /media/39a674e2d31201ab3812048f321901ae.jpg
-
     VideoUpdateRequest:
       type: object
       properties:
@@ -1600,10 +1746,15 @@ components:
           type: string
         cover_url:
           type: string
-
     Video:
       type: object
-      required: [id, author_id, title, media_url, status, created_at]
+      required:
+      - id
+      - author_id
+      - title
+      - media_url
+      - status
+      - created_at
       properties:
         id:
           type: integer
@@ -1621,7 +1772,11 @@ components:
           type: string
         status:
           type: string
-          enum: [processing, published, failed, deleted]
+          enum:
+          - processing
+          - published
+          - failed
+          - deleted
         processing_error:
           type: string
         duration_ms:
@@ -1645,20 +1800,24 @@ components:
         created_at:
           type: string
           format: date-time
-
     CommentCreateRequest:
       type: object
-      required: [body]
+      required:
+      - body
       properties:
         body:
           type: string
           example: Great video!
         parent_id:
           type: integer
-
     Comment:
       type: object
-      required: [id, video_id, user_id, body, created_at]
+      required:
+      - id
+      - video_id
+      - user_id
+      - body
+      - created_at
       properties:
         id:
           type: integer
@@ -1677,7 +1836,6 @@ components:
         created_at:
           type: string
           format: date-time
-
     CommentPageResponse:
       type: object
       properties:
@@ -1689,10 +1847,11 @@ components:
           type: string
         has_more:
           type: boolean
-
     FeedResponse:
       type: object
-      required: [items, has_more]
+      required:
+      - items
+      - has_more
       properties:
         items:
           type: array
@@ -1702,10 +1861,13 @@ components:
           type: string
         has_more:
           type: boolean
-
     SearchResponse:
       type: object
-      required: [users, videos, has_more_users, has_more_videos]
+      required:
+      - users
+      - videos
+      - has_more_users
+      - has_more_videos
       properties:
         users:
           type: array
@@ -1723,17 +1885,25 @@ components:
           type: boolean
         has_more_videos:
           type: boolean
-
     Notification:
       type: object
-      required: [id, kind, text, created_at]
+      required:
+      - id
+      - kind
+      - text
+      - created_at
       properties:
         id:
           type: integer
           example: 10
         kind:
           type: string
-          enum: [follow, like, favorite, comment, message]
+          enum:
+          - follow
+          - like
+          - favorite
+          - comment
+          - message
           example: follow
         actor_id:
           type: integer
@@ -1754,7 +1924,6 @@ components:
         created_at:
           type: string
           format: date-time
-
     NotificationPageResponse:
       type: object
       properties:
@@ -1766,16 +1935,16 @@ components:
           type: integer
         has_more:
           type: boolean
-
     UnreadCountResponse:
       type: object
       properties:
         unread_count:
           type: integer
-
     MarkReadResponse:
       type: object
-      required: [read, read_count]
+      required:
+      - read
+      - read_count
       properties:
         read:
           type: boolean
@@ -1783,7 +1952,6 @@ components:
         read_count:
           type: integer
           example: 5
-
     DirectMessage:
       type: object
       properties:
@@ -1800,7 +1968,6 @@ components:
         created_at:
           type: string
           format: date-time
-
     DirectMessageHistoryResponse:
       type: object
       properties:
@@ -1812,7 +1979,6 @@ components:
           type: integer
         has_more:
           type: boolean
-
     DirectMessageUnreadResponse:
       type: object
       properties:
@@ -1824,19 +1990,19 @@ components:
           type: integer
         has_more:
           type: boolean
-
     BatchAckRequest:
       type: object
-      required: [ids]
+      required:
+      - ids
       properties:
         ids:
           type: array
           items:
             type: integer
-
     BatchAckResponse:
       type: object
-      required: [acked]
+      required:
+      - acked
       properties:
         acked:
           type: boolean
@@ -1844,7 +2010,6 @@ components:
         acked_count:
           type: integer
           example: 5
-
     ChatGroup:
       type: object
       properties:
@@ -1857,14 +2022,13 @@ components:
         created_at:
           type: string
           format: date-time
-
     GroupMemberRequest:
       type: object
-      required: [user_id]
+      required:
+      - user_id
       properties:
         user_id:
           type: integer
-
     GroupMessage:
       type: object
       properties:
@@ -1881,7 +2045,6 @@ components:
         created_at:
           type: string
           format: date-time
-
     GroupHistoryResponse:
       type: object
       properties:
@@ -1893,7 +2056,6 @@ components:
           type: integer
         has_more:
           type: boolean
-
     GroupUnreadResponse:
       type: object
       properties:
@@ -1901,23 +2063,28 @@ components:
           type: integer
         unread_count:
           type: integer
-
     WSClientPing:
       type: object
-      required: [type]
+      required:
+      - type
       properties:
         type:
           type: string
-          enum: [ping]
+          enum:
+          - ping
           example: ping
-
     WSClientDirectMessage:
       type: object
-      required: [type, recipient_id, client_id, body]
+      required:
+      - type
+      - recipient_id
+      - client_id
+      - body
       properties:
         type:
           type: string
-          enum: [message]
+          enum:
+          - message
           example: message
         recipient_id:
           type: integer
@@ -1928,14 +2095,18 @@ components:
         body:
           type: string
           example: Hello there!
-
     WSClientGroupMessage:
       type: object
-      required: [type, group_id, client_id, body]
+      required:
+      - type
+      - group_id
+      - client_id
+      - body
       properties:
         type:
           type: string
-          enum: [group_message]
+          enum:
+          - group_message
           example: group_message
         group_id:
           type: integer
@@ -1946,44 +2117,51 @@ components:
         body:
           type: string
           example: Hello team!
-
     WSServerReady:
       type: object
-      required: [type]
+      required:
+      - type
       properties:
         type:
           type: string
-          enum: [ready]
+          enum:
+          - ready
           example: ready
-
     WSServerPong:
       type: object
-      required: [type]
+      required:
+      - type
       properties:
         type:
           type: string
-          enum: [pong]
+          enum:
+          - pong
           example: pong
-
     WSServerError:
       type: object
-      required: [type, message]
+      required:
+      - type
+      - message
       properties:
         type:
           type: string
-          enum: [error]
+          enum:
+          - error
           example: error
         message:
           type: string
           example: invalid message
-
     WSServerDirectAck:
       type: object
-      required: [type, client_id, message_id]
+      required:
+      - type
+      - client_id
+      - message_id
       properties:
         type:
           type: string
-          enum: [ack]
+          enum:
+          - ack
           example: ack
         client_id:
           type: string
@@ -1991,14 +2169,18 @@ components:
         message_id:
           type: integer
           example: 42
-
     WSServerGroupAck:
       type: object
-      required: [type, client_id, message_id, group_id]
+      required:
+      - type
+      - client_id
+      - message_id
+      - group_id
       properties:
         type:
           type: string
-          enum: [ack]
+          enum:
+          - ack
           example: ack
         client_id:
           type: string
@@ -2009,43 +2191,61 @@ components:
         group_id:
           type: integer
           example: 1
-
     WSServerDirectMessage:
       type: object
-      required: [type, message]
+      required:
+      - type
+      - message
       properties:
         type:
           type: string
-          enum: [message]
+          enum:
+          - message
           example: message
         message:
           $ref: '#/components/schemas/DirectMessage'
-
     WSServerGroupMessage:
       type: object
-      required: [type, message]
+      required:
+      - type
+      - message
       properties:
         type:
           type: string
-          enum: [group_message]
+          enum:
+          - group_message
           example: group_message
         message:
           $ref: '#/components/schemas/GroupMessage'
-
     WSServerSyncRequired:
       type: object
-      required: [type]
+      required:
+      - type
       properties:
         type:
           type: string
-          enum: [sync_required]
+          enum:
+          - sync_required
           example: sync_required
-
     WSServerGroupSyncRequired:
       type: object
-      required: [type]
+      required:
+      - type
       properties:
         type:
           type: string
-          enum: [group_sync_required]
+          enum:
+          - group_sync_required
           example: group_sync_required
+    WSServerNotification:
+      type: object
+      required:
+      - type
+      - notification
+      properties:
+        type:
+          type: string
+          enum:
+          - notification
+        notification:
+          $ref: '#/components/schemas/Notification'

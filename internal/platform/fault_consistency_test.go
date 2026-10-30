@@ -41,6 +41,49 @@ func TestFaultScenario1_TransactionInterruptionNoHalfCommits(t *testing.T) {
 		t.Fatalf("initial counts: like=%d, comment=%d", initialVideo.LikeCount, initialVideo.CommentCount)
 	}
 
+	// Inject an actual storage error after the notification INSERT. The action/
+	// comment and denormalized video counter have already been written in the
+	// same transaction; all of them must roll back together.
+	injections := 0
+	callback := "review:fail_notification_after_insert"
+	if err := db.Callback().Create().After("gorm:create").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "notifications" && tx.Error == nil {
+			injections++
+			tx.AddError(fmt.Errorf("injected post-insert notification error"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Create().Remove(callback) })
+	for _, kind := range []string{"like", "comments"} {
+		method := http.MethodPut
+		var body any
+		if kind == "comments" {
+			method = http.MethodPost
+			body = map[string]string{"body": "must roll back"}
+		}
+		r := request(t, h, method, fmt.Sprintf("/api/videos/%d/%s", video.ID, kind), viewerToken, body)
+		if r.Code != 500 {
+			t.Fatalf("injected %s failure: %d %s", kind, r.Code, r.Body.String())
+		}
+		for _, model := range []any{&VideoAction{}, &Comment{}, &Notification{}, &OutboxEvent{}} {
+			var count int64
+			if err := db.Model(model).Count(&count).Error; err != nil || count != 0 {
+				t.Fatalf("partial %T rows=%d err=%v", model, count, err)
+			}
+		}
+		var current Video
+		if err := db.First(&current, video.ID).Error; err != nil || current.LikeCount != 0 || current.CommentCount != 0 {
+			t.Fatalf("partial counters: %+v %v", current, err)
+		}
+	}
+	if injections != 2 {
+		t.Fatalf("did not reach post-insert fault boundary: %d", injections)
+	}
+	if err := db.Callback().Create().Remove(callback); err != nil {
+		t.Fatal(err)
+	}
+
 	// 3. Like transaction rollback simulation:
 	// If a video is deleted or concurrent rollback happens before commit,
 	// no half-committed rows must remain.
@@ -266,10 +309,10 @@ func TestFaultScenario2_DuplicateRequestsAndIdempotency(t *testing.T) {
 	_ = s
 }
 
-// TestFaultScenario3_SingleComponentOutageAndGracefulFallback verifies that:
+// TestComponentSQLFallbackAndLocalOutbox verifies that:
 // 1. Redis outage does not block Feed or chat history; Feed falls back to SQL without 500s.
 // 2. Outbox events committed before broker outage persist and are safely claimable upon recovery.
-func TestFaultScenario3_SingleComponentOutageAndGracefulFallback(t *testing.T) {
+func TestComponentSQLFallbackAndLocalOutbox(t *testing.T) {
 	s, h, db := testServer(t)
 	authorID, _ := registerTestUser(t, h, "fallback_author")
 	viewerID, viewerToken := registerTestUser(t, h, "fallback_viewer")
@@ -350,10 +393,10 @@ func TestFaultScenario3_SingleComponentOutageAndGracefulFallback(t *testing.T) {
 	_ = viewerID
 }
 
-// TestFaultScenario4_ProcessRestartAndLeaseRecovery verifies that when a leased worker
+// TestComponentLeaseGenerationGuard verifies that when a leased worker
 // crashes or holds an unexpired lease that subsequently expires, another worker
 // safely claims the expired lease without duplicating actions, and old expired workers are fenced.
-func TestFaultScenario4_ProcessRestartAndLeaseRecovery(t *testing.T) {
+func TestComponentLeaseGenerationGuard(t *testing.T) {
 	s, _, db := testServer(t)
 
 	authorID, _ := registerTestUser(t, s.Router(), "lease_author")
@@ -388,7 +431,7 @@ func TestFaultScenario4_ProcessRestartAndLeaseRecovery(t *testing.T) {
 	// but the lease has now expired (available_at <= now) with attempts=1
 	if err := db.Model(&ev).Updates(map[string]any{
 		"available_at": now.Add(-5 * time.Second),
-		"attempts":    1,
+		"attempts":     1,
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -424,10 +467,10 @@ func TestFaultScenario4_ProcessRestartAndLeaseRecovery(t *testing.T) {
 	}
 }
 
-// TestFaultScenario5_DualInstanceCollaborationAndStateReconciliation verifies that
+// TestSharedStoreUploadAcrossRouters verifies that
 // two independent server instances can coordinate on the same upload session and
 // serve users across instances without data loss.
-func TestFaultScenario5_DualInstanceCollaborationAndStateReconciliation(t *testing.T) {
+func TestSharedStoreUploadAcrossRouters(t *testing.T) {
 	tempDir := t.TempDir()
 	dbPath := filepath.Join(tempDir, "dual.db")
 	dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1"
@@ -520,11 +563,11 @@ func TestFaultScenario5_DualInstanceCollaborationAndStateReconciliation(t *testi
 	_ = authorID
 }
 
-// TestFaultScenario6_PermissionSwitchingDynamicEnforcement verifies that:
+// TestComponentPermissionSwitchingVisibility verifies that:
 // 1. Unfollowing immediately strips the followee's videos from following feed.
 // 2. Removing a group member immediately blocks them from reading history and sending messages (404 / 403 privacy boundary).
 // 3. Deleting a video immediately strips it from Feed and Search, returning 404 on direct access.
-func TestFaultScenario6_PermissionSwitchingDynamicEnforcement(t *testing.T) {
+func TestComponentPermissionSwitchingVisibility(t *testing.T) {
 	_, h, db := testServer(t)
 	creatorID, creatorToken := registerTestUser(t, h, "perm_creator")
 	viewerID, viewerToken := registerTestUser(t, h, "perm_viewer")

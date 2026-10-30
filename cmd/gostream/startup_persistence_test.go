@@ -520,7 +520,7 @@ func TestPrometheusMetricsExpositionFormat(t *testing.T) {
 	_ = testJSONRequest(t, h, http.MethodGet, "/ready", "", nil)
 	_ = testJSONRequest(t, h, http.MethodGet, "/api/feed", "", nil)
 	_ = testJSONRequest(t, h, http.MethodPost, "/api/sessions", "", map[string]string{"username": "test", "password": "wrongpassword"}) // triggers rate limiter counter
-	_ = testJSONRequest(t, h, http.MethodGet, "/nonexistent", "", nil) // 404
+	_ = testJSONRequest(t, h, http.MethodGet, "/nonexistent", "", nil)                                                                  // 404
 
 	rec := testJSONRequest(t, h, http.MethodGet, "/metrics", "", nil)
 	if rec.Code != http.StatusOK {

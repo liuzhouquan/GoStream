@@ -25,12 +25,12 @@ type openAPISpec struct {
 }
 
 type openAPISchema struct {
-	Type       string                    `yaml:"type"`
-	Required   []string                  `yaml:"required"`
+	Type       string                     `yaml:"type"`
+	Required   []string                   `yaml:"required"`
 	Properties map[string]openAPIProperty `yaml:"properties"`
-	AllOf      []openAPISchema           `yaml:"allOf"`
-	Items      *openAPISchema            `yaml:"items"`
-	Ref        string                    `yaml:"$ref"`
+	AllOf      []openAPISchema            `yaml:"allOf"`
+	Items      *openAPISchema             `yaml:"items"`
+	Ref        string                     `yaml:"$ref"`
 }
 
 type openAPIProperty struct {
@@ -252,7 +252,8 @@ func TestOpenAPISchemaModelParity(t *testing.T) {
 // TestOpenAPILiveEndpointResponseFidelity executes real HTTP handlers and confirms the returned
 // JSON schema structure matches the OpenAPI 3.0 specification contract.
 func TestOpenAPILiveEndpointResponseFidelity(t *testing.T) {
-	_, h, db := testServer(t)
+	_, router, db := testServer(t)
+	h := responseContract(t, validatedOpenAPI(t), router)
 
 	// 1. /health
 	res := request(t, h, http.MethodGet, "/health", "", nil)

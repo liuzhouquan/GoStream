@@ -76,21 +76,16 @@ The real Go matrix checks:
 - Invalid envelopes reaching a persistent quorum DLQ.
 - A transient SQL failure recovering after delayed retry; persistent SQL failure exhausting its delivery limit and recovering through confirmed DLQ replay.
 - Broker stop/start while a committed SQL event remains pending, followed by reconnection and delivery.
-- Publisher confirm window disconnect and retry: unconfirmed outbox rows are preserved across connection drop, retried with stable event IDs, and idempotently deduplicated.
-- Dead-letter queue target outage and recovery: dead lettering handles unavailable DLQ targets, recovering routing once the DLQ topology is restored.
-- Sustained backlog drain of 50 events while worker is offline, verifying exact MySQL delivery rows and deduplication on redelivery.
 
-Direct Go invocation needs `GOSTREAM_TEST_RABBITMQ_URL` and `GOSTREAM_TEST_RABBITMQ_MYSQL_DSN` pointing to a dedicated migrated schema with an empty outbox. `GOSTREAM_TEST_RABBITMQ_CONTAINER` optionally names a **disposable** container the test is allowed to stop/start; without it, the restart subcase skips. The script supplies all three. Ordinary Go suites skip this matrix when external configuration is absent. Fast SQLite unit tests separately cover strict envelopes, conflicting duplicates, rollback, cancellation, unavailable broker errors, sustained backlog drain (50 events), publisher confirm failure & recovery, consumer commit-before-ACK crash & redelivery, and targeted SQL/DLQ replay.
+Direct Go invocation needs `GOSTREAM_TEST_RABBITMQ_URL` and `GOSTREAM_TEST_RABBITMQ_MYSQL_DSN` pointing to a dedicated migrated schema with an empty outbox. `GOSTREAM_TEST_RABBITMQ_CONTAINER` optionally names a **disposable** container the test is allowed to stop/start; without it, the restart subcase skips. The script supplies all three. Ordinary Go suites skip this matrix when external configuration is absent. SQLite unit tests separately cover strict envelopes, conflicting duplicates, rollback, cancellation, unavailable broker errors and targeted SQL replay.
 
-The smoke script exercises:
-1. Automatic source and delivery completion for real HTTP API actions.
-2. Precise publisher confirm window SIGKILL fault injection: pauses the disposable broker to block confirms, asserts worker is actively in confirm wait (`attempts >= 1, published_at IS NULL`), sends SIGKILL and verifies exit status `-signal.SIGKILL`, unpauses broker, restarts API, and verifies event recovery.
-3. Sustained backlog drain of 50 offline events across multiple accounts, verifying all 52 source and delivery events complete in MySQL, zero dead letters occur, and broker queue depth returns to 0 via the RabbitMQ Management HTTP API.
-4. Shipped operator CLI (`gostream-events`) for targeted outbox replay and dead-letter replay.
+The final local matrix passed all seven subcases in 48.12 seconds; API lifecycle and operator checks passed and cleanup reported zero remaining schemas/users. These are correctness timings, not a throughput benchmark. The first fixture failed because it asserted a deliberately hidden notification field; another attempt exposed Docker's randomly allocated host port changing on restart. The fixture now checks public notification fields and explicitly binds ports, retaining its state and recovery assertions.
 
 ## Remaining acceptance work
 
-Multi-node broker cluster quorum availability and the final combined MySQL/Redis/RabbitMQ/MinIO browser workflow remain unverified. No MQ throughput or exactly-once real-time delivery claim is made. Broker transport currently handles notifications; IM history/ACK and group hints retain SQL/Redis.
+The smoke script additionally kills a real API after a committed follow request, restarts it and checks delivery, then drains five source events inserted while the API is stopped. This demonstrates general process restart and a small finite backlog. The kill is not gated on publisher-confirm/consumer-commit/ACK state; it may happen after delivery has completed. Sequential duplicate unit tests do not represent concurrent sustained load.
+
+Actual producer/consumer kills at exact commit/confirm/ACK windows, unavailable/full DLQ targets, sustained backlog, multi-node quorum availability and the final combined MySQL/Redis/RabbitMQ/MinIO browser workflow remain unverified. No MQ throughput or exactly-once real-time delivery claim is made. Broker transport currently handles notifications; IM history/ACK and group hints retain SQL/Redis.
 
 ## Primary references
 
@@ -98,3 +93,10 @@ Multi-node broker cluster quorum availability and the final combined MySQL/Redis
 - [Consumer acknowledgements and confirms](https://www.rabbitmq.com/docs/confirms)
 - [Quorum retry, delivery limits and at-least-once dead lettering](https://www.rabbitmq.com/docs/quorum-queues)
 - [Pinned client release](https://github.com/rabbitmq/amqp091-go/releases/tag/v1.15.0)
+
+
+## 2026-10-30 fault-test revision
+
+New coverage pauses the isolated broker, observes a claimed/unpublished SQL event, kills/restarts the API and drains 50 finite events. The SQL claim is not proof of entry into a publisher-confirm wait. A separate test repeats a successful broker publication before SQL source completion, without claiming a real disconnect. The DLQ test now observes the production consumer reject the original poison while the target is unbound, restores the binding and checks that same ID before a second poison. It also fixes an erroneous `*gorm.DB != nil` check that previously made backlog polling always fail. Exact post-confirm/pre-SQL and consumer-commit/pre-ACK process-kill windows, sustained traffic and full DLQ remain outstanding.
+
+Quorum at-least-once dead lettering is configured to retain messages until target confirmation; test scope follows the [RabbitMQ quorum queue documentation](https://www.rabbitmq.com/docs/quorum-queues#dead-lettering). Results require the actual broker CI, not SQLite unit tests.

@@ -366,38 +366,49 @@ func TestConcurrentMultiUserMultiVideoInteractionsAndCounters(t *testing.T) {
 	var totalViews atomic.Int64
 	var wg sync.WaitGroup
 	const operationsPerUser = 25
-
-	for uIdx := 0; uIdx < userCount; uIdx++ {
+	var successes atomic.Int64
+	for u := range users {
 		wg.Add(1)
 		go func(u int) {
 			defer wg.Done()
-			token := tokens[u]
 			for op := 0; op < operationsPerUser; op++ {
-				targetVideo := videos[(u+op)%videoCount]
+				id := videos[(u+op)%videoCount].ID
+				method, path, want := http.MethodPut, fmt.Sprintf("/api/videos/%d/like", id), http.StatusOK
+				var body any
 				switch op % 6 {
-				case 0: // Like
-					request(t, h, http.MethodPut, fmt.Sprintf("/api/videos/%d/like", targetVideo.ID), token, nil)
-				case 1: // Unlike
-					request(t, h, http.MethodDelete, fmt.Sprintf("/api/videos/%d/like", targetVideo.ID), token, nil)
-				case 2: // Favorite
-					request(t, h, http.MethodPut, fmt.Sprintf("/api/videos/%d/favorite", targetVideo.ID), token, nil)
-				case 3: // Unfavorite
-					request(t, h, http.MethodDelete, fmt.Sprintf("/api/videos/%d/favorite", targetVideo.ID), token, nil)
-				case 4: // Record view
-					res := request(t, h, http.MethodPost, fmt.Sprintf("/api/videos/%d/view", targetVideo.ID), "", nil)
-					if res.Code == http.StatusNoContent {
-						totalViews.Add(1)
-					}
-				case 5: // Comment
-					request(t, h, http.MethodPost, fmt.Sprintf("/api/videos/%d/comments", targetVideo.ID), token, map[string]string{
-						"body": fmt.Sprintf("concurrent comment from u%d op%d", u, op),
-					})
+				case 1:
+					method = http.MethodDelete
+				case 2:
+					path = fmt.Sprintf("/api/videos/%d/favorite", id)
+				case 3:
+					method = http.MethodDelete
+					path = fmt.Sprintf("/api/videos/%d/favorite", id)
+				case 4:
+					method = http.MethodPost
+					path = fmt.Sprintf("/api/videos/%d/views", id)
+					want = http.StatusNoContent
+				case 5:
+					method = http.MethodPost
+					path = fmt.Sprintf("/api/videos/%d/comments", id)
+					want = http.StatusCreated
+					body = map[string]string{"body": fmt.Sprintf("u%d op%d", u, op)}
+				}
+				res := request(t, h, method, path, tokens[u], body)
+				if res.Code != want {
+					t.Errorf("u%d op%d %s %s: status=%d want=%d %s", u, op, method, path, res.Code, want, res.Body.String())
+					continue
+				}
+				successes.Add(1)
+				if op%6 == 4 {
+					totalViews.Add(1)
 				}
 			}
-		}(uIdx)
+		}(u)
 	}
-
 	wg.Wait()
+	if successes.Load() != userCount*operationsPerUser || totalViews.Load() != userCount*4 {
+		t.Fatalf("successful operations=%d views=%d", successes.Load(), totalViews.Load())
+	}
 
 	// Verify invariant across all videos
 	var sumViews int64

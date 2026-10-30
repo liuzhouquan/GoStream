@@ -402,7 +402,7 @@ func TestRabbitMQNotificationIntegration(t *testing.T) {
 		publish(t)
 		awaitRabbit(t, "consumer automatically recovered", 15*time.Second, func() bool { return jobCount(t, source) == 1 })
 	})
-	t.Run("publisher_confirm_window_disconnect_and_retry", func(t *testing.T) {
+	t.Run("confirmed_publish_before_sql_completion_retry", func(t *testing.T) {
 		source := fixture(t)
 		// Simulate publish reaching broker but publisher dropping connection before SQL confirmation
 		if err := a.broker.publish(context.Background(), source); err != nil {
@@ -429,37 +429,45 @@ func TestRabbitMQNotificationIntegration(t *testing.T) {
 		defer stop()
 		session := open(t)
 		defer session.close()
-
-		// Simulate DLQ target outage: unbind queue.dead from queue.dlx
+		// The previous confirmed-publish test leaves a connected publisher.
+		// Opening it here would redeclare/rebind the target, defeating the outage.
+		if a.broker.pub == nil || a.broker.pub.conn.IsClosed() {
+			t.Fatal("publisher must be warm before removing DLQ binding")
+		}
 		if err := session.ch.QueueUnbind(queue+".dead", notificationCreatedTopic, queue+".dlx", nil); err != nil {
 			t.Fatal(err)
 		}
-
-		// Poison message while DLQ target is unreachable
+		before := testutil.ToFloat64(b.metrics.brokerMessages.WithLabelValues("dead"))
 		if err := a.broker.publishBody(context.Background(), []byte("{corrupt-pre-recovery"), "dlq-outage-test-1"); err != nil {
 			t.Fatal(err)
 		}
-
-		// Restore DLQ target binding
+		awaitRabbit(t, "consumer rejected poison while target unbound", 10*time.Second, func() bool { return testutil.ToFloat64(b.metrics.brokerMessages.WithLabelValues("dead")) >= before+1 })
+		q, err := session.ch.QueueInspect(queue + ".dead")
+		if err != nil || q.Messages != 0 {
+			t.Fatalf("unbound target received message: %+v %v", q, err)
+		}
 		if err := session.ch.QueueBind(queue+".dead", notificationCreatedTopic, queue+".dlx", false, nil); err != nil {
 			t.Fatal(err)
 		}
-
-		// Poison message after DLQ target is restored
+		dead := rabbitGet(t, session, queue+".dead", 45*time.Second)
+		if dead.MessageId != "dlq-outage-test-1" || dead.Headers["x-first-death-reason"] != "rejected" || dead.DeliveryMode != amqp.Persistent {
+			t.Fatalf("lost or changed original poison: id=%q headers=%v", dead.MessageId, dead.Headers)
+		}
+		if err := dead.Ack(false); err != nil {
+			t.Fatal(err)
+		}
 		if err := a.broker.publishBody(context.Background(), []byte("{corrupt-post-recovery"), "dlq-outage-test-2"); err != nil {
 			t.Fatal(err)
 		}
-
-		// Verify DLQ queue receives the poison message
-		dead := rabbitGet(t, session, queue+".dead", 10*time.Second)
-		if dead.MessageId != "dlq-outage-test-2" || dead.Headers["x-first-death-reason"] != "rejected" || dead.DeliveryMode != amqp.Persistent {
-			t.Fatalf("dead letter headers: %v mode=%d id=%q", dead.Headers, dead.DeliveryMode, dead.MessageId)
+		dead = rabbitGet(t, session, queue+".dead", 10*time.Second)
+		if dead.MessageId != "dlq-outage-test-2" {
+			t.Fatalf("post-recovery poison id=%q", dead.MessageId)
 		}
 		if err := dead.Ack(false); err != nil {
 			t.Fatal(err)
 		}
 	})
-	t.Run("sustained_backlog_drain_50_events", func(t *testing.T) {
+	t.Run("finite_backlog_drain_50_events", func(t *testing.T) {
 		const backlogCount = 50
 		sources := make([]OutboxEvent, backlogCount)
 		for i := 0; i < backlogCount; i++ {
@@ -484,7 +492,7 @@ func TestRabbitMQNotificationIntegration(t *testing.T) {
 
 		awaitRabbit(t, "50 sustained backlog delivery jobs in MySQL", 30*time.Second, func() bool {
 			var count int64
-			if err := dbs[0].Model(&OutboxEvent{}).Where("topic = ?", notificationDeliverTopic).Count(&count); err != nil {
+			if err := dbs[0].Model(&OutboxEvent{}).Where("topic = ?", notificationDeliverTopic).Count(&count).Error; err != nil {
 				return false
 			}
 			return count >= countBefore+backlogCount

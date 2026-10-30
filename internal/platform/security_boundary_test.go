@@ -271,14 +271,16 @@ func TestVideoAndResourceOwnershipIsolation(t *testing.T) {
 
 	// 1. Stranger cannot edit Author's video
 	editBody := map[string]any{"title": "Hacked Title"}
-	res := request(t, h, http.MethodPut, fmt.Sprintf("/api/videos/%d", pubVideo.ID), strangerToken, editBody)
+	res := request(t, h, http.MethodPatch, fmt.Sprintf("/api/videos/%d", pubVideo.ID), strangerToken, editBody)
 	if res.Code != http.StatusNotFound && res.Code != http.StatusForbidden {
 		t.Fatalf("stranger edit video: expected 404/403, got %d", res.Code)
 	}
 
 	// Verify title did not change
 	var persisted Video
-	db.First(&persisted, pubVideo.ID)
+	if err := db.First(&persisted, pubVideo.ID).Error; err != nil {
+		t.Fatalf("owned row missing after rejected request: %v", err)
+	}
 	if persisted.Title != "Author Published" {
 		t.Fatalf("video title was maliciously altered: %s", persisted.Title)
 	}
@@ -288,7 +290,9 @@ func TestVideoAndResourceOwnershipIsolation(t *testing.T) {
 	if res.Code != http.StatusNotFound && res.Code != http.StatusForbidden {
 		t.Fatalf("stranger delete video: expected 404/403, got %d", res.Code)
 	}
-	db.First(&persisted, pubVideo.ID)
+	if err := db.First(&persisted, pubVideo.ID).Error; err != nil {
+		t.Fatalf("owned row missing after rejected request: %v", err)
+	}
 	if persisted.Status == "deleted" {
 		t.Fatalf("video was maliciously deleted by stranger")
 	}
@@ -364,10 +368,37 @@ func TestChatAndGroupSecurityBoundaries(t *testing.T) {
 		t.Fatalf("stranger read group messages: expected 404/403, got %d", res.Code)
 	}
 
-	// 2. Stranger (non-member) cannot send group messages
-	res = request(t, h, http.MethodPost, fmt.Sprintf("/api/groups/%d/messages", group.ID), strangerToken, map[string]string{"content": "spam"})
-	if res.Code != http.StatusNotFound && res.Code != http.StatusForbidden {
-		t.Fatalf("stranger send group messages: expected 404/403, got %d", res.Code)
+	// Exercise the real WebSocket send protocol, with an authorized control.
+	web := httptest.NewServer(h)
+	t.Cleanup(web.Close)
+	outsider := connectDeviceSocket(t, web.URL, strangerToken, "")
+	if err := outsider.WriteJSON(socketEvent{Type: "group_message", GroupID: group.ID, ClientID: "stranger-attempt", Body: "spam"}); err != nil {
+		t.Fatal(err)
+	}
+	var denied struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	}
+	if err := outsider.ReadJSON(&denied); err != nil || denied.Type != "error" || denied.Message != "group not found" {
+		t.Fatalf("outsider send: %+v %v", denied, err)
+	}
+	var count int64
+	if err := db.Model(&GroupMessage{}).Where("client_id = ?", "stranger-attempt").Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("unauthorized message rows=%d err=%v", count, err)
+	}
+	member := connectDeviceSocket(t, web.URL, memberToken, "")
+	if err := member.WriteJSON(socketEvent{Type: "group_message", GroupID: group.ID, ClientID: "member-control", Body: "allowed"}); err != nil {
+		t.Fatal(err)
+	}
+	var ack struct {
+		Type string `json:"type"`
+		ID   uint   `json:"message_id"`
+	}
+	if err := member.ReadJSON(&ack); err != nil || ack.Type != "ack" || ack.ID == 0 {
+		t.Fatalf("member control: %+v %v", ack, err)
+	}
+	if err := db.Model(&GroupMessage{}).Where("id = ? AND sender_id = ?", ack.ID, memberID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("authorized message rows=%d err=%v", count, err)
 	}
 
 	// 3. Ordinary member cannot invite others (only owner can)
@@ -553,13 +584,13 @@ func TestAccountValidationBoundaries(t *testing.T) {
 
 	// 1. Username length and character validation
 	invalidUsernames := []string{
-		"ab",                                           // too short (<3)
+		"ab", // too short (<3)
 		"a_very_long_username_exceeding_32_characters", // too long (>32)
-		"user name",                                    // space
-		"user@domain",                                  // @ symbol
-		"user.name",                                    // dot
-		"user$name",                                    // symbol
-		"-invalid-",                                    // hyphen
+		"user name",   // space
+		"user@domain", // @ symbol
+		"user.name",   // dot
+		"user$name",   // symbol
+		"-invalid-",   // hyphen
 	}
 	for i, un := range invalidUsernames {
 		body := map[string]string{
@@ -679,7 +710,7 @@ func TestMySQLSecurityAndOwnershipBoundaries(t *testing.T) {
 	}
 
 	// User 2 cannot edit User 1's video
-	res := request(t, h, http.MethodPut, fmt.Sprintf("/api/videos/%d", v.ID), user2Token, map[string]any{"title": "Hacked"})
+	res := request(t, h, http.MethodPatch, fmt.Sprintf("/api/videos/%d", v.ID), user2Token, map[string]any{"title": "Hacked"})
 	if res.Code != http.StatusNotFound && res.Code != http.StatusForbidden {
 		t.Fatalf("MySQL user 2 edit user 1 video returned %d", res.Code)
 	}

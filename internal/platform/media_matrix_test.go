@@ -22,8 +22,8 @@ import (
 
 // sampleWebM and sampleMOV are minimal valid EBML/WebM and QuickTime/MOV container
 // headers used to test HTTP multipart format detection, magic bytes, extension matching,
-// and upload acceptance at the ingress boundary. Full frame decoding, transcoding, and
-// thumbnail extraction are exercised in the asynchronous FFmpeg worker suite.
+// and upload acceptance at the ingress boundary. These fragments are not playable.
+// Codec-specific frame decoding/transcoding/thumbnail acceptance remains separate.
 var (
 	sampleWebM = []byte{0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0xf7, 0x81, 0x01, 0x42, 0xf2, 0x81, 0x04, 0x42, 0x82, 0x84, 'w', 'e', 'b', 'm'}
 	sampleMOV  = []byte{0, 0, 0, 20, 'f', 't', 'y', 'p', 'q', 't', ' ', ' ', 0, 0, 0, 0, 'q', 't', ' ', ' '}

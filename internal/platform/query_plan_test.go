@@ -86,11 +86,11 @@ func TestQueryPlansSQLite(t *testing.T) {
 			CreatedAt:   now.Add(time.Duration(i) * time.Minute),
 		})
 		_ = db.Create(&Video{
-			AuthorID:    user.ID,
-			Title:       fmt.Sprintf("Video %d", i),
-			MediaURL:    fmt.Sprintf("/media/v%d.mp4", i),
-			Status:      "published",
-			CreatedAt:   now.Add(time.Duration(i) * time.Minute),
+			AuthorID:  user.ID,
+			Title:     fmt.Sprintf("Video %d", i),
+			MediaURL:  fmt.Sprintf("/media/v%d.mp4", i),
+			Status:    "published",
+			CreatedAt: now.Add(time.Duration(i) * time.Minute),
 		})
 		_ = db.Create(&VideoAction{
 			UserID:    user.ID,
@@ -250,18 +250,64 @@ func TestMySQLQueryPlans(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	now := time.Now().UTC()
-	user := User{Username: fmt.Sprintf("qp_my_%d", now.UnixNano()), Nickname: "QP User", PasswordHash: "unused"}
-	if err := db.Create(&user).Error; err != nil {
+	sqlDB, err := db.DB()
+	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = db.Where("user_id = ?", user.ID).Delete(&Notification{}).Error
-		_ = db.Where("sender_id = ?", user.ID).Delete(&ChatMessage{}).Error
-		_ = db.Where("user_id = ?", user.ID).Delete(&VideoAction{}).Error
-		_ = db.Where("user_id = ?", user.ID).Delete(&FeedInbox{}).Error
-		_ = db.Delete(&user).Error
+		if err := sqlDB.Close(); err != nil {
+			t.Error(err)
+		}
 	})
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	defer tx.Rollback()
+	db = tx
+	now := time.Now().UTC()
+	user := User{Username: fmt.Sprintf("qp_my_%d", now.UnixNano()), Nickname: "QP User", PasswordHash: "unused"}
+	peer := User{Username: fmt.Sprintf("qp_peer_%d", now.UnixNano()), Nickname: "Peer", PasswordHash: "unused"}
+	for _, u := range []*User{&user, &peer} {
+		if err := db.Create(u).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	const count = 500
+	videos := make([]Video, count)
+	for i := range videos {
+		author := user.ID
+		if i%2 == 1 {
+			author = peer.ID
+		}
+		videos[i] = Video{AuthorID: author, Title: "Plan fixture", MediaURL: "/media/plan.mp4", Status: "published", CreatedAt: now.Add(-time.Duration(i+1) * time.Second)}
+	}
+	if err := db.CreateInBatches(&videos, 100).Error; err != nil {
+		t.Fatal(err)
+	}
+	notices := make([]Notification, count)
+	messages := make([]ChatMessage, count)
+	actions := make([]VideoAction, count)
+	comments := make([]Comment, count)
+	inboxes := make([]FeedInbox, count)
+	for i := range count {
+		viewer, sender := user.ID, peer.ID
+		if i%2 == 1 {
+			viewer, sender = peer.ID, user.ID
+		}
+		stamp := now.Add(-time.Duration(i+1) * time.Second)
+		notices[i] = Notification{UserID: viewer, ActorID: sender, Kind: "follow", EventKey: fmt.Sprintf("qp_%d", i), CreatedAt: stamp}
+		messages[i] = ChatMessage{SenderID: sender, RecipientID: viewer, ClientID: fmt.Sprintf("qp_%d", i), Body: "plan fixture", CreatedAt: stamp}
+		actions[i] = VideoAction{UserID: viewer, VideoID: videos[i].ID, Kind: "like", CreatedAt: stamp}
+		comments[i] = Comment{UserID: viewer, VideoID: videos[i%2].ID, Body: "plan fixture", CreatedAt: stamp}
+		inboxes[i] = FeedInbox{UserID: viewer, VideoID: videos[i].ID, CreatedAt: stamp}
+	}
+	for _, rows := range []any{&notices, &messages, &actions, &comments, &inboxes} {
+		if err := db.CreateInBatches(rows, 100).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Log("EXPLAIN fixture: two users, 500 rows per business table; rollback after test; simplified probes, not production workload")
 
 	queries := []struct {
 		name      string
@@ -273,7 +319,7 @@ func TestMySQLQueryPlans(t *testing.T) {
 		{
 			name:      "notification_keyset_page",
 			query:     "SELECT * FROM notifications WHERE user_id = ? AND id < ? ORDER BY id DESC LIMIT 31",
-			args:      []any{user.ID, 100},
+			args:      []any{user.ID, notices[len(notices)-1].ID + 1},
 			wantIndex: "idx_notification_user_id",
 		},
 		{
@@ -285,7 +331,7 @@ func TestMySQLQueryPlans(t *testing.T) {
 		{
 			name:      "direct_message_history_page",
 			query:     "SELECT * FROM chat_messages WHERE sender_id = ? AND recipient_id = ? AND id < ? ORDER BY id DESC LIMIT 31",
-			args:      []any{user.ID, 999999, 100},
+			args:      []any{user.ID, peer.ID, messages[len(messages)-1].ID + 1},
 			wantIndex: "idx_message_thread_id",
 		},
 		{
@@ -315,7 +361,7 @@ func TestMySQLQueryPlans(t *testing.T) {
 		{
 			name:      "comment_thread_roots",
 			query:     "SELECT * FROM comments WHERE video_id = ? AND parent_id IS NULL AND created_at < ? ORDER BY created_at DESC, id DESC LIMIT 31",
-			args:      []any{1, now},
+			args:      []any{videos[0].ID, now},
 			wantIndex: "idx_comment_thread",
 		},
 		{
@@ -327,7 +373,7 @@ func TestMySQLQueryPlans(t *testing.T) {
 		{
 			name:      "user_search_keyset",
 			query:     "SELECT * FROM users WHERE (username LIKE ? ESCAPE '!' OR nickname LIKE ? ESCAPE '!') AND id < ? ORDER BY id DESC LIMIT 21",
-			args:      []any{"%test%", "%test%", 100},
+			args:      []any{"%QP%", "%QP%", peer.ID + 1},
 			wantIndex: "PRIMARY",
 		},
 	}

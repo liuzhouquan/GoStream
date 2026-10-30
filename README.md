@@ -4,7 +4,7 @@ GoStream is a runnable Go short-video social platform with a static web client, 
 
 ## Status
 
-This repository is under active staged development. See [delivery scope](docs/DELIVERY_SCOPE.md), [test and acceptance standards](docs/TEST_STANDARD.md), and [PROGRESS.md](PROGRESS.md) for the target release, evidence requirements, and current status. Do not treat planned modules as implemented features. For development order, document ownership and verification commands, start with the [development guide](docs/DEVELOPMENT.md).
+This repository is under active staged development. See [delivery scope](docs/DELIVERY_SCOPE.md), [test and acceptance standards](docs/TEST_STANDARD.md), and [PROGRESS.md](PROGRESS.md) for the target release, evidence requirements, and current status. Do not treat planned modules as implemented features. The [OpenAPI document](docs/openapi.yaml) has structure and representative runtime-schema checks; complete acceptance remains tracked in the matrix. For development order, document ownership and verification commands, start with the [development guide](docs/DEVELOPMENT.md).
 
 ## Local requirements
 
@@ -82,3 +82,5 @@ The optional MinIO deployment builds the MinIO server from its pinned upstream s
 Image validation uses `golang.org/x/image` under BSD-3-Clause. Its [license notice](third_party_licenses/golang.org-x-image-LICENSE) is also copied into the API image.
 
 RabbitMQ delivery uses the RabbitMQ-maintained Go client under BSD-2-Clause; its [license notice](third_party_licenses/rabbitmq-amqp091-go-LICENSE) is included in the API image.
+
+OpenAPI test validation uses [kin-openapi](https://github.com/getkin/kin-openapi), under MIT; its [notice](third_party_licenses/kin-openapi-LICENSE) is retained. This validation dependency is used by tests.

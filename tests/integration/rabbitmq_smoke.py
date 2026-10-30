@@ -73,6 +73,7 @@ def main():
         with urllib.request.urlopen(url, timeout=1) as response:
             return response.status == 200
 
+    paused = False
     try:
         mysql(f"CREATE DATABASE `{schema}`;")
         created_db = True
@@ -122,15 +123,16 @@ def main():
                 f"SELECT COUNT(*) FROM `{schema}`.outbox_events o JOIN `{schema}`.notifications n "
                 f"ON o.event_key=CONCAT('broker-delivery:notification:',n.id) WHERE n.user_id={owner['user']['id']} AND o.published_at IS NOT NULL;") == "1")
 
-            # Scenario 2: Precise publisher confirm window SIGKILL fault injection and worker recovery
+            # Scenario 2: Claimed source SIGKILL while broker traffic is paused and worker recovery
             # Pause broker container to block AMQP confirm traffic, forcing worker into publisher confirm wait
             run(["docker", "pause", container], capture_output=True)
+            paused = True
             actor2 = call("/api/users", {"username": "process_actor2", "nickname": "Actor2", "password": "fixture-password-123"})
             call(f"/api/users/me/following/{owner['user']['id']}", None, actor2["access_token"], "PUT")
-            wait("worker claimed row and entered publisher confirm wait", lambda: mysql(
+            wait("worker claimed row during broker pause", lambda: mysql(
                 f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE topic='notification.created' AND published_at IS NULL AND attempts >= 1;") == "1")
 
-            # Forcibly kill API process with SIGKILL precisely while blocked waiting for publisher confirm
+            # Forcibly kill API process with SIGKILL after SQL claim during a broker pause (not an observed confirm boundary)
             api.send_signal(signal.SIGKILL)
             if api.wait(timeout=10) != -signal.SIGKILL:
                 raise RuntimeError("API did not exit via SIGKILL")
@@ -142,15 +144,16 @@ def main():
 
             # Unpause broker and reset lease available_at for immediate restart pickup
             run(["docker", "unpause", container], capture_output=True)
+            paused = False
             mysql(f"UPDATE `{schema}`.outbox_events SET available_at=UTC_TIMESTAMP(3) WHERE published_at IS NULL;")
 
             api = subprocess.Popen([str(work / "gostream")], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
             wait("restarted API readiness", lambda: reachable(base + "/ready"))
-            wait("recovery of event after SIGKILL in confirm window", lambda: mysql(
+            wait("recovery of claimed source after SIGKILL", lambda: mysql(
                 f"SELECT COUNT(*) FROM `{schema}`.outbox_events o JOIN `{schema}`.notifications n "
                 f"ON o.event_key=CONCAT('broker-delivery:notification:',n.id) WHERE n.user_id={owner['user']['id']} AND o.published_at IS NOT NULL;") == "2")
 
-            # Scenario 3: Sustained backlog drain of 50 events while worker is offline
+            # Scenario 3: Finite backlog drain of 50 events while worker is offline
             actor3 = call("/api/users", {"username": "process_actor3", "nickname": "Actor3", "password": "fixture-password-123"})
             api.send_signal(signal.SIGTERM)
             if api.wait(timeout=10) != 0:
@@ -168,7 +171,7 @@ def main():
             api = subprocess.Popen([str(work / "gostream")], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
             wait("API readiness for backlog drain", lambda: reachable(base + "/ready"))
             expected_deliveries = 2 + const_backlog
-            wait(f"drain sustained backlog of {const_backlog} events", lambda: mysql(
+            wait(f"drain finite backlog of {const_backlog} events", lambda: mysql(
                 f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE topic='notification.deliver' AND published_at IS NOT NULL;") == str(expected_deliveries), seconds=60)
 
             # Assert all source events marked published and zero dead letters
@@ -204,6 +207,8 @@ def main():
         print(json.dumps({"rabbitmq": "4.3.7", "mysql": "8.4", "real_broker_matrix": True,
                           "api_worker_lifecycle": True, "operator_cli": True}), flush=True)
     finally:
+        if paused:
+            subprocess.run(["docker", "unpause", container], capture_output=True)
         if api is not None:
             api.terminate()
             try:
