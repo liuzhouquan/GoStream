@@ -219,11 +219,23 @@ func TestIMProcessRecovery(t *testing.T) {
 	})
 	check("recipient_sigkill_reconnect_and_sender_ack_retry", func(t *testing.T) {
 		b.stop(t, true)
+		// Process b was SIGKILL'd, so clearPresence was never called.
+		// Immediately after crash, member should still be reported online via Redis.
+		presence(t, a.base, true)
+		// After the 2-second presence lease expires, member should transition to offline.
+		eventually(t, "crashed node presence expiry", 5*time.Second, func() bool {
+			var result struct {
+				Online bool `json:"online"`
+			}
+			call(t, a.base, "GET", fmt.Sprintf("/api/users/%d/presence", member.User.ID), account{}, "", nil, 200, &result)
+			return !result.Online
+		})
 		offline := send(t, ownerA, "message", "recipient-killed", "recipient process is down", member.User.ID)
 		offlineGroup := send(t, ownerA, "group_message", "recipient-killed-group", "recipient group process is down", group.ID)
 		b.start(t)
 		subscribed()
 		memberB = open(b.base, member, memberOne)
+		presence(t, a.base, true)
 		memberB.next(t, "message", func(e event) bool { return e.Message.ID == offline })
 		memberB.next(t, "group_message", func(e event) bool { return e.Message.ID == offlineGroup })
 		// Persist before killing the sender, then retry the same key elsewhere.

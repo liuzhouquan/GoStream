@@ -187,3 +187,54 @@ func TestRealtimeDirectEventStillReachesDeviceAfterUserACK(t *testing.T) {
 		t.Fatalf("delivery after another device ACK: %+v %v", event, err)
 	}
 }
+
+func TestRedisCrashedNodePresenceExpiry(t *testing.T) {
+	redisServer, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(redisServer.Close)
+	client := redis.NewClient(&redis.Options{Addr: redisServer.Addr(), MaxRetries: 0})
+	t.Cleanup(func() { _ = client.Close() })
+
+	s1, _, _ := testServer(t)
+	if err := s1.UseRedisRealtime(client); err != nil {
+		t.Fatal(err)
+	}
+	s2, _, _ := testServer(t)
+	if err := s2.UseRedisRealtime(client); err != nil {
+		t.Fatal(err)
+	}
+
+	// Configure short 80ms lease for test speed
+	s1.SetPresenceLease(80*time.Millisecond, 25*time.Millisecond)
+
+	userID := uint(42)
+	ctx := context.Background()
+
+	// 1. Initially offline
+	if s2.onlineAcrossInstances(ctx, userID) {
+		t.Fatal("expected offline initially")
+	}
+
+	// 2. Refreshed presence on node 1 reports online on node 2
+	s1.refreshPresence(ctx, userID)
+	if !s2.onlineAcrossInstances(ctx, userID) {
+		t.Fatal("expected online across instances immediately after refresh")
+	}
+
+	// 3. Simulate node 1 crash: no clean disconnect (no clearPresence), renewal stopped.
+	// Wait past the 80ms lease duration so time.Now() advances past the stored lease score.
+	time.Sleep(100 * time.Millisecond)
+
+	// 4. Node 2 observes crashed node presence expiry
+	if s2.onlineAcrossInstances(ctx, userID) {
+		t.Fatal("expected user to be reported offline after presence lease expired")
+	}
+
+	// 5. Node 1 comes back up and refreshes
+	s1.refreshPresence(ctx, userID)
+	if !s2.onlineAcrossInstances(ctx, userID) {
+		t.Fatal("expected online after node recovery")
+	}
+}

@@ -708,6 +708,73 @@ func TestMySQLMessageDeviceLifecycleIntegration(t *testing.T) {
 	}
 }
 
+func TestMySQLConcurrentDeviceRegistration(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to run the MySQL integration test")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewServer(db, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	router := s.Router()
+	username := fmt.Sprintf("mysqlconc%d", time.Now().UnixNano())
+	userID, token := registerTestUser(t, router, username)
+	t.Cleanup(func() {
+		_ = db.Where("user_id = ?", userID).Delete(&MessageDevice{}).Error
+		_ = db.Where("id = ?", userID).Delete(&User{}).Error
+	})
+
+	const totalAttempts = 40
+	start := make(chan struct{})
+	statuses := make(chan int, totalAttempts)
+	var wg sync.WaitGroup
+
+	for i := 1; i <= totalAttempts; i++ {
+		wg.Add(1)
+		deviceID := fmt.Sprintf("00000000-0000-4000-8000-%012x", i)
+		go func(id string) {
+			defer wg.Done()
+			<-start
+			res := requestOnDevice(t, router, http.MethodGet, "/api/messages/unread", token, id, nil)
+			statuses <- res.Code
+		}(deviceID)
+	}
+
+	close(start)
+	wg.Wait()
+	close(statuses)
+
+	var okCount, rateLimitedCount, unexpectedCount int
+	for status := range statuses {
+		switch status {
+		case http.StatusOK:
+			okCount++
+		case http.StatusTooManyRequests:
+			rateLimitedCount++
+		default:
+			unexpectedCount++
+		}
+	}
+
+	if unexpectedCount > 0 {
+		t.Fatalf("unexpected statuses: %d (ok=%d, 429=%d)", unexpectedCount, okCount, rateLimitedCount)
+	}
+	if okCount != maxMessageDevices {
+		t.Fatalf("okCount=%d want %d", okCount, maxMessageDevices)
+	}
+	if rateLimitedCount != totalAttempts-maxMessageDevices {
+		t.Fatalf("rateLimitedCount=%d want %d", rateLimitedCount, totalAttempts-maxMessageDevices)
+	}
+
+	var count int64
+	if err := db.Model(&MessageDevice{}).Where("user_id = ?", userID).Count(&count).Error; err != nil || count != maxMessageDevices {
+		t.Fatalf("persisted message devices count=%d want %d, err=%v", count, maxMessageDevices, err)
+	}
+}
+
 func TestMySQLNotificationPaginationIntegration(t *testing.T) {
 	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
 	if dsn == "" {

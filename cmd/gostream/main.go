@@ -116,6 +116,17 @@ func main() {
 		if err := server.UseRedisRealtime(client); err != nil {
 			log.Fatalf("initialize realtime bridge: %v", err)
 		}
+		if leaseStr := os.Getenv("PRESENCE_LEASE"); leaseStr != "" {
+			if d, err := time.ParseDuration(leaseStr); err == nil && d > 0 {
+				renew := d / 2
+				if renewStr := os.Getenv("PRESENCE_RENEW"); renewStr != "" {
+					if r, err := time.ParseDuration(renewStr); err == nil && r > 0 {
+						renew = r
+					}
+				}
+				server.SetPresenceLease(d, renew)
+			}
+		}
 		pingCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 		if err := client.Ping(pingCtx).Err(); err != nil {
 			log.Printf("Redis unavailable at startup; Feed will use database reads: %v", err)
