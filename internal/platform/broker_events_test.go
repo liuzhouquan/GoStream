@@ -227,6 +227,268 @@ func TestBrokerNotificationBacklogDrain(t *testing.T) {
 	}
 }
 
+func TestBrokerNotificationSustainedBacklogDrain(t *testing.T) {
+	s, _, db := testServer(t)
+	ctx := context.Background()
+
+	// 5 distinct targets receiving notifications from 5 distinct actors
+	const userCount = 5
+	const eventsPerUser = 10
+	const totalEvents = userCount * eventsPerUser
+
+	users := make([]User, userCount)
+	for i := 0; i < userCount; i++ {
+		users[i] = User{Username: fmt.Sprintf("sustained-target-%d", i), PasswordHash: "fixture", Nickname: fmt.Sprintf("Target%d", i)}
+		if err := db.Create(&users[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	items := make([]OutboxEvent, totalEvents)
+	bodies := make([][]byte, totalEvents)
+	idx := 0
+	for uIdx := 0; uIdx < userCount; uIdx++ {
+		for eIdx := 0; eIdx < eventsPerUser; eIdx++ {
+			key := fmt.Sprintf("sustained-event-u%d-e%d", uIdx, eIdx)
+			if err := db.Transaction(func(tx *gorm.DB) error {
+				return enqueueNotification(tx, Notification{
+					UserID:   users[uIdx].ID,
+					ActorID:  users[(uIdx+1)%userCount].ID,
+					Kind:     "follow",
+					EventKey: key,
+					Text:     fmt.Sprintf("sustained notice %d for user %d", eIdx, uIdx),
+				})
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var n Notification
+			if err := db.Where("event_key = ?", key).First(&n).Error; err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Where("event_key = ?", fmt.Sprintf("notification:%d", n.ID)).First(&items[idx]).Error; err != nil {
+				t.Fatal(err)
+			}
+			var err error
+			bodies[idx], err = marshalBrokerNotification(items[idx])
+			if err != nil {
+				t.Fatal(err)
+			}
+			idx++
+		}
+	}
+
+	// Simulate that the source outbox worker already published all notification.created rows to RabbitMQ
+	if err := db.Model(&OutboxEvent{}).Where("topic = ?", notificationCreatedTopic).Update("published_at", time.Now().UTC()).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// Drain sustained backlog in chunks through consumer commit
+	for i := 0; i < totalEvents; i++ {
+		duplicate, err := s.acceptBrokerNotification(ctx, bodies[i], items[i].EventKey)
+		if err != nil || duplicate {
+			t.Fatalf("sustained item %d: duplicate=%v err=%v", i, duplicate, err)
+		}
+	}
+
+	// Verify all delivery rows exist in SQL
+	var deliveryCount int64
+	if err := db.Model(&OutboxEvent{}).Where("topic = ?", notificationDeliverTopic).Count(&deliveryCount).Error; err != nil || deliveryCount != totalEvents {
+		t.Fatalf("expected %d delivery events, got %d", totalEvents, deliveryCount)
+	}
+
+	// Drain delivery outbox in batches of 32
+	drained := 0
+	for drained < totalEvents {
+		n, err := s.ProcessOutboxOnce(ctx)
+		if err != nil {
+			t.Fatalf("drain outbox: %v", err)
+		}
+		if n == 0 {
+			break
+		}
+		drained += n
+	}
+	if drained != totalEvents {
+		t.Fatalf("expected to drain %d outbox items, got %d", totalEvents, drained)
+	}
+
+	// Verify all delivery rows have published_at IS NOT NULL
+	var unpublishedDeliveryCount int64
+	if err := db.Model(&OutboxEvent{}).Where("topic = ? AND published_at IS NULL", notificationDeliverTopic).Count(&unpublishedDeliveryCount).Error; err != nil || unpublishedDeliveryCount != 0 {
+		t.Fatalf("expected 0 unpublished delivery events, got %d", unpublishedDeliveryCount)
+	}
+
+	// Redeliver entire sustained backlog: must all be classified as duplicates
+	for i := 0; i < totalEvents; i++ {
+		duplicate, err := s.acceptBrokerNotification(ctx, bodies[i], items[i].EventKey)
+		if err != nil || !duplicate {
+			t.Fatalf("sustained redelivery item %d: duplicate=%v err=%v", i, duplicate, err)
+		}
+	}
+
+	// Delivery count must remain strictly unchanged
+	if err := db.Model(&OutboxEvent{}).Where("topic = ?", notificationDeliverTopic).Count(&deliveryCount).Error; err != nil || deliveryCount != totalEvents {
+		t.Fatalf("expected %d delivery events after redelivery, got %d", totalEvents, deliveryCount)
+	}
+}
+
+func TestBrokerPublisherConfirmFailureAndRecovery(t *testing.T) {
+	s, _, db := testServer(t)
+	ctx := context.Background()
+
+	item := brokerEventFixture(t, db)
+
+	// Attempt 1: Publisher experiences confirm failure (e.g. timeout or socket drop)
+	confirmErr := errors.New("simulated publisher confirm timeout")
+	var failPublish atomic.Bool
+	failPublish.Store(true)
+
+	mockDispatch := func(c context.Context, e OutboxEvent) error {
+		if failPublish.Load() {
+			return confirmErr
+		}
+		return nil
+	}
+
+	n, err := s.processOutboxOnce(ctx, mockDispatch)
+	if err != nil || n != 1 {
+		t.Fatalf("attempt 1: n=%d err=%v", n, err)
+	}
+
+	var row OutboxEvent
+	if err := db.First(&row, item.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.PublishedAt != nil || row.Attempts != 1 || row.LastError != confirmErr.Error() {
+		t.Fatalf("unconfirmed publish row state: %+v", row)
+	}
+	if !row.AvailableAt.After(time.Now().UTC()) {
+		t.Fatalf("available_at not backed off: %v", row.AvailableAt)
+	}
+
+	// Recover publisher connection: fast forward available_at and allow success
+	if err := db.Model(&row).Update("available_at", time.Now().UTC().Add(-time.Second)).Error; err != nil {
+		t.Fatal(err)
+	}
+	failPublish.Store(false)
+
+	n, err = s.processOutboxOnce(ctx, mockDispatch)
+	if err != nil || n != 1 {
+		t.Fatalf("attempt 2: n=%d err=%v", n, err)
+	}
+
+	if err := db.First(&row, item.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.PublishedAt == nil || row.Attempts != 2 || row.LastError != "" {
+		t.Fatalf("recovered publish row state: %+v", row)
+	}
+
+	// Consumer receives message: commits delivery and verifies deduplication on retry
+	body, err := marshalBrokerNotification(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dup, err := s.acceptBrokerNotification(ctx, body, row.EventKey)
+	if err != nil || dup {
+		t.Fatalf("first consumer accept: dup=%v err=%v", dup, err)
+	}
+	dup, err = s.acceptBrokerNotification(ctx, body, row.EventKey)
+	if err != nil || !dup {
+		t.Fatalf("retry consumer accept: dup=%v err=%v", dup, err)
+	}
+
+	var jobCount int64
+	if err := db.Model(&OutboxEvent{}).Where("event_key = ?", "broker-delivery:"+row.EventKey).Count(&jobCount).Error; err != nil || jobCount != 1 {
+		t.Fatalf("expected exactly 1 delivery job, got %d", jobCount)
+	}
+}
+
+func TestBrokerConsumerPreACKCrashAndDeduplication(t *testing.T) {
+	s, _, db := testServer(t)
+	ctx := context.Background()
+
+	item := brokerEventFixture(t, db)
+	// Source event was published to RabbitMQ
+	if err := db.Model(&item).Update("published_at", time.Now().UTC()).Error; err != nil {
+		t.Fatal(err)
+	}
+	body, err := marshalBrokerNotification(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Consumer 1: processes delivery and commits to SQL
+	dup1, err := s.acceptBrokerNotification(ctx, body, item.EventKey)
+	if err != nil || dup1 {
+		t.Fatalf("consumer 1 commit: dup=%v err=%v", dup1, err)
+	}
+
+	// Verify that the SQL delivery row exists
+	var delivery OutboxEvent
+	if err := db.Where("event_key = ?", "broker-delivery:"+item.EventKey).First(&delivery).Error; err != nil {
+		t.Fatalf("delivery row not committed: %v", err)
+	}
+
+	// Crash window: Consumer 1 crashes before issuing basic.ack to broker.
+	// Broker re-queues unacked delivery and redelivers to Consumer 2.
+	dup2, err := s.acceptBrokerNotification(ctx, body, item.EventKey)
+	if err != nil || !dup2 {
+		t.Fatalf("consumer 2 redelivery: expected duplicate=true, got dup=%v err=%v", dup2, err)
+	}
+
+	// Consumer 2 issues basic.ack. Only 1 delivery outbox event must exist.
+	var jobCount int64
+	if err := db.Model(&OutboxEvent{}).Where("event_key = ?", "broker-delivery:"+item.EventKey).Count(&jobCount).Error; err != nil || jobCount != 1 {
+		t.Fatalf("expected exactly 1 delivery row, got %d", jobCount)
+	}
+
+	// Dispatch delivery outbox row: single execution
+	n, err := s.ProcessOutboxOnce(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("dispatch delivery: n=%d err=%v", n, err)
+	}
+	if err := db.First(&delivery, delivery.ID).Error; err != nil || delivery.PublishedAt == nil {
+		t.Fatalf("delivery row not published: %+v", delivery)
+	}
+}
+
+func TestBrokerDLQReplayIdempotency(t *testing.T) {
+	s, _, db := testServer(t)
+	ctx := context.Background()
+
+	item := brokerEventFixture(t, db)
+	// Source event was published to RabbitMQ
+	if err := db.Model(&item).Update("published_at", time.Now().UTC()).Error; err != nil {
+		t.Fatal(err)
+	}
+	body, err := marshalBrokerNotification(item)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Existing completed delivery
+	if dup, err := s.acceptBrokerNotification(ctx, body, item.EventKey); err != nil || dup {
+		t.Fatalf("initial delivery: dup=%v err=%v", dup, err)
+	}
+	if n, err := s.ProcessOutboxOnce(ctx); err != nil || n != 1 {
+		t.Fatalf("dispatch initial delivery: n=%d err=%v", n, err)
+	}
+
+	// Operator DLQ replay delivers message again (simulating repeated replay on interruption)
+	for replay := 1; replay <= 3; replay++ {
+		dup, err := s.acceptBrokerNotification(ctx, body, item.EventKey)
+		if err != nil || !dup {
+			t.Fatalf("replay %d: expected duplicate=true, got dup=%v err=%v", replay, dup, err)
+		}
+	}
+
+	var jobCount int64
+	if err := db.Model(&OutboxEvent{}).Where("event_key = ?", "broker-delivery:"+item.EventKey).Count(&jobCount).Error; err != nil || jobCount != 1 {
+		t.Fatalf("expected exactly 1 delivery job after DLQ replays, got %d", jobCount)
+	}
+}
+
 func TestBrokerNotificationBurstAndIdempotency(t *testing.T) {
 	s, _, db := testServer(t)
 	item := brokerEventFixture(t, db)

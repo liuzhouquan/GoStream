@@ -13,7 +13,7 @@
 
 进度里的勾选表示局部工作完成。只有测试标准对应项的证据齐全，才能将该项从“部分通过”改成“通过”。历史记录保留原始基线和失败，最新状态放在阅读入口，不将旧结果当作当前提交的验证。
 
-当前七分支审核和合并决定见 [BRANCH_REVIEW.md](BRANCH_REVIEW.md)。接手前先检查其中暂缓的设备生命周期/OpenAPI 问题；不要把原分支的“通过”描述作为当前验收结论。
+当前十分支审核见 [2026-10-30 审核记录](BRANCH_REVIEW_2026-10-30.md)；此前七分支的历史决定保留在 [BRANCH_REVIEW.md](BRANCH_REVIEW.md)。新的 presence 分支未引入被否决的全局回执压缩；OpenAPI 修订已加入真正的结构及代表性响应/帧校验，完整交付仍以测试矩阵为准。
 
 ## 一次工作包怎么推进
 
@@ -48,6 +48,6 @@ git diff --check
 | 分片/MinIO/FFmpeg | [测试标准](TEST_STANDARD.md) 和 [媒体运维](MEDIA_OPERATIONS.md) 中对应矩阵 |
 | Web 状态与交互 | 目标浏览器回归；涉及持久状态再用真实 API 验证，模拟响应不能替代端到端结果 |
 
-已有七项 CI 是质量、MySQL、Redis、MinIO、RabbitMQ、视频恢复和 IM 恢复。相关代码改变时按实际依赖检查，不把仅解析 Compose YAML 当作已部署验收。
+已有八项 CI：质量、MySQL、Redis、MinIO、RabbitMQ、视频恢复、IM 恢复及浏览器工作流。相关代码改变时按实际依赖检查，不把仅解析 Compose YAML 当作已部署验收。
 
 本地学习笔记 `docs/LOCAL_STUDY_GUIDE.md` 保持在 Git 排除列表中，不加入 PR。提交前检查 `git check-ignore -v docs/LOCAL_STUDY_GUIDE.md` 及暂存文件列表。

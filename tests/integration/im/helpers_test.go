@@ -112,7 +112,7 @@ func newProcess(t *testing.T, binary, dsn, redisAddr, secret string) *process {
 		"ADDR": addr, "DB_DRIVER": "mysql", "DB_DSN": dsn, "JWT_SECRET": secret,
 		"REDIS_ADDR": redisAddr, "RABBITMQ_URL": "", "MEDIA_STORE": "local",
 		"MEDIA_DIR": filepath.Join(p.dir, "media"), "FFMPEG_BIN": "", "PPROF_ADDR": "",
-		"FEED_FANOUT_MAX_FOLLOWERS": "0",
+		"FEED_FANOUT_MAX_FOLLOWERS": "0", "PRESENCE_LEASE": "", "PRESENCE_RENEW": "",
 	}
 	for _, item := range os.Environ() {
 		key, _, _ := strings.Cut(item, "=")

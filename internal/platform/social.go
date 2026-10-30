@@ -40,7 +40,10 @@ func (s *Server) follow(c *gin.Context) {
 }
 
 func (s *Server) unfollow(c *gin.Context) {
-	if err := s.DB.Where("follower_id = ? AND followee_id = ?", uid(c), c.Param("id")).Delete(&Follow{}).Error; err != nil {
+	err := transactionWithDeadlockRetry(c.Request.Context(), s.DB, func(tx *gorm.DB) error {
+		return tx.Where("follower_id = ? AND followee_id = ?", uid(c), c.Param("id")).Delete(&Follow{}).Error
+	})
+	if err != nil {
 		respondError(c, 500, "could not unfollow user")
 		return
 	}

@@ -708,6 +708,73 @@ func TestMySQLMessageDeviceLifecycleIntegration(t *testing.T) {
 	}
 }
 
+func TestMySQLConcurrentDeviceRegistration(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to run the MySQL integration test")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := NewServer(db, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	router := s.Router()
+	username := fmt.Sprintf("mysqlconc%d", time.Now().UnixNano())
+	userID, token := registerTestUser(t, router, username)
+	t.Cleanup(func() {
+		_ = db.Where("user_id = ?", userID).Delete(&MessageDevice{}).Error
+		_ = db.Where("id = ?", userID).Delete(&User{}).Error
+	})
+
+	const totalAttempts = 40
+	start := make(chan struct{})
+	statuses := make(chan int, totalAttempts)
+	var wg sync.WaitGroup
+
+	for i := 1; i <= totalAttempts; i++ {
+		wg.Add(1)
+		deviceID := fmt.Sprintf("00000000-0000-4000-8000-%012x", i)
+		go func(id string) {
+			defer wg.Done()
+			<-start
+			res := requestOnDevice(t, router, http.MethodGet, "/api/messages/unread", token, id, nil)
+			statuses <- res.Code
+		}(deviceID)
+	}
+
+	close(start)
+	wg.Wait()
+	close(statuses)
+
+	var okCount, rateLimitedCount, unexpectedCount int
+	for status := range statuses {
+		switch status {
+		case http.StatusOK:
+			okCount++
+		case http.StatusTooManyRequests:
+			rateLimitedCount++
+		default:
+			unexpectedCount++
+		}
+	}
+
+	if unexpectedCount > 0 {
+		t.Fatalf("unexpected statuses: %d (ok=%d, 429=%d)", unexpectedCount, okCount, rateLimitedCount)
+	}
+	if okCount != maxMessageDevices {
+		t.Fatalf("okCount=%d want %d", okCount, maxMessageDevices)
+	}
+	if rateLimitedCount != totalAttempts-maxMessageDevices {
+		t.Fatalf("rateLimitedCount=%d want %d", rateLimitedCount, totalAttempts-maxMessageDevices)
+	}
+
+	var count int64
+	if err := db.Model(&MessageDevice{}).Where("user_id = ?", userID).Count(&count).Error; err != nil || count != maxMessageDevices {
+		t.Fatalf("persisted message devices count=%d want %d, err=%v", count, maxMessageDevices, err)
+	}
+}
+
 func TestMySQLNotificationPaginationIntegration(t *testing.T) {
 	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
 	if dsn == "" {
@@ -929,5 +996,283 @@ func TestMySQLCommentThreadsIntegration(t *testing.T) {
 	var page2 commentPageResponse
 	if second.Code != http.StatusOK || json.Unmarshal(second.Body.Bytes(), &page2) != nil || len(page2.Items) != 1 || page2.Items[0].ID != ids[0] || page2.Items[0].ReplyCount != 1 || page2.HasMore {
 		t.Fatalf("second MySQL page: %d %s", second.Code, second.Body.String())
+	}
+}
+
+func TestMySQLMultiUserConcurrentInteractionsAndCounters(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to a migrated disposable MySQL database")
+	}
+	dbA, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbB, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prefix := fmt.Sprintf("mxct%x", time.Now().UnixNano()&0xffffff)
+	var userIDs []uint
+	var videoIDs []uint
+
+	t.Cleanup(func() {
+		_ = dbA.Transaction(func(tx *gorm.DB) error {
+			if len(videoIDs) > 0 {
+				_ = tx.Where("video_id IN ?", videoIDs).Delete(&VideoAction{}).Error
+				_ = tx.Where("video_id IN ?", videoIDs).Delete(&Comment{}).Error
+				_ = tx.Where("id IN ?", videoIDs).Delete(&Video{}).Error
+			}
+			if len(userIDs) > 0 {
+				_ = tx.Where("id IN ?", userIDs).Delete(&User{}).Error
+			}
+			return nil
+		})
+	})
+
+	sA := NewServer(dbA, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	sB := NewServer(dbB, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	handlers := []http.Handler{sA.Router(), sB.Router()}
+
+	// Register 1 author
+	author := User{Username: prefix + "_author", Nickname: "Author", PasswordHash: "unused"}
+	if err := dbA.Create(&author).Error; err != nil {
+		t.Fatal(err)
+	}
+	userIDs = append(userIDs, author.ID)
+
+	// Create 3 videos
+	for i := 1; i <= 3; i++ {
+		v := Video{
+			AuthorID: author.ID,
+			Title:    fmt.Sprintf("%s-video-%d", prefix, i),
+			MediaURL: fmt.Sprintf("/media/%s-%d.mp4", prefix, i),
+			Status:   "published",
+		}
+		if err := dbA.Create(&v).Error; err != nil {
+			t.Fatal(err)
+		}
+		videoIDs = append(videoIDs, v.ID)
+	}
+
+	// Register 4 interacting users
+	const numUsers = 4
+	tokens := make([]string, numUsers)
+	for i := 0; i < numUsers; i++ {
+		u := User{Username: fmt.Sprintf("%s_u%d", prefix, i), Nickname: fmt.Sprintf("User %d", i), PasswordHash: "unused"}
+		if err := dbA.Create(&u).Error; err != nil {
+			t.Fatal(err)
+		}
+		userIDs = append(userIDs, u.ID)
+		tok, err := sA.issueToken(u.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tokens[i] = tok
+	}
+
+	// Concurrently perform like, unlike, favorite, unfavorite, and comments across videos
+	const opsPerUser = 20
+	failures := make(chan string, numUsers*opsPerUser)
+	var wg sync.WaitGroup
+
+	for uIdx, token := range tokens {
+		wg.Add(1)
+		go func(userToken string, u int) {
+			defer wg.Done()
+			for op := 0; op < opsPerUser; op++ {
+				vid := videoIDs[(u+op)%len(videoIDs)]
+				router := handlers[(u+op)%len(handlers)]
+
+				switch op % 5 {
+				case 0:
+					req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/videos/%d/like", vid), nil)
+					req.Header.Set("Authorization", "Bearer "+userToken)
+					res := httptest.NewRecorder()
+					router.ServeHTTP(res, req)
+					if res.Code != http.StatusOK {
+						failures <- fmt.Sprintf("u=%d op=%d PUT like vid=%d: %d %s", u, op, vid, res.Code, res.Body.String())
+					}
+				case 1:
+					req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/videos/%d/like", vid), nil)
+					req.Header.Set("Authorization", "Bearer "+userToken)
+					res := httptest.NewRecorder()
+					router.ServeHTTP(res, req)
+					if res.Code != http.StatusOK {
+						failures <- fmt.Sprintf("u=%d op=%d DELETE like vid=%d: %d %s", u, op, vid, res.Code, res.Body.String())
+					}
+				case 2:
+					req := httptest.NewRequest(http.MethodPut, fmt.Sprintf("/api/videos/%d/favorite", vid), nil)
+					req.Header.Set("Authorization", "Bearer "+userToken)
+					res := httptest.NewRecorder()
+					router.ServeHTTP(res, req)
+					if res.Code != http.StatusOK {
+						failures <- fmt.Sprintf("u=%d op=%d PUT fav vid=%d: %d %s", u, op, vid, res.Code, res.Body.String())
+					}
+				case 3:
+					req := httptest.NewRequest(http.MethodDelete, fmt.Sprintf("/api/videos/%d/favorite", vid), nil)
+					req.Header.Set("Authorization", "Bearer "+userToken)
+					res := httptest.NewRecorder()
+					router.ServeHTTP(res, req)
+					if res.Code != http.StatusOK {
+						failures <- fmt.Sprintf("u=%d op=%d DELETE fav vid=%d: %d %s", u, op, vid, res.Code, res.Body.String())
+					}
+				case 4:
+					body := fmt.Sprintf(`{"body":"mysql comment u%d op%d"}`, u, op)
+					req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/videos/%d/comments", vid), strings.NewReader(body))
+					req.Header.Set("Authorization", "Bearer "+userToken)
+					req.Header.Set("Content-Type", "application/json")
+					res := httptest.NewRecorder()
+					router.ServeHTTP(res, req)
+					if res.Code != http.StatusCreated {
+						failures <- fmt.Sprintf("u=%d op=%d POST comment vid=%d: %d %s", u, op, vid, res.Code, res.Body.String())
+					}
+				}
+			}
+		}(token, uIdx)
+	}
+
+	wg.Wait()
+	close(failures)
+
+	var failed []string
+	for f := range failures {
+		if len(failed) < 5 {
+			failed = append(failed, f)
+		}
+	}
+	if len(failed) > 0 {
+		t.Fatalf("MySQL concurrent interaction failures: %v", failed)
+	}
+
+	// Verify row-counter parity and non-negative counters on MySQL
+	for _, vid := range videoIDs {
+		var v Video
+		if err := dbA.First(&v, vid).Error; err != nil {
+			t.Fatal(err)
+		}
+		var actualLikes int64
+		if err := dbB.Model(&VideoAction{}).Where("video_id = ? AND kind = ?", vid, "like").Count(&actualLikes).Error; err != nil {
+			t.Fatal(err)
+		}
+		var actualFavs int64
+		if err := dbB.Model(&VideoAction{}).Where("video_id = ? AND kind = ?", vid, "favorite").Count(&actualFavs).Error; err != nil {
+			t.Fatal(err)
+		}
+		var actualComments int64
+		if err := dbB.Model(&Comment{}).Where("video_id = ?", vid).Count(&actualComments).Error; err != nil {
+			t.Fatal(err)
+		}
+
+		if v.LikeCount < 0 || v.FavoriteCount < 0 || v.CommentCount < 0 {
+			t.Fatalf("negative counter for video %d: likes=%d favs=%d cmts=%d", vid, v.LikeCount, v.FavoriteCount, v.CommentCount)
+		}
+		if v.LikeCount != actualLikes {
+			t.Fatalf("video %d like_count mismatch: counter=%d rows=%d", vid, v.LikeCount, actualLikes)
+		}
+		if v.FavoriteCount != actualFavs {
+			t.Fatalf("video %d favorite_count mismatch: counter=%d rows=%d", vid, v.FavoriteCount, actualFavs)
+		}
+		if v.CommentCount != actualComments {
+			t.Fatalf("video %d comment_count mismatch: counter=%d rows=%d", vid, v.CommentCount, actualComments)
+		}
+	}
+}
+
+// TestMySQLRestartPersistenceLifecycle verifies that real MySQL data, counters,
+// and state persist across server instances (A01).
+func TestMySQLRestartPersistenceLifecycle(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to run the MySQL integration test")
+	}
+	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := db.Begin()
+	if tx.Error != nil {
+		t.Fatal(tx.Error)
+	}
+	defer tx.Rollback()
+
+	secret := "mysql-restart-persistence-secret-at-least-32-bytes"
+	unique := time.Now().UnixNano()
+
+	// Instance 1 writes state
+	s1 := NewServer(tx, secret, t.TempDir())
+	h1 := s1.Router()
+
+	u1Name := fmt.Sprintf("myuser1_%d", unique)
+	u2Name := fmt.Sprintf("myuser2_%d", unique)
+	u1ID, u1Token := registerTestUser(t, h1, u1Name)
+	u2ID, u2Token := registerTestUser(t, h1, u2Name)
+
+	video := Video{AuthorID: u1ID, Title: "MySQL Persist Video", MediaURL: "/media/myvid.mp4", Status: "published"}
+	if err := tx.Create(&video).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// Like, comment, follow on Instance 1
+	if res := request(t, h1, http.MethodPut, fmt.Sprintf("/api/videos/%d/like", video.ID), u2Token, nil); res.Code != http.StatusOK {
+		t.Fatalf("like on instance 1: %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, h1, http.MethodPost, fmt.Sprintf("/api/videos/%d/comments", video.ID), u2Token, map[string]string{"body": "mysql comment"}); res.Code != http.StatusCreated {
+		t.Fatalf("comment on instance 1: %d %s", res.Code, res.Body.String())
+	}
+	if res := request(t, h1, http.MethodPut, fmt.Sprintf("/api/users/me/following/%d", u1ID), u2Token, nil); res.Code != http.StatusOK {
+		t.Fatalf("follow on instance 1: %d %s", res.Code, res.Body.String())
+	}
+
+	// Direct message
+	dm := ChatMessage{SenderID: u1ID, RecipientID: u2ID, ClientID: fmt.Sprintf("my-dm-%d", unique), Body: "hello mysql restart"}
+	if err := tx.Create(&dm).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// Instance 2 boots on same MySQL state
+	s2 := NewServer(tx, secret, t.TempDir())
+	h2 := s2.Router()
+
+	// Verify /health and /ready on Instance 2
+	if res := request(t, h2, http.MethodGet, "/health", "", nil); res.Code != http.StatusOK {
+		t.Fatalf("instance 2 /health: %d", res.Code)
+	}
+	if res := request(t, h2, http.MethodGet, "/ready", "", nil); res.Code != http.StatusOK {
+		t.Fatalf("instance 2 /ready: %d", res.Code)
+	}
+
+	// Pre-restart tokens still authenticate
+	if res := request(t, h2, http.MethodGet, "/api/users/me", u1Token, nil); res.Code != http.StatusOK {
+		t.Fatalf("u1 token on instance 2: %d %s", res.Code, res.Body.String())
+	}
+
+	// Video counters persist on real MySQL
+	resVid := request(t, h2, http.MethodGet, fmt.Sprintf("/api/videos/%d", video.ID), "", nil)
+	if resVid.Code != http.StatusOK {
+		t.Fatalf("get video on instance 2: %d %s", resVid.Code, resVid.Body.String())
+	}
+	var vRec Video
+	if err := json.Unmarshal(resVid.Body.Bytes(), &vRec); err != nil || vRec.LikeCount != 1 || vRec.CommentCount != 1 {
+		t.Fatalf("video counters on instance 2: %+v", vRec)
+	}
+
+	// Comment persists
+	resComms := request(t, h2, http.MethodGet, fmt.Sprintf("/api/videos/%d/comments", video.ID), "", nil)
+	if resComms.Code != http.StatusOK || !strings.Contains(resComms.Body.String(), "mysql comment") {
+		t.Fatalf("comments on instance 2: %d %s", resComms.Code, resComms.Body.String())
+	}
+
+	// Follow feed persists
+	resFeed := request(t, h2, http.MethodGet, "/api/feed?scene=following", u2Token, nil)
+	if resFeed.Code != http.StatusOK || !strings.Contains(resFeed.Body.String(), "MySQL Persist Video") {
+		t.Fatalf("following feed on instance 2: %d %s", resFeed.Code, resFeed.Body.String())
+	}
+
+	// Direct message history persists
+	resMsg := request(t, h2, http.MethodGet, fmt.Sprintf("/api/messages?user_id=%d", u1ID), u2Token, nil)
+	if resMsg.Code != http.StatusOK || !strings.Contains(resMsg.Body.String(), "hello mysql restart") {
+		t.Fatalf("messages on instance 2: %d %s", resMsg.Code, resMsg.Body.String())
 	}
 }

@@ -1,0 +1,2251 @@
+openapi: 3.0.3
+info:
+  title: GoStream API
+  version: 1.0.0
+  description: Machine-readable API contract for GoStream short-video social platform,
+    providing accounts, resumable video uploads, FFmpeg processing, hybrid Feed, social
+    interactions, notifications, and real-time/historical IM messaging.
+servers:
+- url: http://127.0.0.1:8080
+  description: Local API server
+paths:
+  /health:
+    get:
+      summary: Liveness probe
+      operationId: getHealth
+      tags:
+      - System
+      responses:
+        '200':
+          description: Service is alive
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /ready:
+    get:
+      summary: Readiness probe
+      operationId: getReady
+      tags:
+      - System
+      responses:
+        '200':
+          description: Database is ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReadyResponse'
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /metrics:
+    get:
+      summary: Prometheus metrics
+      operationId: getMetrics
+      tags:
+      - System
+      responses:
+        '200':
+          description: Prometheus text exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+  /media/{name}:
+    get:
+      summary: Serve uploaded or processed media file
+      operationId: getMedia
+      tags:
+      - Media
+      parameters:
+      - name: name
+        in: path
+        required: true
+        description: 32-hex content name with extension (mp4, mov, webm, jpg, png,
+          webp)
+        schema:
+          type: string
+      - name: Range
+        in: header
+        required: false
+        description: HTTP byte range request
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Full media content
+          headers:
+            Content-Type:
+              schema:
+                type: string
+            Cache-Control:
+              schema:
+                type: string
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '206':
+          description: Partial byte range content
+        '404':
+          description: Media not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Media storage unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/users:
+    post:
+      summary: Register a new user
+      operationId: register
+      tags:
+      - Accounts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '400':
+          description: Invalid username or password format
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Username already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded (10 req/min/peer IP)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/sessions:
+    post:
+      summary: Login with username and password
+      operationId: login
+      tags:
+      - Accounts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded (30 req/min/peer IP)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/users/me:
+    get:
+      summary: Get current authenticated user profile
+      operationId: getCurrentUser
+      tags:
+      - Accounts
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Update profile details or avatar
+      operationId: updateCurrentUser
+      tags:
+      - Accounts
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProfileRequest'
+      responses:
+        '200':
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '400':
+          description: Invalid fields or avatar not owned by caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/users/{id}:
+    get:
+      summary: Get public user profile by ID
+      operationId: getUserByID
+      tags:
+      - Accounts
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Public user profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserProfileResponse'
+        '404':
+          description: User not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/users/{id}/presence:
+    get:
+      summary: Get user presence and online status
+      operationId: getUserPresence
+      tags:
+      - Presence
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Presence information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PresenceResponse'
+  /api/users/{id}/videos:
+    get:
+      summary: Get creator published videos (owner also sees processing/failed)
+      operationId: getUserVideos
+      tags:
+      - Videos
+      security:
+      - {}
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: List of videos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/VideoCard'
+  /api/users/me/following:
+    get:
+      summary: Get list of users the caller follows
+      operationId: getFollowing
+      tags:
+      - Relationships
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: List of followed users
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+  /api/users/me/followers:
+    get:
+      summary: Get list of followers of the caller
+      operationId: getFollowers
+      tags:
+      - Relationships
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: List of followers
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+  /api/users/me/following/{id}:
+    put:
+      summary: Follow a user
+      operationId: followUser
+      tags:
+      - Relationships
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Follow relationship established
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FollowToggleResponse'
+    delete:
+      summary: Unfollow a user
+      operationId: unfollowUser
+      tags:
+      - Relationships
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Follow relationship removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FollowToggleResponse'
+  /api/uploads:
+    post:
+      summary: Direct single-file upload (<= 250 MiB)
+      operationId: uploadDirect
+      tags:
+      - Uploads
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Upload registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    example: /media/39a674e2d31201ab3812048f321901ae.mp4
+                  size:
+                    type: integer
+                  filename:
+                    type: string
+        '400':
+          description: Unsupported extension or invalid media magic bytes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: File exceeds 250 MiB or is 0 bytes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Media storage unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/uploads/sessions:
+    post:
+      summary: Create resumable upload session
+      operationId: createUploadSession
+      tags:
+      - Uploads
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UploadSessionCreateRequest'
+      responses:
+        '201':
+          description: Upload session initialized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSession'
+        '400':
+          description: Invalid size or unsupported filename extension
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/uploads/sessions/{id}:
+    get:
+      summary: Get resumable upload session status and uploaded chunks
+      operationId: getUploadSession
+      tags:
+      - Uploads
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Upload session state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSession'
+        '404':
+          description: Session not found or not owned by caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/uploads/sessions/{id}/chunks/{index}:
+    put:
+      summary: Upload a raw 4 MiB chunk
+      operationId: putUploadChunk
+      tags:
+      - Uploads
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: index
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        '200':
+          description: Chunk accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  index:
+                    type: integer
+                  sha256:
+                    type: string
+                  uploaded:
+                    type: boolean
+        '400':
+          description: Chunk index out of range or size mismatch
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found or not owned by caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Chunk uploaded with conflicting content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Media storage unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/uploads/sessions/{id}/complete:
+    post:
+      summary: Assemble and finalize resumable upload session
+      operationId: completeUploadSession
+      tags:
+      - Uploads
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Assembly succeeded and media registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadSessionCompleteResponse'
+        '400':
+          description: Assembled file content does not match supported type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Session not found or not owned by caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Incomplete chunks, integrity mismatch, or expired lease
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Media storage unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/videos:
+    post:
+      summary: Publish a video referencing an uploaded media URL
+      operationId: createVideo
+      tags:
+      - Videos
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VideoPublishRequest'
+      responses:
+        '201':
+          description: Video published or queued for processing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+        '400':
+          description: Missing title, unowned media, or invalid cover asset
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/videos/{id}:
+    get:
+      summary: Get video details
+      operationId: getVideo
+      tags:
+      - Videos
+      security:
+      - {}
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Video information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+        '404':
+          description: Video not found or processing details hidden from non-author
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      summary: Edit video metadata or update source file
+      operationId: updateVideo
+      tags:
+      - Videos
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VideoUpdateRequest'
+      responses:
+        '200':
+          description: Video updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Video'
+        '400':
+          description: Invalid fields or media not owned by caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Video not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Cannot change source of failed/processing video without FFmpeg
+            enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Delete a video
+      operationId: deleteVideo
+      tags:
+      - Videos
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '204':
+          description: Video deleted
+        '404':
+          description: Video not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/videos/{id}/like:
+    put:
+      summary: Like a video
+      operationId: likeVideo
+      tags:
+      - Interactions
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Video liked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InteractionToggleResponse'
+    delete:
+      summary: Unlike a video
+      operationId: unlikeVideo
+      tags:
+      - Interactions
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Video unliked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InteractionToggleResponse'
+  /api/videos/{id}/favorite:
+    put:
+      summary: Favorite a video
+      operationId: favoriteVideo
+      tags:
+      - Interactions
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Video favorited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InteractionToggleResponse'
+    delete:
+      summary: Unfavorite a video
+      operationId: unfavoriteVideo
+      tags:
+      - Interactions
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Video unfavorited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InteractionToggleResponse'
+  /api/videos/{id}/views:
+    post:
+      summary: Increment accepted play request count
+      operationId: recordView
+      tags:
+      - Interactions
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '204':
+          description: Accepted and play count incremented
+        '404':
+          description: Video not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Rate limit exceeded (120 req/min/peer IP)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/videos/{id}/comments:
+    get:
+      summary: List top-level comments on a video
+      operationId: getComments
+      tags:
+      - Comments
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Page of comments
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentPageResponse'
+    post:
+      summary: Create a top-level comment or reply to a top-level comment
+      operationId: createComment
+      tags:
+      - Comments
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommentCreateRequest'
+      responses:
+        '201':
+          description: Comment created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Comment'
+        '400':
+          description: Invalid body, reply to reply rejected, or parent not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/videos/{id}/comments/{comment_id}/replies:
+    get:
+      summary: List replies to a top-level comment
+      operationId: getCommentReplies
+      tags:
+      - Comments
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: comment_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Page of replies
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommentPageResponse'
+  /api/feed:
+    get:
+      summary: Fetch video feed (timeline, following, recommend, hot)
+      operationId: getFeed
+      tags:
+      - Feed
+      security:
+      - {}
+      - BearerAuth: []
+      parameters:
+      - name: scene
+        in: query
+        required: false
+        description: Feed scene (timeline, following, recommend, hot)
+        schema:
+          type: string
+          enum:
+          - timeline
+          - following
+          - recommend
+          - hot
+          default: timeline
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 10
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Feed page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedResponse'
+  /api/search:
+    get:
+      summary: Search users and published video titles/descriptions
+      operationId: search
+      tags:
+      - Search
+      security:
+      - {}
+      - BearerAuth: []
+      parameters:
+      - name: q
+        in: query
+        required: true
+        description: Search keyword (2-80 characters)
+        schema:
+          type: string
+      - name: type
+        in: query
+        required: false
+        schema:
+          type: string
+          enum:
+          - all
+          - users
+          - videos
+          default: all
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 20
+      - name: users_before_id
+        in: query
+        required: false
+        schema:
+          type: integer
+      - name: videos_before_id
+        in: query
+        required: false
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResponse'
+  /api/notifications:
+    get:
+      summary: Get notifications for authenticated user
+      operationId: getNotifications
+      tags:
+      - Notifications
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: before_id
+        in: query
+        required: false
+        schema:
+          type: integer
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 30
+      responses:
+        '200':
+          description: Notification page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationPageResponse'
+  /api/notifications/unread:
+    get:
+      summary: Get unread notification count
+      operationId: getUnreadNotifications
+      tags:
+      - Notifications
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: Unread notification count
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnreadCountResponse'
+  /api/notifications/read:
+    patch:
+      summary: Mark notifications as read up to a given ID
+      operationId: markNotificationsRead
+      tags:
+      - Notifications
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: up_to_id
+        in: query
+        required: false
+        description: Highest notification ID to mark read (omitted marks all)
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Count of notifications marked read
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MarkReadResponse'
+  /api/messages:
+    get:
+      summary: Get direct message conversation history with a peer
+      operationId: getDirectMessages
+      tags:
+      - Messaging
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: user_id
+        in: query
+        required: true
+        description: Peer user ID
+        schema:
+          type: integer
+      - name: before_id
+        in: query
+        required: false
+        schema:
+          type: integer
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+      responses:
+        '200':
+          description: Page of messages ordered newest first
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectMessageHistoryResponse'
+  /api/messages/unread:
+    get:
+      summary: Page through unacknowledged direct messages
+      operationId: getUnreadMessages
+      tags:
+      - Messaging
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: after_id
+        in: query
+        required: false
+        schema:
+          type: integer
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 100
+      - name: X-GoStream-Device-ID
+        in: header
+        required: false
+        description: Device UUID for per-device isolated unread tracking
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Page of unread messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DirectMessageUnreadResponse'
+  /api/messages/{id}/ack:
+    post:
+      summary: Acknowledge a single direct message
+      operationId: ackMessage
+      tags:
+      - Messaging
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: X-GoStream-Device-ID
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Message acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  acked:
+                    type: boolean
+                    example: true
+  /api/messages/acks:
+    post:
+      summary: Batch acknowledge up to 100 direct messages
+      operationId: ackMessages
+      tags:
+      - Messaging
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: X-GoStream-Device-ID
+        in: header
+        required: false
+        schema:
+          type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchAckRequest'
+      responses:
+        '200':
+          description: Batch acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchAckResponse'
+        '400':
+          description: Foreign ID in batch or invalid list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/groups:
+    get:
+      summary: List groups the authenticated caller belongs to
+      operationId: listGroups
+      tags:
+      - Groups
+      security:
+      - BearerAuth: []
+      responses:
+        '200':
+          description: List of groups
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupListResponse'
+    post:
+      summary: Create a new chat group
+      operationId: createGroup
+      tags:
+      - Groups
+      security:
+      - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - name
+              properties:
+                name:
+                  type: string
+                  example: Engineering discussion
+      responses:
+        '201':
+          description: Group created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChatGroup'
+  /api/groups/{id}/members:
+    post:
+      summary: Group owner invites a member (capped at 200 members)
+      operationId: addGroupMember
+      tags:
+      - Groups
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GroupMemberRequest'
+      responses:
+        '200':
+          description: Member added or already in group
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  member:
+                    type: boolean
+                    example: true
+        '403':
+          description: Only group owner can invite
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Group has reached its 200-member limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/groups/{id}/members/{user_id}:
+    delete:
+      summary: Owner removes member, or member voluntarily leaves group
+      operationId: removeGroupMember
+      tags:
+      - Groups
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Member removed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupMemberToggleResponse'
+        '403':
+          description: Caller cannot remove another member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/groups/{id}/messages:
+    get:
+      summary: Get group message history
+      operationId: getGroupHistory
+      tags:
+      - Groups
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: before_id
+        in: query
+        required: false
+        schema:
+          type: integer
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          default: 50
+      responses:
+        '200':
+          description: Page of group messages
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupHistoryResponse'
+        '404':
+          description: Group not found or caller is not a member
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /api/groups/{id}/unread:
+    get:
+      summary: Get count of unread group messages for caller device
+      operationId: getGroupUnread
+      tags:
+      - Groups
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: X-GoStream-Device-ID
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Unread count and last acknowledged message ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupUnreadResponse'
+  /api/groups/{id}/messages/{message_id}/ack:
+    post:
+      summary: Advance group read cursor up to message ID
+      operationId: ackGroupMessage
+      tags:
+      - Groups
+      security:
+      - BearerAuth: []
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: message_id
+        in: path
+        required: true
+        schema:
+          type: integer
+      - name: X-GoStream-Device-ID
+        in: header
+        required: false
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Group cursor advanced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupAckResponse'
+  /api/ws:
+    get:
+      summary: Realtime bidirectional WebSocket connection
+      operationId: connectWebSocket
+      tags:
+      - Realtime
+      description: 'Bidirectional WebSocket connection for real-time IM direct and
+        group messaging, online presence refresh, and unread replay hints.
+
+        Authentication is established during the initial WebSocket handshake via the
+        `Sec-WebSocket-Protocol` header: - `gostream.jwt.<token>` (required, Bearer
+        JWT) - `gostream.device.<deviceID>` (optional, device UUID)
+
+        Client events: - `WSClientPing`: Heartbeat ping (`{"type": "ping"}`) - `WSClientDirectMessage`:
+        Send direct message (`{"type": "message", "recipient_id": ..., "client_id":
+        "...", "body": "..."}`) - `WSClientGroupMessage`: Send group message (`{"type":
+        "group_message", "group_id": ..., "client_id": "...", "body": "..."}`)
+
+        Server events: - `WSServerReady`: Initial handshake complete (`{"type": "ready"}`)
+        - `WSServerPong`: Heartbeat response (`{"type": "pong"}`) - `WSServerError`:
+        Error notification (`{"type": "error", "message": "..."}`) - `WSServerDirectAck`:
+        Sender delivery ACK (`{"type": "ack", "client_id": "...", "message_id": ...}`)
+        - `WSServerGroupAck`: Sender group delivery ACK (`{"type": "ack", "client_id":
+        "...", "message_id": ..., "group_id": ...}`) - `WSServerDirectMessage`: Inbound
+        direct message (`{"type": "message", "message": {...}}`) - `WSServerGroupMessage`:
+        Inbound group message (`{"type": "group_message", "message": {...}}`) - `WSServerSyncRequired`:
+        Replay buffer overflow hint (`{"type": "sync_required"}`) - `WSServerGroupSyncRequired`:
+        Group replay buffer overflow hint (`{"type": "group_sync_required"}`) Server
+        notification frames use WSServerNotification with a durable SQL inbox record.'
+      parameters:
+      - name: Sec-WebSocket-Protocol
+        in: header
+        required: true
+        description: Subprotocol list including 'gostream', 'gostream.jwt.<token>',
+          and optionally 'gostream.device.<uuid>'.
+        schema:
+          type: string
+      responses:
+        '101':
+          description: Switching Protocols to WebSocket
+        '401':
+          description: Missing or invalid JWT in subprotocol
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: Exceeded 8 simultaneous active sockets per account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    DeviceID:
+      type: apiKey
+      in: header
+      name: X-GoStream-Device-ID
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+    ReadyResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ready
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+          example: record not found
+    RegisterRequest:
+      type: object
+      required:
+      - username
+      - password
+      properties:
+        username:
+          type: string
+          example: alice
+        password:
+          type: string
+          format: password
+          example: securepassword123
+        nickname:
+          type: string
+          example: Alice In Wonderland
+    LoginRequest:
+      type: object
+      required:
+      - username
+      - password
+      properties:
+        username:
+          type: string
+          example: alice
+        password:
+          type: string
+          format: password
+          example: securepassword123
+    SessionResponse:
+      type: object
+      required:
+      - user
+      - access_token
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        access_token:
+          type: string
+          example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+    User:
+      type: object
+      required:
+      - id
+      - username
+      - nickname
+      - created_at
+      properties:
+        id:
+          type: integer
+          example: 1
+        username:
+          type: string
+          example: alice
+        nickname:
+          type: string
+          example: Alice
+        bio:
+          type: string
+          example: Digital creator
+        avatar_url:
+          type: string
+          example: /media/39a674e2d31201ab3812048f321901ae.png
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    UserProfileResponse:
+      type: object
+      required:
+      - user
+      - video_count
+      - follower_count
+      - following_count
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        video_count:
+          type: integer
+          example: 12
+        follower_count:
+          type: integer
+          example: 45
+        following_count:
+          type: integer
+          example: 23
+    UserListResponse:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+          nullable: true
+    FollowToggleResponse:
+      type: object
+      required:
+      - following
+      properties:
+        following:
+          type: boolean
+          example: true
+    InteractionToggleResponse:
+      type: object
+      required:
+      - active
+      properties:
+        active:
+          type: boolean
+          example: true
+    GroupMemberToggleResponse:
+      type: object
+      required:
+      - member
+      properties:
+        member:
+          type: boolean
+          example: true
+    GroupListResponse:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChatGroup'
+    GroupAckResponse:
+      type: object
+      required:
+      - acked
+      - last_ack_id
+      properties:
+        acked:
+          type: boolean
+          example: true
+        last_ack_id:
+          type: integer
+          example: 42
+    VideoCard:
+      allOf:
+      - $ref: '#/components/schemas/Video'
+      - type: object
+        required:
+        - liked
+        - favorited
+        properties:
+          liked:
+            type: boolean
+            example: false
+          favorited:
+            type: boolean
+            example: false
+    UpdateProfileRequest:
+      type: object
+      properties:
+        nickname:
+          type: string
+        bio:
+          type: string
+        avatar_url:
+          type: string
+    PresenceResponse:
+      type: object
+      required:
+      - user_id
+      - online
+      properties:
+        user_id:
+          type: integer
+          example: 1
+        online:
+          type: boolean
+          example: true
+        last_seen_at:
+          type: string
+          format: date-time
+          nullable: true
+    UploadSessionCreateRequest:
+      type: object
+      required:
+      - filename
+      - size
+      properties:
+        filename:
+          type: string
+          example: video.mp4
+        size:
+          type: integer
+          example: 10485760
+        sha256:
+          type: string
+          example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+    UploadSession:
+      type: object
+      properties:
+        id:
+          type: string
+        filename:
+          type: string
+        size:
+          type: integer
+        chunk_size:
+          type: integer
+          example: 4194304
+        status:
+          type: string
+          enum:
+          - open
+          - completing
+          - completed
+          - cleaning
+        uploaded_chunks:
+          type: array
+          items:
+            type: integer
+        expires_at:
+          type: string
+          format: date-time
+    UploadSessionCompleteResponse:
+      type: object
+      properties:
+        url:
+          type: string
+        size:
+          type: integer
+        sha256:
+          type: string
+    VideoPublishRequest:
+      type: object
+      required:
+      - title
+      - media_url
+      properties:
+        title:
+          type: string
+          example: My First Short Video
+        description:
+          type: string
+          example: Exploring GoStream platform features
+        media_url:
+          type: string
+          example: /media/39a674e2d31201ab3812048f321901ae.mp4
+        cover_url:
+          type: string
+          example: /media/39a674e2d31201ab3812048f321901ae.jpg
+    VideoUpdateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        media_url:
+          type: string
+        cover_url:
+          type: string
+    Video:
+      type: object
+      required:
+      - id
+      - author_id
+      - title
+      - media_url
+      - status
+      - created_at
+      properties:
+        id:
+          type: integer
+        author_id:
+          type: integer
+        author:
+          $ref: '#/components/schemas/User'
+        title:
+          type: string
+        description:
+          type: string
+        media_url:
+          type: string
+        cover_url:
+          type: string
+        status:
+          type: string
+          enum:
+          - processing
+          - published
+          - failed
+          - deleted
+        processing_error:
+          type: string
+        duration_ms:
+          type: integer
+        width:
+          type: integer
+        height:
+          type: integer
+        like_count:
+          type: integer
+        favorite_count:
+          type: integer
+        comment_count:
+          type: integer
+        play_count:
+          type: integer
+        liked:
+          type: boolean
+        favorited:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+    CommentCreateRequest:
+      type: object
+      required:
+      - body
+      properties:
+        body:
+          type: string
+          example: Great video!
+        parent_id:
+          type: integer
+    Comment:
+      type: object
+      required:
+      - id
+      - video_id
+      - user_id
+      - body
+      - created_at
+      properties:
+        id:
+          type: integer
+        video_id:
+          type: integer
+        user_id:
+          type: integer
+        user:
+          $ref: '#/components/schemas/User'
+        parent_id:
+          type: integer
+        body:
+          type: string
+        reply_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+    CommentPageResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Comment'
+        next_cursor:
+          type: string
+        has_more:
+          type: boolean
+    FeedResponse:
+      type: object
+      required:
+      - items
+      - has_more
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/VideoCard'
+        next_cursor:
+          type: string
+        has_more:
+          type: boolean
+    SearchResponse:
+      type: object
+      required:
+      - users
+      - videos
+      - has_more_users
+      - has_more_videos
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        videos:
+          type: array
+          items:
+            $ref: '#/components/schemas/VideoCard'
+        next_user_cursor:
+          type: integer
+        next_video_cursor:
+          type: integer
+        has_more_users:
+          type: boolean
+        has_more_videos:
+          type: boolean
+    Notification:
+      type: object
+      required:
+      - id
+      - kind
+      - text
+      - created_at
+      properties:
+        id:
+          type: integer
+          example: 10
+        kind:
+          type: string
+          enum:
+          - follow
+          - like
+          - favorite
+          - comment
+          - message
+          example: follow
+        actor_id:
+          type: integer
+          example: 2
+        actor:
+          $ref: '#/components/schemas/User'
+        video_id:
+          type: integer
+          nullable: true
+          example: 5
+        text:
+          type: string
+          example: followed you
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+    NotificationPageResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Notification'
+        next_cursor:
+          type: integer
+        has_more:
+          type: boolean
+    UnreadCountResponse:
+      type: object
+      properties:
+        unread_count:
+          type: integer
+    MarkReadResponse:
+      type: object
+      required:
+      - read
+      - read_count
+      properties:
+        read:
+          type: boolean
+          example: true
+        read_count:
+          type: integer
+          example: 5
+    DirectMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        sender_id:
+          type: integer
+        recipient_id:
+          type: integer
+        client_id:
+          type: string
+        body:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    DirectMessageHistoryResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DirectMessage'
+        next_cursor:
+          type: integer
+        has_more:
+          type: boolean
+    DirectMessageUnreadResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/DirectMessage'
+        next_cursor:
+          type: integer
+        has_more:
+          type: boolean
+    BatchAckRequest:
+      type: object
+      required:
+      - ids
+      properties:
+        ids:
+          type: array
+          items:
+            type: integer
+    BatchAckResponse:
+      type: object
+      required:
+      - acked
+      properties:
+        acked:
+          type: boolean
+          example: true
+        acked_count:
+          type: integer
+          example: 5
+    ChatGroup:
+      type: object
+      properties:
+        id:
+          type: integer
+        owner_id:
+          type: integer
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    GroupMemberRequest:
+      type: object
+      required:
+      - user_id
+      properties:
+        user_id:
+          type: integer
+    GroupMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        group_id:
+          type: integer
+        sender_id:
+          type: integer
+        client_id:
+          type: string
+        body:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    GroupHistoryResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/GroupMessage'
+        next_cursor:
+          type: integer
+        has_more:
+          type: boolean
+    GroupUnreadResponse:
+      type: object
+      properties:
+        last_ack_id:
+          type: integer
+        unread_count:
+          type: integer
+    WSClientPing:
+      type: object
+      required:
+      - type
+      properties:
+        type:
+          type: string
+          enum:
+          - ping
+          example: ping
+    WSClientDirectMessage:
+      type: object
+      required:
+      - type
+      - recipient_id
+      - client_id
+      - body
+      properties:
+        type:
+          type: string
+          enum:
+          - message
+          example: message
+        recipient_id:
+          type: integer
+          example: 2
+        client_id:
+          type: string
+          example: 7b319520-22c6-4d1a-82dc-3dbf3014c278
+        body:
+          type: string
+          example: Hello there!
+    WSClientGroupMessage:
+      type: object
+      required:
+      - type
+      - group_id
+      - client_id
+      - body
+      properties:
+        type:
+          type: string
+          enum:
+          - group_message
+          example: group_message
+        group_id:
+          type: integer
+          example: 1
+        client_id:
+          type: string
+          example: 7b319520-22c6-4d1a-82dc-3dbf3014c278
+        body:
+          type: string
+          example: Hello team!
+    WSServerReady:
+      type: object
+      required:
+      - type
+      properties:
+        type:
+          type: string
+          enum:
+          - ready
+          example: ready
+    WSServerPong:
+      type: object
+      required:
+      - type
+      properties:
+        type:
+          type: string
+          enum:
+          - pong
+          example: pong
+    WSServerError:
+      type: object
+      required:
+      - type
+      - message
+      properties:
+        type:
+          type: string
+          enum:
+          - error
+          example: error
+        message:
+          type: string
+          example: invalid message
+    WSServerDirectAck:
+      type: object
+      required:
+      - type
+      - client_id
+      - message_id
+      properties:
+        type:
+          type: string
+          enum:
+          - ack
+          example: ack
+        client_id:
+          type: string
+          example: 7b319520-22c6-4d1a-82dc-3dbf3014c278
+        message_id:
+          type: integer
+          example: 42
+    WSServerGroupAck:
+      type: object
+      required:
+      - type
+      - client_id
+      - message_id
+      - group_id
+      properties:
+        type:
+          type: string
+          enum:
+          - ack
+          example: ack
+        client_id:
+          type: string
+          example: 7b319520-22c6-4d1a-82dc-3dbf3014c278
+        message_id:
+          type: integer
+          example: 42
+        group_id:
+          type: integer
+          example: 1
+    WSServerDirectMessage:
+      type: object
+      required:
+      - type
+      - message
+      properties:
+        type:
+          type: string
+          enum:
+          - message
+          example: message
+        message:
+          $ref: '#/components/schemas/DirectMessage'
+    WSServerGroupMessage:
+      type: object
+      required:
+      - type
+      - message
+      properties:
+        type:
+          type: string
+          enum:
+          - group_message
+          example: group_message
+        message:
+          $ref: '#/components/schemas/GroupMessage'
+    WSServerSyncRequired:
+      type: object
+      required:
+      - type
+      properties:
+        type:
+          type: string
+          enum:
+          - sync_required
+          example: sync_required
+    WSServerGroupSyncRequired:
+      type: object
+      required:
+      - type
+      properties:
+        type:
+          type: string
+          enum:
+          - group_sync_required
+          example: group_sync_required
+    WSServerNotification:
+      type: object
+      required:
+      - type
+      - notification
+      properties:
+        type:
+          type: string
+          enum:
+          - notification
+        notification:
+          $ref: '#/components/schemas/Notification'

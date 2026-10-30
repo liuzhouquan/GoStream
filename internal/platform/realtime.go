@@ -59,6 +59,33 @@ func (s *Server) presenceKey(userID uint) string {
 	return fmt.Sprintf("gostream:presence:%d", userID)
 }
 
+const defaultPresenceLease = 75 * time.Second
+const defaultPresenceRenew = 30 * time.Second
+
+func (s *Server) presenceLeaseDuration() time.Duration {
+	if s.presenceLease > 0 {
+		return s.presenceLease
+	}
+	return defaultPresenceLease
+}
+
+func (s *Server) presenceRenewDuration() time.Duration {
+	if s.presenceRenew > 0 {
+		return s.presenceRenew
+	}
+	return defaultPresenceRenew
+}
+
+// SetPresenceLease must be called before starting workers or accepting requests.
+func (s *Server) SetPresenceLease(lease, renew time.Duration) error {
+	if lease <= 0 || renew <= 0 || renew >= lease {
+		return fmt.Errorf("presence requires 0 < renewal < lease")
+	}
+	s.presenceLease = lease
+	s.presenceRenew = renew
+	return nil
+}
+
 func (s *Server) refreshPresence(ctx context.Context, userID uint) {
 	if s.realtime == nil {
 		return
@@ -66,18 +93,18 @@ func (s *Server) refreshPresence(ctx context.Context, userID uint) {
 	ctx, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer cancel()
 	key := s.presenceKey(userID)
-	until := time.Now().Add(75 * time.Second)
+	until := time.Now().Add(s.presenceLeaseDuration())
 	pipe := s.realtime.client.Pipeline()
 	pipe.ZRemRangeByScore(ctx, key, "-inf", fmt.Sprint(time.Now().UnixMilli()))
 	pipe.ZAdd(ctx, key, redis.Z{Score: float64(until.UnixMilli()), Member: s.realtime.nodeID})
-	pipe.Expire(ctx, key, 90*time.Second)
+	pipe.Expire(ctx, key, s.presenceLeaseDuration()+15*time.Second)
 	if _, err := pipe.Exec(ctx); err != nil {
 		log.Printf("Redis presence refresh failed for user %d: %v", userID, err)
 	}
 }
 
 func (s *Server) renewPresence(ctx context.Context, userID uint) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(s.presenceRenewDuration())
 	defer ticker.Stop()
 	for {
 		select {

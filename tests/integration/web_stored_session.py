@@ -104,6 +104,18 @@ def main():
         if valid != {"user": "Valid", "token": "valid-fixture", "storedToken": "valid-fixture"}:
             raise AssertionError(f"valid cached session was not preserved: {valid}")
 
+        # A short desktop viewport must keep the sidebar's auth controls usable.
+        # In the broken layout its footer falls below the viewport, so a click
+        # can hit the page instead of logging out.
+        cli("set", "viewport", "1280", "577")
+        cli("click", "#auth-open")
+        expect_guest("short desktop logout")
+        cli("click", "#auth-open")
+        if not json.loads(cli("eval", "document.querySelector('#auth-dialog').matches(':modal')")):
+            raise AssertionError("short desktop login did not open a modal")
+        cli("click", "#auth-dialog .dialog-close button")
+        cli("set", "viewport", "1280", "720")
+
         cli("eval", "localStorage.setItem('gostream.user',"
                     "JSON.stringify({id:'oops',nickname:'Bad'}));"
                     "localStorage.setItem('gostream.token','stale-token')")
@@ -127,7 +139,7 @@ def main():
         print(json.dumps({"browser": "Chromium", "invalid_json": True,
                           "valid_session": True, "malformed_shape": True,
                           "missing_token": True, "empty_token": True,
-                          "missing_user": True}))
+                          "missing_user": True, "short_desktop_auth": True}))
     finally:
         try:
             cli("close")

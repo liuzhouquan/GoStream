@@ -35,7 +35,7 @@ Local recipients and the sender's other local devices are also reached by the pr
 | Direct device ACK | Exact unique `(user, device, message)` receipts; batch ownership is checked before writes | Legacy account-level ACK still suppresses replay on all devices |
 | Group device ACK | Monotonic per-group/user/device cursor, starting from the account join/read baseline | ACK means every message through that ID is read; clients must synchronize gaps before advancing it |
 | History order | Descending server-ID keyset pages; reconnect/unread direct pages ascend by ID | Same-group sends serialize ID allocation and commit; there is no cross-group commit order or live arrival order guarantee |
-| Presence | Local hub plus expiring Redis node entries; Redis failure falls back to local visibility | Configured refresh is 30 seconds and node expiry 75 seconds; this test does not wait through a full crashed-node expiry |
+| Presence | Local hub plus expiring Redis node entries; Redis failure falls back to local visibility | Default refresh is 30 seconds and node expiry 75 seconds; the process matrix now checks the stored default lease and waits through real expiry after SIGKILL |
 | Device retention | New IDs capped at 32; 30-day idle eviction and 90-day expiry remove device-specific state, retaining messages | Continuously active devices' exact receipts are not compacted yet |
 
 Group removal blocks later sends/history reads and removes that member's device cursors. Remote group hints recheck current SQL membership before dispatch. Data already delivered before removal cannot be recalled. The server commit-order regression below is separate from the process matrix. The web client pages older group history before advancing ACK beyond an unread backlog. Every live hint triggers paged SQL-history synchronization back to its verified boundary. Failed synchronization blocks ACK advancement; stale requests and ACK responses are discarded when switching groups. Browser fixtures verify these paths; final combined-deployment browser acceptance remains pending.
@@ -98,7 +98,7 @@ Direct invocation of `TestIMProcessRecovery` requires all of `GOSTREAM_TEST_IM_B
 
 Local execution used Go 1.27.2, MySQL 8.4.11, Redis 8.2.9 and WSL2 Linux x86_64; actual run results are in [`PROGRESS.md`](../PROGRESS.md). Test duration is correctness-check runtime, not a message latency or capacity measurement. This work does not claim the 20-client/1,000-message performance gate has passed.
 
-A07 remains partial pending the final two-browser/full-component workflow, full presence-expiry fault observation, long-lived active-device receipt compaction and the prescribed load run. Device eviction/expiry have separate existing SQLite/MySQL tests; this process matrix does not simulate 90 days. RabbitMQ commit/confirm/ACK kill windows remain separate A06 work. A disconnect can produce duplicate real-time events; SQL history and receipts, with client synchronization, provide recovery.
+A07 remains partial pending the final two-browser/full-component workflow, long-lived active-device receipt compaction and the prescribed load run. Device eviction/expiry have separate existing SQLite/MySQL tests; this process matrix does not simulate 90 days. RabbitMQ commit/confirm/ACK kill windows remain separate A06 work. A disconnect can produce duplicate real-time events; SQL history and receipts, with client synchronization, provide recovery.
 
 ## Code reading order
 
@@ -114,3 +114,10 @@ A07 remains partial pending the final two-browser/full-component workflow, full 
 A current member can read the full retained group history, including messages before first invitation and during an absence. Invitation/re-invitation sets the shared unread baseline to the latest committed group message, so older messages remain readable but do not become a new unread backlog. Removal deletes membership and account/device group read state and denies history, unread, ACK and new sends. `TestGroupMembershipLifecycleAndHistorySemantics` verifies the sequential lifecycle; concurrent send/ACK removal is a separate MySQL regression.
 
 The proposed `feat/im-device-lifecycle` compaction is withheld: promoting device receipts to account-wide `acked_at` suppresses unread on a newly registered device, and its device-count check is not serialized with registration. Existing 30/90-day eviction/expiry remains in place. Full default 75-second crash-presence observation and safe active-device receipt compaction are still pending. See [seven-branch review](BRANCH_REVIEW.md).
+
+
+## Presence lifecycle revision
+
+`PRESENCE_LEASE` and `PRESENCE_RENEW` configure startup timing. Unset values retain 75s/30s; an explicit lease with no renewal uses half the lease. Invalid durations, zero values and `renew >= lease` are rejected. `SetPresenceLease` is startup configuration and must precede workers/requests. The real process matrix leaves these variables unset, checks a fresh Redis score has approximately 75 seconds remaining, kills the recipient and waits up to 85 seconds for offline visibility. The surviving sender is kept alive with normal ping/pong. Miniredis's 80ms unit check is separate evidence, not a substitute for the default process test. CI results are in the current review/PR.
+
+This branch adds regression coverage for new-device unread, expiration and concurrent registration without introducing the previously rejected global `acked_at` compaction. Safe compaction for continuously active devices remains unfinished.

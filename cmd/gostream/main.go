@@ -116,6 +116,13 @@ func main() {
 		if err := server.UseRedisRealtime(client); err != nil {
 			log.Fatalf("initialize realtime bridge: %v", err)
 		}
+		lease, renew, err := presenceDurations(os.Getenv("PRESENCE_LEASE"), os.Getenv("PRESENCE_RENEW"))
+		if err != nil {
+			log.Fatal(err)
+		}
+		if err := server.SetPresenceLease(lease, renew); err != nil {
+			log.Fatal(err)
+		}
 		pingCtx, cancel := context.WithTimeout(context.Background(), time.Second)
 		if err := client.Ping(pingCtx).Err(); err != nil {
 			log.Printf("Redis unavailable at startup; Feed will use database reads: %v", err)
@@ -197,4 +204,27 @@ func env(key, fallback string) string {
 
 func sqliteDSN(path string) string {
 	return path + "?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1"
+}
+
+// Presence configuration is applied before any workers or HTTP requests start.
+func presenceDurations(rawLease, rawRenew string) (time.Duration, time.Duration, error) {
+	lease, renew := 75*time.Second, 30*time.Second
+	var err error
+	if rawLease != "" {
+		lease, err = time.ParseDuration(rawLease)
+		if err != nil {
+			return 0, 0, fmt.Errorf("invalid PRESENCE_LEASE")
+		}
+		renew = lease / 2
+	}
+	if rawRenew != "" {
+		renew, err = time.ParseDuration(rawRenew)
+		if err != nil {
+			return 0, 0, fmt.Errorf("invalid PRESENCE_RENEW")
+		}
+	}
+	if lease <= 0 || renew <= 0 || renew >= lease {
+		return 0, 0, fmt.Errorf("presence requires 0 < PRESENCE_RENEW < PRESENCE_LEASE")
+	}
+	return lease, renew, nil
 }
