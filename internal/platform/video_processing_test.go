@@ -275,12 +275,18 @@ func TestVideoProcessingCompletionPublishesAtomically(t *testing.T) {
 
 func jsonContainsVideo(raw []byte, id uint) bool {
 	var page struct {
-		Items []Video `json:"items"`
+		Items  []Video `json:"items"`
+		Videos []Video `json:"videos"`
 	}
 	if json.Unmarshal(raw, &page) != nil {
 		return false
 	}
 	for _, video := range page.Items {
+		if video.ID == id {
+			return true
+		}
+	}
+	for _, video := range page.Videos {
 		if video.ID == id {
 			return true
 		}

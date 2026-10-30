@@ -20,6 +20,10 @@ import (
 	"gorm.io/gorm"
 )
 
+// sampleWebM and sampleMOV are minimal valid EBML/WebM and QuickTime/MOV container
+// headers used to test HTTP multipart format detection, magic bytes, extension matching,
+// and upload acceptance at the ingress boundary. Full frame decoding, transcoding, and
+// thumbnail extraction are exercised in the asynchronous FFmpeg worker suite.
 var (
 	sampleWebM = []byte{0x1a, 0x45, 0xdf, 0xa3, 0x9f, 0x42, 0x86, 0x81, 0x01, 0x42, 0xf7, 0x81, 0x01, 0x42, 0xf2, 0x81, 0x04, 0x42, 0x82, 0x84, 'w', 'e', 'b', 'm'}
 	sampleMOV  = []byte{0, 0, 0, 20, 'f', 't', 'y', 'p', 'q', 't', ' ', ' ', 0, 0, 0, 0, 'q', 't', ' ', ' '}
@@ -303,9 +307,15 @@ func testMediaPermissionAndOwnershipMatrix(t *testing.T, h http.Handler, db *gor
 
 // TestMediaEndpointAccessAndPrivacySemantics validates path traversal protection,
 // invalid name filtering, public accessibility of published video content, and
-// documents the direct 128-bit unguessable nonce media URL semantics for unpublished uploads.
+// documents the direct 128-bit unguessable nonce media URL semantics for unpublished uploads
+// on local filesystem storage.
 func TestMediaEndpointAccessAndPrivacySemantics(t *testing.T) {
 	s, h, db := testServer(t)
+	testMediaAccessAndPrivacySemantics(t, s, h, db)
+}
+
+func testMediaAccessAndPrivacySemantics(t *testing.T, s *Server, h http.Handler, db *gorm.DB) {
+	t.Helper()
 	_, token := registerTestUser(t, h, "privacy_author")
 
 	// 1. Path traversal and malformed name rejection
@@ -328,7 +338,7 @@ func TestMediaEndpointAccessAndPrivacySemantics(t *testing.T) {
 		})
 	}
 
-	// 2. Published video accessibility
+	// 2. Published video accessibility and search visibility
 	res := uploadTestMedia(t, h, token, "clip.mp4", sampleMP4)
 	if res.Code != http.StatusCreated {
 		t.Fatalf("upload: %d", res.Code)
@@ -337,12 +347,14 @@ func TestMediaEndpointAccessAndPrivacySemantics(t *testing.T) {
 	_ = json.Unmarshal(res.Body.Bytes(), &asset)
 
 	pubRes := request(t, h, http.MethodPost, "/api/videos", token, map[string]string{
-		"title":     "Public Clip",
+		"title":     "Public Searchable Clip",
 		"media_url": asset.URL,
 	})
 	if pubRes.Code != http.StatusCreated {
 		t.Fatalf("publish: %d", pubRes.Code)
 	}
+	var pubVideo Video
+	_ = json.Unmarshal(pubRes.Body.Bytes(), &pubVideo)
 
 	// Guest can read the published video media directly
 	mediaRes := request(t, h, http.MethodGet, asset.URL, "", nil)
@@ -353,16 +365,21 @@ func TestMediaEndpointAccessAndPrivacySemantics(t *testing.T) {
 		t.Fatal("fetched media payload differs from uploaded sample")
 	}
 
-	// 3. Unpublished source media access semantics (P2 audit verification):
-	// When a video is in "processing" state (or failed), it must NOT appear in feeds or user profile,
-	// but the underlying asset URL is content-addressed by a 128-bit unguessable nonce token.
+	// Published video is discoverable in search
+	searchPub := request(t, h, http.MethodGet, "/api/search?q=Searchable&type=videos", "", nil)
+	if searchPub.Code != http.StatusOK || !jsonContainsVideo(searchPub.Body.Bytes(), pubVideo.ID) {
+		t.Fatalf("published video not found in search: %d %s", searchPub.Code, searchPub.Body.String())
+	}
+
+	// 3. Unpublished source media access & privacy semantics:
+	// When a video is in "processing" state (or failed), it must NOT appear in feeds, user profile, or search.
 	s.UseFFmpeg("ffmpeg-mock")
 	resUnpublished := uploadTestMedia(t, h, token, "source.mp4", sampleMP4)
 	var assetUnpub struct{ URL string }
 	_ = json.Unmarshal(resUnpublished.Body.Bytes(), &assetUnpub)
 
 	createProcessing := request(t, h, http.MethodPost, "/api/videos", token, map[string]string{
-		"title":     "Processing Video",
+		"title":     "Processing Secret Video",
 		"media_url": assetUnpub.URL,
 	})
 	if createProcessing.Code != http.StatusCreated {
@@ -374,10 +391,12 @@ func TestMediaEndpointAccessAndPrivacySemantics(t *testing.T) {
 		t.Fatalf("expected status processing, got %s", unpubVideo.Status)
 	}
 
-	// Assert absent from public timeline feed
-	feed := request(t, h, http.MethodGet, "/api/feed?scene=timeline", "", nil)
-	if feed.Code != http.StatusOK || jsonContainsVideo(feed.Body.Bytes(), unpubVideo.ID) {
-		t.Fatal("processing video leaked into public timeline feed")
+	// Assert absent from public timeline, hot, and recommend feeds
+	for _, scene := range []string{"timeline", "hot", "recommend"} {
+		feed := request(t, h, http.MethodGet, "/api/feed?scene="+scene, "", nil)
+		if feed.Code != http.StatusOK || jsonContainsVideo(feed.Body.Bytes(), unpubVideo.ID) {
+			t.Fatalf("processing video leaked into public %s feed", scene)
+		}
 	}
 
 	// Assert absent from author's public video profile for guests
@@ -386,12 +405,50 @@ func TestMediaEndpointAccessAndPrivacySemantics(t *testing.T) {
 		t.Fatal("processing video leaked into guest profile view")
 	}
 
+	// Author CAN view own processing video in private profile view
+	authorVideos := request(t, h, http.MethodGet, fmt.Sprintf("/api/users/%d/videos", unpubVideo.AuthorID), token, nil)
+	if authorVideos.Code != http.StatusOK || !jsonContainsVideo(authorVideos.Body.Bytes(), unpubVideo.ID) {
+		t.Fatal("author cannot see own processing video in profile")
+	}
+
+	// Assert strictly absent from search
+	for _, searchURL := range []string{
+		"/api/search?q=Processing&type=videos",
+		"/api/search?q=Secret&type=videos",
+		"/api/search?q=Processing&type=all",
+	} {
+		searchRes := request(t, h, http.MethodGet, searchURL, "", nil)
+		if searchRes.Code != http.StatusOK || jsonContainsVideo(searchRes.Body.Bytes(), unpubVideo.ID) {
+			t.Fatalf("processing video leaked into search query %s", searchURL)
+		}
+	}
+
+	// 4. Failed video privacy semantics
+	if err := db.Model(&unpubVideo).Update("status", "failed").Error; err != nil {
+		t.Fatal(err)
+	}
+	feedFailed := request(t, h, http.MethodGet, "/api/feed?scene=timeline", "", nil)
+	if feedFailed.Code != http.StatusOK || jsonContainsVideo(feedFailed.Body.Bytes(), unpubVideo.ID) {
+		t.Fatal("failed video leaked into timeline feed")
+	}
+	searchFailed := request(t, h, http.MethodGet, "/api/search?q=Secret&type=videos", "", nil)
+	if searchFailed.Code != http.StatusOK || jsonContainsVideo(searchFailed.Body.Bytes(), unpubVideo.ID) {
+		t.Fatal("failed video leaked into search")
+	}
+	singleAnon := request(t, h, http.MethodGet, fmt.Sprintf("/api/videos/%d", unpubVideo.ID), "", nil)
+	if singleAnon.Code != http.StatusNotFound {
+		t.Fatalf("anonymous fetch of failed video expected 404, got %d", singleAnon.Code)
+	}
+	singleAuthor := request(t, h, http.MethodGet, fmt.Sprintf("/api/videos/%d", unpubVideo.ID), token, nil)
+	if singleAuthor.Code != http.StatusOK {
+		t.Fatalf("author fetch of failed video expected 200, got %d", singleAuthor.Code)
+	}
+
 	// Direct access with known 128-bit nonce URL succeeds (standard CDN/static media model)
 	unpubMedia := request(t, h, http.MethodGet, assetUnpub.URL, "", nil)
 	if unpubMedia.Code != http.StatusOK {
 		t.Fatalf("direct media URL with 128-bit nonce expected 200, got %d", unpubMedia.Code)
 	}
-	_ = db
 }
 
 // TestMinIOMediaFormatAndPermissionMatrix repeats the format and permission matrix against MinIO
@@ -414,13 +471,17 @@ func TestMinIOMediaFormatAndPermissionMatrix(t *testing.T) {
 	t.Cleanup(func() {
 		cleanCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		var cleanupErrs []error
 		for _, prefix := range []string{"chunks/", "media/"} {
 			if err := store.removePrefix(cleanCtx, prefix); err != nil {
-				t.Errorf("clean objects: %v", err)
+				cleanupErrs = append(cleanupErrs, fmt.Errorf("clean %s: %w", prefix, err))
 			}
 		}
 		if err := store.client.RemoveBucket(cleanCtx, bucket); err != nil {
-			t.Errorf("remove bucket: %v", err)
+			cleanupErrs = append(cleanupErrs, fmt.Errorf("remove bucket: %w", err))
+		}
+		for _, err := range cleanupErrs {
+			t.Errorf("minio cleanup failure: %v", err)
 		}
 	})
 
@@ -430,4 +491,5 @@ func TestMinIOMediaFormatAndPermissionMatrix(t *testing.T) {
 
 	testMediaFormatValidation(t, h, db)
 	testMediaPermissionAndOwnershipMatrix(t, h, db)
+	testMediaAccessAndPrivacySemantics(t, s, h, db)
 }
