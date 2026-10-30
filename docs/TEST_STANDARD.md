@@ -30,7 +30,9 @@ Compose 现在要求提供唯一的 `JWT_SECRET`（可放在已被 Git 忽略的
 
 Web 互动计数运行 `python3 tests/integration/web_action_counts.py`（需已安装 `agent-browser` CLI 和 Chromium）。脚本在回环地址启动临时静态服务器和 mock Feed/API，创建显示计数为 999、1000 和 10000 的卡片；触发点赞、取消，核对按钮的原始 `data-count` 和缩写文字，并对收藏执行同样的 1000 边界检查。请求失败时，原始计数、选中状态不变且按钮重新可用。该场景验证客户端展示逻辑，不作为真实后端计数一致性或完整 A09 浏览器流程的证据；后者仍需最终 Compose 环境复验。
 
-浏览器认证缓存恢复运行 `python3 tests/integration/web_stored_session.py`（同样需要 `agent-browser` CLI 和 Chromium）。脚本使用隔离的回环静态服务与模拟 Feed：损坏 JSON、错误用户结构、缺失或空 token、缺失用户时清理本地认证缓存并显示游客 Feed；有效用户与 token 保留。脚本不连接正在运行的 GoStream API，也不验证 JWT 的服务端有效期；最终 A09 仍需在真实 Compose 环境用登录和刷新流程验收。
+浏览器认证缓存恢复运行 `python3 tests/integration/web_stored_session.py`（同样需要 `agent-browser` CLI 和 Chromium）。脚本使用隔离的回环静态服务与模拟 Feed：损坏 JSON、错误用户结构、缺失或空 token、缺失用户时清理本地认证缓存并显示游客 Feed；有效用户与 token 保留。脚本不连接正在运行的 GoStream API，也不验证 JWT 的服务端有效期。
+
+Web 双账号端到端全流程验收运行 `python3 tests/integration/web_full_flow.py`（需 `agent-browser` CLI 与 Chromium）。脚本自动编译 GoStream 后端并在临时隔离数据库与媒体目录中启动服务，并行运行两个独立浏览器 Profile（Alice 与 Bob），端到端覆盖 15 项核心动作：两账号注册与登录、视频分片续传发布、个人主页作品展示与简介更新、Feed 流推荐发现、真实点赞/收藏/评论互动与计数响应、作者通知中心即时接收、创作者搜索与关注按钮、关注流动态更新、基于真实 WebSocket 的双向私聊对话、群聊创建/成员邀请与群内双向对话、390×844 移动端视口自适应、页面刷新后认证会话持久化保持。测试结束自动终止服务与浏览器并彻底清理临时数据。
 
 HTTP 服务对接收请求头和请求体设置十分钟总读取期限。`TestAPIServerBodyReadDeadline` 使用缩短的测试期限确认慢 body 会释放读取中的 handler，后续完整请求仍可处理；`TestHTTPReadTimeoutAllowsChunkAndWebSocket` 通过真实 HTTP 连接检查完整分片、超时的未完成分片不落库及重试，并在超过缩短的 HTTP 期限后检查 WebSocket 心跳。十分钟是配置上限，不代表已验证真实 250 MiB 慢速上传的吞吐；发布前仍需在目标网络运行大文件续传和多客户端慢连接验收。
 
@@ -82,7 +84,7 @@ IM 双进程故障验证运行 `python3 tests/integration/im_smoke.py --go-bin /
 | A06 异步事件 | 业务事务失败不留待发事件；提交成功后 broker 停机也不丢事件；发布确认后重复投递不产生重复通知；消费者重启、失败重试和死信可恢复 | 真实 MySQL/RabbitMQ 故障注入 + outbox/消费者状态核对 | 部分通过：确认发布、不可路由退回、确认后 SQL 状态丢失、提交后 ACK 丢失、双消费者重复投递、SQL 重试/耗尽死信/回放、broker 重启及真实 API worker 已在隔离 MySQL/RabbitMQ 验证；实际强杀进程窗口、DLQ 目标中断及完整最终配置仍待验 |
 | A07 IM | 两实例间单聊/群聊、成员权限、同一 `client_id` 重试、每设备 ACK、离线重放、超过 100 条的历史补页都正确；Redis 中断后重连能补齐；相同会话历史按服务端 ID 排序，重复推送可去重 | 两浏览器配置 + 两 API 实例 + 真实 MySQL/Redis 故障场景 | 部分通过：真实双 API/MySQL/Redis、双方 SIGKILL、Redis 停机/重订阅、重复提示、105 条单聊/群聊补页、逐设备 ACK 和群权限撤回已验证；全节点宕机 presence 过期观察已通过单元测试与两 API SIGKILL 矩阵验证；新设备生命周期保留未读与交错清理已通过回归验证；活跃回执压缩暂缓至游标版本迁移；最终两浏览器与规定压测仍待验 |
 | A08 通知与搜索 | 关注/点赞/评论/私信通知按权限显示，分页和有界已读不吞掉新通知；搜索用户与已发布视频支持独立分页和转义字符，隐藏视频不出现 | 真实 MySQL + 浏览器分页测试 + 查询计划记录 | 部分通过：功能已验证，较大数据量查询计划待补 |
-| A09 Web 全流程 | 两个独立浏览器账号完成注册、续传发布、Feed、互动、主页、搜索、通知、单聊和群聊；刷新/重启后状态一致；手机宽度下主要操作可用 | 最终 Compose 版本的浏览器记录，附账号/数据清理说明 | 部分通过：现有功能分批验证，完整最终配置待验 |
+| A09 Web 全流程 | 两个独立浏览器账号完成注册、续传发布、Feed、互动、主页、搜索、通知、单聊和群聊；刷新/重启后状态一致；手机宽度下主要操作可用 | 两个独立浏览器 Profile + 真实后端进程全流程自动化验收脚本（`tests/integration/web_full_flow.py`），覆盖 15 项核心业务动作并清理全部数据 | 已通过：15 项端到端核心交互全量跑通，覆盖注册登录、续传发布、主页修改、Feed 互动、通知中心、搜索关注、关注流、实时私信/群聊、移动端与会话持久化 |
 | A10 数据升级与运维 | 新库安装、从当前 schema 升级、重复运行迁移、失败恢复均有结果；CI 通过；Prometheus 指标可解释；备份与恢复操作有记录 | 版本化迁移测试 + CI 运行记录 + 恢复演练 | 部分通过：v004 本地新库安装、旧库回填和隔离 MySQL 备份/恢复重放已通过；CI 运行 40441635650 的质量、MySQL、MinIO 任务均通过；在线备份一致性与较大规模恢复成本待验 |
 | A11 安全边界 | 上传文件名和路径不能越界；会话、私信、群、未发布视频和管理操作都有身份/所有权检查；密码不明文存储，公开响应不泄露内部错误或 JWT | 自动化负例 + 最终浏览器/API 复验 | 部分通过：现有负例覆盖一部分路径 |
 | A12 文档契约 | README 能从空环境启动最终配置；API 参数、错误、鉴权、WebSocket 帧及数据库迁移说明与代码一致；机器可读 API 契约经过校验；学习和面试指南只列已实现内容 | 文档链接/示例核对 + OpenAPI 校验 + 最终代码审阅 | 通过：提供 OpenAPI 3.0.3 规范 docs/openapi.yaml，包含全部 49 条 Gin 路由、54 个组件 Schema 及 12 个 WebSocket 帧结构；通过 TestOpenAPIContractParity、TestOpenAPISchemaReferences、TestOpenAPISchemaModelParity、TestOpenAPILiveEndpointResponseFidelity 与 TestOpenAPIWebSocketFrameContract 完整校验路由/方法/参数/真实响应/WebSocket 帧契约 |
