@@ -122,37 +122,73 @@ def main():
                 f"SELECT COUNT(*) FROM `{schema}`.outbox_events o JOIN `{schema}`.notifications n "
                 f"ON o.event_key=CONCAT('broker-delivery:notification:',n.id) WHERE n.user_id={owner['user']['id']} AND o.published_at IS NOT NULL;") == "1")
 
-            # Scenario 2: SIGKILL fault injection and worker recovery
+            # Scenario 2: Precise publisher confirm window SIGKILL fault injection and worker recovery
+            # Pause broker container to block AMQP confirm traffic, forcing worker into publisher confirm wait
+            run(["docker", "pause", container], capture_output=True)
             actor2 = call("/api/users", {"username": "process_actor2", "nickname": "Actor2", "password": "fixture-password-123"})
             call(f"/api/users/me/following/{owner['user']['id']}", None, actor2["access_token"], "PUT")
+            wait("worker claimed row and entered publisher confirm wait", lambda: mysql(
+                f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE topic='notification.created' AND published_at IS NULL AND attempts >= 1;") == "1")
+
+            # Forcibly kill API process with SIGKILL precisely while blocked waiting for publisher confirm
             api.send_signal(signal.SIGKILL)
             if api.wait(timeout=10) != -signal.SIGKILL:
                 raise RuntimeError("API did not exit via SIGKILL")
             api = None
 
+            # Verify in SQL: published_at is STILL NULL; row was not prematurely marked sent
+            if mysql(f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE topic='notification.created' AND published_at IS NULL AND attempts >= 1;") != "1":
+                raise AssertionError("unconfirmed event prematurely marked published before SIGKILL")
+
+            # Unpause broker and reset lease available_at for immediate restart pickup
+            run(["docker", "unpause", container], capture_output=True)
+            mysql(f"UPDATE `{schema}`.outbox_events SET available_at=UTC_TIMESTAMP(3) WHERE published_at IS NULL;")
+
             api = subprocess.Popen([str(work / "gostream")], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
             wait("restarted API readiness", lambda: reachable(base + "/ready"))
-            wait("recovery of event after SIGKILL", lambda: mysql(
+            wait("recovery of event after SIGKILL in confirm window", lambda: mysql(
                 f"SELECT COUNT(*) FROM `{schema}`.outbox_events o JOIN `{schema}`.notifications n "
                 f"ON o.event_key=CONCAT('broker-delivery:notification:',n.id) WHERE n.user_id={owner['user']['id']} AND o.published_at IS NOT NULL;") == "2")
 
-            # Scenario 3: Small finite backlog drain while worker is offline
+            # Scenario 3: Sustained backlog drain of 50 events while worker is offline
+            actor3 = call("/api/users", {"username": "process_actor3", "nickname": "Actor3", "password": "fixture-password-123"})
             api.send_signal(signal.SIGTERM)
             if api.wait(timeout=10) != 0:
                 raise RuntimeError("API shutdown before backlog drain failed")
             api = None
 
-            for i in range(5):
+            const_backlog = 50
+            for i in range(const_backlog):
                 mysql(f"INSERT INTO `{schema}`.notifications(user_id,actor_id,kind,text,event_key,created_at) "
-                      f"VALUES({owner['user']['id']},{actor['user']['id']},'follow','backlog-{i}','backlog-key-{tag}-{i}',UTC_TIMESTAMP(3));")
-                nid = mysql(f"SELECT id FROM `{schema}`.notifications WHERE event_key='backlog-key-{tag}-{i}';")
+                      f"VALUES({owner['user']['id']},{actor3['user']['id']},'follow','sustained-backlog-{i}','sustained-key-{tag}-{i}',UTC_TIMESTAMP(3));")
+                nid = mysql(f"SELECT id FROM `{schema}`.notifications WHERE event_key='sustained-key-{tag}-{i}';")
                 mysql(f"INSERT INTO `{schema}`.outbox_events(event_key,topic,payload,attempts,available_at,created_at) "
                       f"VALUES('notification:{nid}','notification.created','{{\"notification_id\":{nid}}}',0,UTC_TIMESTAMP(3),UTC_TIMESTAMP(3));")
 
             api = subprocess.Popen([str(work / "gostream")], cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
             wait("API readiness for backlog drain", lambda: reachable(base + "/ready"))
-            wait("drain small backlog of 5 events", lambda: mysql(
-                f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE topic='notification.deliver' AND published_at IS NOT NULL;") == "7")
+            expected_deliveries = 2 + const_backlog
+            wait(f"drain sustained backlog of {const_backlog} events", lambda: mysql(
+                f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE topic='notification.deliver' AND published_at IS NOT NULL;") == str(expected_deliveries), seconds=60)
+
+            # Assert all source events marked published and zero dead letters
+            if mysql(f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE topic='notification.created' AND published_at IS NOT NULL;") != str(expected_deliveries):
+                raise AssertionError("not all source backlog events were published")
+            if mysql(f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE dead_at IS NOT NULL;") != "0":
+                raise AssertionError("unexpected dead outbox events during backlog drain")
+
+            # Verify queue depth returns to 0 via RabbitMQ Management HTTP API
+            auth_handler = urllib.request.HTTPBasicAuthHandler()
+            auth_handler.add_password(realm="RabbitMQ Management", uri=f"http://127.0.0.1:{http_port}", user="gostream-test", passwd=broker_password)
+            opener = urllib.request.build_opener(auth_handler)
+            def queue_depth():
+                try:
+                    with opener.open(f"http://127.0.0.1:{http_port}/api/queues/%2f/gostream.process.{tag}", timeout=2) as r:
+                        data = json.load(r)
+                        return data.get("messages", -1)
+                except Exception:
+                    return -1
+            wait("broker queue depth returns to 0", lambda: queue_depth() == 0, seconds=15)
 
             api.send_signal(signal.SIGTERM)
             if api.wait(timeout=10) != 0:
