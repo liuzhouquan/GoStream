@@ -1,8 +1,22 @@
 # GoStream development progress
 
-Last updated: 2026-10-29
+Last updated: 2026-10-30
 
 The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs/DELIVERY_SCOPE.md); the test matrix and pass criteria are in [`docs/TEST_STANDARD.md`](docs/TEST_STANDARD.md). Checked items below record individual features or local verification; they do not mean the whole project has met those release gates.
+
+2026-10-30 A08 query plans and index coverage validation (`test/query-plans-and-index-validation`):
+- Added automated query plan test suite `internal/platform/query_plan_test.go` covering 13 critical query paths across Notifications, Search, Direct Chat, Group Chat, Timeline Feed, Author Videos, Hybrid Inboxes, Comments, and Video Actions.
+- Validated keyset pagination without temporary sorting/filesort:
+  - Notifications (`idx_notification_user_id (user_id, id DESC)`)
+  - Direct chat history (`idx_message_thread_id (sender_id, recipient_id, id DESC)`)
+  - Comments root threads (`idx_comment_thread (video_id, parent_id, created_at DESC, id DESC)`)
+- Validated covering indexes:
+  - Notification unread count (`idx_notification_unread (user_id, read_at, id DESC)`)
+  - Multi-device direct unread anti-join (`ux_message_device_ack (user_id, device_id, message_id)`)
+  - Hybrid feed inbox pagination (`idx_feed_inbox_user (user_id, created_at DESC, video_id DESC)`)
+- Verified redundant legacy indexes in `TestRedundantIndexesAnalysis`:
+  - `idx_notification_page (user_id, created_at DESC)` and `idx_message_thread (sender_id, recipient_id, created_at)` are confirmed unused by runtime keyset pagination queries and marked for future schema cleanup.
+- Created comprehensive documentation in [`docs/QUERY_PLANS.md`](docs/QUERY_PLANS.md) resolving A08 query-plan requirements.
 
 2026-10-29 seven-branch review (baseline `876b4b6`): independent Standards/Spec reviews and actual reproduction are in [`docs/BRANCH_REVIEW.md`](docs/BRANCH_REVIEW.md). Five branches are included with review fixes: web group synchronization, group revocation, RabbitMQ restart tests, media header/permissions/outage tests and group history lifecycle. `feat/im-device-lifecycle` and `feat/openapi-spec` are withheld; new-device unread loss and incorrect/insufficiently validated contracts block them. Their original code and premature acceptance claims are not part of the integrated runtime.
 
