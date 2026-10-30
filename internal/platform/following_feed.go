@@ -9,6 +9,15 @@ import (
 // leave the ordinary pull index, while a separate indexed range keeps videos
 // visible to followers who joined after publication.
 func (s *Server) followingVideos(ctx context.Context, viewerID uint, cursor feedCursor, limit int) ([]Video, error) {
+	// Fast-path: if the viewer does not follow any authors, avoid running the 3-subquery UNION.
+	var hasFollows bool
+	if err := s.DB.WithContext(ctx).Raw("SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = ?)", viewerID).Scan(&hasFollows).Error; err != nil {
+		return nil, err
+	}
+	if !hasFollows {
+		return []Video{}, nil
+	}
+
 	cursorTime := cursor.createdTime()
 	var sql strings.Builder
 	args := []any{viewerID, "published", true}
