@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,6 +43,16 @@ func TestMySQLDeviceAckQueryProfile(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("environment go=%s os=%s arch=%s cpu=%d mysql=%s", runtime.Version(), runtime.GOOS, runtime.GOARCH, runtime.NumCPU(), version)
+	var settings struct {
+		BufferPool uint64
+		Isolation  string
+		Optimizer  string
+	}
+	if err := db.Raw("SELECT @@innodb_buffer_pool_size AS buffer_pool, @@transaction_isolation AS isolation, @@optimizer_switch AS optimizer").Scan(&settings).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("mysql settings=%+v", settings)
+
 	for _, size := range []int{1000, 10000} {
 		t.Run(fmt.Sprintf("ranges_%d", size), func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -107,7 +118,7 @@ func TestMySQLDeviceAckQueryProfile(t *testing.T) {
 						name  string
 						query func() *gorm.DB
 					}{
-						{"runtime", func() *gorm.DB { return s.pendingDirectMessages(users[1].ID, testDeviceA) }},
+						{"runtime", nil},
 						{"v005", func() *gorm.DB {
 							return ackQueryProfileBase(tx, users[1].ID).Where("NOT EXISTS (SELECT 1 FROM message_device_ack_ranges r WHERE r.user_id = ? AND r.device_id = ? AND chat_messages.id BETWEEN r.first_message_id AND r.last_message_id)", users[1].ID, testDeviceA)
 						}},
@@ -118,10 +129,22 @@ func TestMySQLDeviceAckQueryProfile(t *testing.T) {
 					for round := 0; round < 4; round++ {
 						for offset := range len(variants) {
 							v := variants[(round+offset)%len(variants)]
-							q := v.query().Where("chat_messages.id > ?", page.after).Order("chat_messages.id ASC").Limit(101)
 							var rows []ChatMessage
+							var q *gorm.DB
+							var err error
+							recorder := &ackProfileLogger{Interface: logger.Default.LogMode(logger.Silent)}
 							start := time.Now()
-							if err := q.Find(&rows).Error; err != nil {
+							if v.name == "runtime" {
+								reader := s
+								if round == 0 {
+									reader = &Server{DB: tx.Session(&gorm.Session{Logger: recorder})}
+								}
+								rows, err = reader.loadPendingDirectMessages(ctx, users[1].ID, testDeviceA, page.after, 101)
+							} else {
+								q = v.query().Where("chat_messages.id > ?", page.after).Order("chat_messages.id ASC").Limit(101)
+								err = q.Find(&rows).Error
+							}
+							if err != nil {
 								t.Fatal(err)
 							}
 							elapsed := time.Since(start)
@@ -136,12 +159,17 @@ func TestMySQLDeviceAckQueryProfile(t *testing.T) {
 								t.Logf("sample ranges=%d page=%s variant=%s round=%d rows=%d ms=%.3f", size, page.name, v.name, round, len(rows), float64(elapsed.Microseconds())/1000)
 							}
 							if round == 0 {
-								stmt := q.Session(&gorm.Session{DryRun: true}).Find(&[]ChatMessage{}).Statement
-								var plan []string
-								if err := tx.Raw("EXPLAIN ANALYZE "+stmt.SQL.String(), stmt.Vars...).Scan(&plan).Error; err != nil {
-									t.Fatal(err)
+								if q != nil {
+									stmt := q.Session(&gorm.Session{DryRun: true}).Find(&[]ChatMessage{}).Statement
+									recorder.queries = []string{tx.Dialector.Explain(stmt.SQL.String(), stmt.Vars...)}
 								}
-								t.Logf("plan variant=%s\n%s", v.name, plan)
+								for i, query := range recorder.queries {
+									var plan []string
+									if err := tx.Raw("EXPLAIN ANALYZE " + query).Scan(&plan).Error; err != nil {
+										t.Fatal(err)
+									}
+									t.Logf("plan variant=%s query=%d\n%s", v.name, i, plan)
+								}
 							}
 						}
 					}
@@ -156,4 +184,17 @@ func ackQueryProfileBase(db *gorm.DB, user uint) *gorm.DB {
 	return db.Model(&ChatMessage{}).Where("chat_messages.recipient_id = ? AND chat_messages.acked_at IS NULL", user).
 		Joins("LEFT JOIN message_device_acks ON message_device_acks.message_id = chat_messages.id AND message_device_acks.user_id = ? AND message_device_acks.device_id = ?", user, testDeviceA).
 		Where("message_device_acks.id IS NULL").Select("chat_messages.*")
+}
+
+// Capture only the production loader's SELECTs, not savepoints or fixture writes.
+type ackProfileLogger struct {
+	logger.Interface
+	queries []string
+}
+
+func (l *ackProfileLogger) Trace(_ context.Context, _ time.Time, fc func() (string, int64), _ error) {
+	query, _ := fc()
+	if strings.HasPrefix(query, "SELECT ") {
+		l.queries = append(l.queries, query)
+	}
 }

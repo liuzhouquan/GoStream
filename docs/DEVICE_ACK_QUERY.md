@@ -19,4 +19,17 @@
 GOSTREAM_TEST_ACK_QUERY_PROFILE=1 go test ./internal/platform -run '^TestMySQLDeviceAckQueryProfile$' -count=1 -v -timeout=10m
 ```
 
-还需 `GOSTREAM_TEST_MYSQL_DSN` 指向已经迁移的隔离 MySQL 8.4 数据库。CI 的 MySQL 任务运行并保留日志。实测结果待补充。
+还需 `GOSTREAM_TEST_MYSQL_DSN` 指向已经迁移的隔离 MySQL 8.4 数据库。CI 的 MySQL 任务运行并保留日志。首轮结果见下；分批方案的真实 MySQL 结果将在候选提交 CI 后补充。
+
+
+## 首轮诊断与实现决定
+
+在 [CI 41163399709](https://github.com/liuzhouquan/GoStream/actions/runs/41163399709)、`59c76b2` 上，Go 1.27.2 / Linux amd64 / 4 CPU / MySQL 8.4.13 的 10,000 区间三次 SQL 采样中位数为：首页 v005 889.665 ms、相关前驱子查询 3035.344 ms；尾页分别 2428.523 / 186.403 ms。前驱候选使首页明显退化，未采用。
+
+执行计划显示，v005 首页的区间索引平均读取 3389 行、循环 301 次；相关前驱平均读取 9951 行、循环 401 次。`ORDER BY ... LIMIT 1` 并未自动变成按当前消息 ID 的单次定位。这里是共享 CI runner 的 SQL 测量，不是 HTTP P95，也不是生产容量。
+
+生产改动改为 `direct_unread.go` 的有界合并读取：在同一个只读 REPEATABLE READ 事务内，按 ID 取最多 256 条候选消息（先排除全局/精确 ACK），用常量 ID 边界查询至多一个前驱区间与 256 个后续区间，合并过滤后继续 keyset 扫描直到得到 `limit+1` 条或耗尽。与逐行相关子查询相比，每批区间只读一次。遇到完整已读区间可跳到真实区间末尾；绝不跨未知缺口。
+
+全局 ACK 可能让两个候选之间存在超过 256 个区间。区间批次满时只处理到已知区间边界，继续下一批，不能把未知区间后的消息误判为未读。内存有界，但极长历史/碎片仍可增加总查询次数和事务时长，不承诺恒定总成本。WebSocket 重放与 HTTP 未读共用读取器并传入请求 context。无需变更 v005 schema、API 响应或 ACK 写入。
+
+新增 HTTP 边界回归检查区间之前/端点/间隙/尾页/空页、设备独立精确 ACK 与全局 ACK。另一个 300 区间的全局已读间隙用例检查跨批次不泄漏已压缩消息、区间读取失败返回 500 且重试恢复；MySQL 双连接在候选读取后提交 ACK，要求当前响应保持旧快照、下一次响应看到新状态，且读事务不阻塞 ACK 写入。
