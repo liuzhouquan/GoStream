@@ -191,14 +191,64 @@ def main():
             auth_handler = urllib.request.HTTPBasicAuthHandler()
             auth_handler.add_password(realm="RabbitMQ Management", uri=f"http://127.0.0.1:{http_port}", user="gostream-test", passwd=broker_password)
             opener = urllib.request.build_opener(auth_handler)
-            def queue_depth():
+            def queue_depth(qname=f"gostream.process.{tag}"):
                 try:
-                    with opener.open(f"http://127.0.0.1:{http_port}/api/queues/%2f/gostream.process.{tag}", timeout=2) as r:
+                    with opener.open(f"http://127.0.0.1:{http_port}/api/queues/%2f/{qname}", timeout=2) as r:
                         data = json.load(r)
                         return data.get("messages", -1)
                 except Exception:
                     return -1
             wait("broker queue depth returns to 0", lambda: queue_depth() == 0, seconds=15)
+
+            # Scenario 4: Consumer commit before ACK crash simulation and redelivery deduplication
+            mysql(f"INSERT INTO `{schema}`.notifications(user_id,actor_id,kind,text,event_key,created_at) "
+                  f"VALUES({owner['user']['id']},{actor3['user']['id']},'follow','preack-notice-{tag}','preack-key-{tag}',UTC_TIMESTAMP(3));")
+            preack_nid = mysql(f"SELECT id FROM `{schema}`.notifications WHERE event_key='preack-key-{tag}';")
+            mysql(f"INSERT INTO `{schema}`.outbox_events(event_key,topic,payload,attempts,available_at,created_at) "
+                  f"VALUES('notification:{preack_nid}','notification.created','{{\"notification_id\":{preack_nid}}}',1,UTC_TIMESTAMP(3),UTC_TIMESTAMP(3));")
+            mysql(f"INSERT INTO `{schema}`.outbox_events(event_key,topic,payload,attempts,available_at,created_at) "
+                  f"VALUES('broker-delivery:notification:{preack_nid}','notification.deliver','{{\"notification_id\":{preack_nid}}}',0,UTC_TIMESTAMP(3),UTC_TIMESTAMP(3));")
+            preack_pub_req = urllib.request.Request(
+                f"http://127.0.0.1:{http_port}/api/exchanges/%2f/gostream.process.{tag}.exchange/publish",
+                data=json.dumps({
+                    "properties": {"delivery_mode": 2, "message_id": f"notification:{preack_nid}"},
+                    "routing_key": "notification.created",
+                    "payload": json.dumps({"version": 1, "event_id": f"notification:{preack_nid}", "topic": "notification.created", "notification_id": int(preack_nid)}),
+                    "payload_encoding": "string"
+                }).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            with opener.open(preack_pub_req, timeout=5) as r:
+                res = json.load(r)
+                if not res.get("routed", False):
+                    raise RuntimeError("preack test message was not routed")
+            wait("consumer deduplication and delivery dispatch", lambda: mysql(
+                f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE event_key='broker-delivery:notification:{preack_nid}' AND published_at IS NOT NULL;") == "1")
+            if mysql(f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE event_key='broker-delivery:notification:{preack_nid}';") != "1":
+                raise AssertionError("duplicate delivery event created in SQL")
+            wait("queue depth returns to 0 after preack deduplication", lambda: queue_depth() == 0, seconds=15)
+
+            # Scenario 5: Concurrent mixed traffic with poison messages routed to quorum DLQ
+            for i in range(10):
+                call(f"/api/users/me/following/{owner['user']['id']}", None, actor3["access_token"], "PUT")
+            for i in range(3):
+                poison_pub_req = urllib.request.Request(
+                    f"http://127.0.0.1:{http_port}/api/exchanges/%2f/gostream.process.{tag}.exchange/publish",
+                    data=json.dumps({
+                        "properties": {"delivery_mode": 2, "message_id": f"poison-{tag}-{i}"},
+                        "routing_key": "notification.created",
+                        "payload": "{corrupt-json-poison-envelope",
+                        "payload_encoding": "string"
+                    }).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                with opener.open(poison_pub_req, timeout=5) as r:
+                    pass
+            dead_qname = f"gostream.process.{tag}.dead"
+            wait("poison messages reach quorum dead letter queue", lambda: queue_depth(dead_qname) >= 3, seconds=20)
+            wait("main queue drains valid mixed traffic", lambda: queue_depth() == 0, seconds=20)
 
             api.send_signal(signal.SIGTERM)
             if api.wait(timeout=10) != 0:
@@ -210,7 +260,7 @@ def main():
         run([str(work / "gostream-events"), "-outbox-key", "operator-smoke"], env=env)
         if mysql(f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE event_key='operator-smoke' AND attempts=0 AND dead_at IS NULL;") != "1":
             raise AssertionError("operator did not reset exactly the dead SQL row")
-        run([str(work / "gostream-events"), "-dead-letters", "1"], env=env)
+        run([str(work / "gostream-events"), "-dead-letters", "3"], env=env)
         print(json.dumps({"rabbitmq": "4.3.7", "mysql": "8.4", "real_broker_matrix": True,
                           "api_worker_lifecycle": True, "operator_cli": True}), flush=True)
     finally:
