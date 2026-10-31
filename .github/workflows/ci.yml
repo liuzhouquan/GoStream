@@ -120,6 +120,35 @@ jobs:
           --mysql-container "${{ job.services.mysql.id }}"
           --mysql-addr 127.0.0.1:3306
 
+      - name: Measure 20-client cross-instance IM traffic and offline recovery
+        run: |
+          uname -srmo
+          lscpu
+          free -m
+          python3 tests/integration/im_smoke.py \
+            --go-bin go \
+            --mysql-container "${{ job.services.mysql.id }}" \
+            --mysql-addr 127.0.0.1:3306 \
+            --suite load --report-file "${{ runner.temp }}/im-load.json"
+
+      - name: Check concurrent IM load with the race detector
+        run: >-
+          python3 tests/integration/im_smoke.py
+          --go-bin go
+          --mysql-container "${{ job.services.mysql.id }}"
+          --mysql-addr 127.0.0.1:3306
+          --suite load --race-load --report-file "${{ runner.temp }}/im-load-race.json"
+
+      - name: Retain raw IM load samples
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: im-load-report
+          path: |
+            ${{ runner.temp }}/im-load.json
+            ${{ runner.temp }}/im-load-race.json
+          if-no-files-found: warn
+
       - name: Verify cleanup when the Go test times out after API startup
         run: >-
           python3 tests/integration/im_smoke.py
