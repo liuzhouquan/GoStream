@@ -102,7 +102,7 @@ func verifyLoadOffline(t *testing.T, ctx context.Context, db *sql.DB, a, b *proc
 	}
 	var wantHistory []uint
 	for _, m := range all {
-		if m.Sender == 10 && m.Recipient == 0 {
+		if (m.Sender == 10 && m.Recipient == 0) || (m.Sender == 0 && m.Recipient == 10) {
 			wantHistory = append(wantHistory, m.ID)
 		}
 	}
@@ -117,11 +117,11 @@ func verifyLoadOffline(t *testing.T, ctx context.Context, db *sql.DB, a, b *proc
 			t.Fatal("history page exceeds limit")
 		}
 		for _, m := range p.Items {
-			if len(history) >= len(wantHistory) || m.ID != wantHistory[len(history)] || m.SenderID != users[10].User.ID || m.RecipientID != users[0].User.ID {
+			if len(history) >= len(wantHistory) || m.ID != wantHistory[len(history)] {
 				t.Fatal("history page missing or wrong identity")
 			}
 			want, ok := all[m.ClientID]
-			if !ok || want.ID != m.ID || want.Body != m.Body {
+			if !ok || want.ID != m.ID || want.Body != m.Body || m.SenderID != users[want.Sender].User.ID || m.RecipientID != users[want.Recipient].User.ID {
 				t.Fatal("history payload mismatch")
 			}
 			history = append(history, m.ID)
@@ -137,7 +137,7 @@ func verifyLoadOffline(t *testing.T, ctx context.Context, db *sql.DB, a, b *proc
 		}
 		cursor = p.Next
 	}
-	if !slices.Equal(history, wantHistory) {
+	if len(wantHistory) != 425 || !slices.Equal(history, wantHistory) {
 		t.Fatal("history set incomplete")
 	}
 	for offset := 0; offset < len(ids); offset += 100 {

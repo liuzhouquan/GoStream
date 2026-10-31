@@ -12,6 +12,7 @@ import (
 
 type loadResource struct {
 	AtMS        float64 `json:"at_ms"`
+	ScrapeMS    float64 `json:"scrape_ms"`
 	CPUSeconds  float64 `json:"cpu_seconds"`
 	RSSBytes    float64 `json:"rss_bytes"`
 	Goroutines  float64 `json:"goroutines"`
@@ -19,12 +20,14 @@ type loadResource struct {
 }
 
 type loadResourceReport struct {
-	Samples      []loadResource `json:"samples"`
-	CPUSeconds   float64        `json:"cpu_seconds_delta"`
-	PeakRSSBytes float64        `json:"peak_sampled_rss_bytes"`
+	TotalScrapeMS float64        `json:"total_scrape_ms"`
+	Samples       []loadResource `json:"samples"`
+	CPUSeconds    float64        `json:"cpu_seconds_delta"`
+	PeakRSSBytes  float64        `json:"peak_sampled_rss_bytes"`
 }
 
 func loadResources(ctx context.Context, base string, start time.Time) (loadResource, error) {
+	scrapeStart := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, "GET", base+"/metrics", nil)
@@ -59,7 +62,7 @@ func loadResources(ctx context.Context, base string, start time.Time) (loadResou
 	if len(values) != len(wanted) {
 		return loadResource{}, fmt.Errorf("missing required API process metrics")
 	}
-	return loadResource{AtMS: float64(time.Since(start).Microseconds()) / 1000, CPUSeconds: values["process_cpu_seconds_total"], RSSBytes: values["process_resident_memory_bytes"], Goroutines: values["go_goroutines"], Connections: values["gostream_websocket_connections"]}, nil
+	return loadResource{AtMS: float64(time.Since(start).Microseconds()) / 1000, ScrapeMS: float64(time.Since(scrapeStart).Microseconds()) / 1000, CPUSeconds: values["process_cpu_seconds_total"], RSSBytes: values["process_resident_memory_bytes"], Goroutines: values["go_goroutines"], Connections: values["gostream_websocket_connections"]}, nil
 }
 
 func summarizeResources(samples []loadResource) loadResourceReport {
@@ -68,6 +71,7 @@ func summarizeResources(samples []loadResource) loadResourceReport {
 		report.CPUSeconds = samples[len(samples)-1].CPUSeconds - samples[0].CPUSeconds
 	}
 	for _, s := range samples {
+		report.TotalScrapeMS += s.ScrapeMS
 		report.PeakRSSBytes = max(report.PeakRSSBytes, s.RSSBytes)
 	}
 	return report

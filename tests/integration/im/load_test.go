@@ -41,18 +41,19 @@ type loadRoundReport struct {
 }
 
 type loadReport struct {
-	Version     int               `json:"format_version"`
-	GoVersion   string            `json:"go_version"`
-	Revision    string            `json:"checkout_revision"`
-	Race        bool              `json:"race_instrumented"`
-	MySQL       string            `json:"mysql_version"`
-	Redis       string            `json:"redis_version"`
-	CPUs        int               `json:"visible_cpus"`
-	BodyBytes   int               `json:"body_bytes"`
-	Rounds      []loadRoundReport `json:"rounds"`
-	Offline     int               `json:"offline_messages"`
-	Persisted   int               `json:"persisted_messages"`
-	RetryChecks int               `json:"retry_checks"`
+	RegistrationWaitMS float64           `json:"registration_rate_limit_wait_ms"`
+	Version            int               `json:"format_version"`
+	GoVersion          string            `json:"go_version"`
+	Revision           string            `json:"checkout_revision"`
+	Race               bool              `json:"race_instrumented"`
+	MySQL              string            `json:"mysql_version"`
+	Redis              string            `json:"redis_version"`
+	CPUs               int               `json:"visible_cpus"`
+	BodyBytes          int               `json:"body_bytes"`
+	Rounds             []loadRoundReport `json:"rounds"`
+	Offline            int               `json:"offline_messages"`
+	Persisted          int               `json:"persisted_messages"`
+	RetryChecks        int               `json:"retry_checks"`
 }
 
 // Read every frame during the measured window. Helpers that wait for one
@@ -310,13 +311,22 @@ func TestIMConcurrentLoad(t *testing.T) {
 	users := make([]account, loadClients)
 	devices := make([]string, loadClients)
 	sockets := make([]*socket, loadClients)
+	var registrationWait time.Duration
 	for i := range loadClients {
-		base := bases[i/10]
-		users[i] = register(t, base, fmt.Sprintf("load_%02d", i))
+		who, wait, err := registerLoadAccount(ctx, bases[i/10], fmt.Sprintf("load_%02d", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		users[i] = who
+		registrationWait += wait
 		devices[i] = randomID(t)
-		sockets[i] = connect(t, base, users[i], devices[i])
 	}
-	report := loadReport{Version: 1, GoVersion: runtime.Version(), Revision: os.Getenv("GOSTREAM_TEST_IM_LOAD_REVISION"), Race: os.Getenv("GOSTREAM_TEST_IM_LOAD_RACE") == "1", CPUs: runtime.NumCPU(), BodyBytes: 256}
+	for i := range loadClients {
+		sockets[i] = connect(t, bases[i/10], users[i], devices[i])
+	}
+	t.Logf("setup respected registration budget; waited %.3f seconds", registrationWait.Seconds())
+
+	report := loadReport{RegistrationWaitMS: float64(registrationWait.Microseconds()) / 1000, Version: 1, GoVersion: runtime.Version(), Revision: os.Getenv("GOSTREAM_TEST_IM_LOAD_REVISION"), Race: os.Getenv("GOSTREAM_TEST_IM_LOAD_RACE") == "1", CPUs: runtime.NumCPU(), BodyBytes: 256}
 	if err := db.QueryRowContext(ctx, "SELECT VERSION()").Scan(&report.MySQL); err != nil {
 		t.Fatal(err)
 	}
