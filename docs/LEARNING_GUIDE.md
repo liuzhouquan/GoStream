@@ -15,3 +15,5 @@ Read the current implementation in this order:
 11. `docs/ARCHITECTURE.md`, `TECHNICAL_DESIGN.md`, then the remaining guides.
 
 The current package keeps handlers, business rules, and GORM queries together. A useful next exercise is to move transaction rules into application services and queries behind repository interfaces while preserving the tests. Compare the Redis page cache and current fanout path against the recorded SQL baseline and a future like-for-like load run; no fanout speedup has been measured yet.
+
+For sparse ACK reads, follow `messages.go` / `hub.go` → `direct_unread.go`; compare the original correlated containment plan with constant-bound batch queries in [DEVICE_ACK_QUERY.md](DEVICE_ACK_QUERY.md). Read `direct_unread_test.go` for a 300-interval global-ACK gap, then the snapshot subtest in `device_ack_ranges_mysql_test.go`. The profile verifies exact IDs and saves SQL-path measurements; it does not measure HTTP P95.

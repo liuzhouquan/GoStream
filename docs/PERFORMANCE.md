@@ -1,5 +1,9 @@
 # Testing and performance report
 
+## Device ACK sparse-query comparison, 2026-10-31
+
+[The measured query work package](DEVICE_ACK_QUERY.md) compares 1,000/10,000 sparse ranges at first/middle/tail/exhausted cursors on one isolated MySQL 8.4.13 transaction. The batched snapshot reader replaces a correlated range containment query. In the 10,000-range fixture, three alternating samples had median first-page costs of 1185.553 ms (v005) and 7.220 ms (batch), and tail costs of 3172.522 / 7.872 ms. All returned IDs matched expected pages. Empty-page cost did not improve. [Raw samples, environment and EXPLAIN ANALYZE](benchmarks/device-ack-query-2026-10-31.json) are retained. These are warm SQL-path timings on a shared four-vCPU CI runner, excluding production BEGIN/COMMIT, HTTP, auth and device registration; they are not HTTP P95, WS throughput or A07 load acceptance.
+
 ## Functional verification
 
 The 2026-10-26 hybrid following Feed changes have correctness evidence from SQLite and disposable MySQL 8.4 databases, including same-timestamp merging and v004 backfill. The original v003 comparison below found a read regression. A later complete-size fixture and indexed v004 query improved the result, but still missed the 20% P95 goal. Earlier following-Feed numbers below describe the SQL join plus Redis first-page cache and are not a hybrid before/after comparison. A small mixed read/write smoke and a committed MySQL two-connection lease-takeover test were added on 2026-10-27. Cold-cache, full-size mixed load, an actual API process crash, and sustained backlog drain tests remain open.
