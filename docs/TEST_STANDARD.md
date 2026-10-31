@@ -1,6 +1,6 @@
 # GoStream 测试与验收标准
 
-更新日期：2026-10-29。此文档规定 [`DELIVERY_SCOPE.md`](DELIVERY_SCOPE.md) 所述求职展示版如何判定完成。带有“目标”的条件尚未通过；已运行过的命令和实测数字以 [`PERFORMANCE.md`](PERFORMANCE.md) 与 [`PROGRESS.md`](../PROGRESS.md) 为准。
+更新日期：2026-10-31。此文档规定 [`DELIVERY_SCOPE.md`](DELIVERY_SCOPE.md) 所述求职展示版如何判定完成。带有“目标”的条件尚未通过；已运行过的命令和实测数字以 [`PERFORMANCE.md`](PERFORMANCE.md) 与 [`PROGRESS.md`](../PROGRESS.md) 为准。
 
 ## 判定规则
 
