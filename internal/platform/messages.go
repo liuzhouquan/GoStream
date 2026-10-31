@@ -11,17 +11,6 @@ import (
 	"gorm.io/gorm"
 )
 
-func (s *Server) pendingDirectMessages(userID uint, deviceID string) *gorm.DB {
-	q := s.DB.Model(&ChatMessage{}).Where("chat_messages.recipient_id = ? AND chat_messages.acked_at IS NULL", userID)
-	if deviceID != "" {
-		q = q.Joins("LEFT JOIN message_device_acks ON message_device_acks.message_id = chat_messages.id AND message_device_acks.user_id = ? AND message_device_acks.device_id = ?", userID, deviceID).
-			Where("message_device_acks.id IS NULL").
-			Where("NOT EXISTS (SELECT 1 FROM message_device_ack_ranges r WHERE r.user_id = ? AND r.device_id = ? AND chat_messages.id BETWEEN r.first_message_id AND r.last_message_id)", userID, deviceID).
-			Select("chat_messages.*")
-	}
-	return q
-}
-
 func (s *Server) history(c *gin.Context) {
 	other, err := strconv.ParseUint(c.Query("user_id"), 10, 64)
 	if err != nil || other == 0 || other == uint64(uid(c)) {
@@ -73,9 +62,8 @@ func (s *Server) unreadMessages(c *gin.Context) {
 		respondError(c, 400, "limit must be 1-100")
 		return
 	}
-	rows := make([]ChatMessage, 0)
-	q := s.pendingDirectMessages(uid(c), deviceID).Where("chat_messages.id > ?", after)
-	if err := q.Order("chat_messages.id ASC").Limit(limit + 1).Find(&rows).Error; err != nil {
+	rows, err := s.loadPendingDirectMessages(c.Request.Context(), uid(c), deviceID, uint(after), limit+1)
+	if err != nil {
 		respondError(c, 500, "could not load unread messages")
 		return
 	}

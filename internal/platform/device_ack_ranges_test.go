@@ -269,3 +269,82 @@ func TestDeviceAckRangeRollbackAndExpiry(t *testing.T) {
 		t.Fatalf("expired device replay: %d %s", r.Code, r.Body.String())
 	}
 }
+
+// Exercise the public unread endpoint at interval edges, including a message
+// before every range and a legacy global ACK inside an otherwise unread gap.
+func TestDeviceAckRangeUnreadCursorBoundaries(t *testing.T) {
+	_, h, db := testServer(t)
+	recipient, token := registerTestUser(t, h, "range_page_reader")
+	sender, _ := registerTestUser(t, h, "range_page_sender")
+	messages := make([]ChatMessage, 12)
+	for i := range messages {
+		messages[i] = ChatMessage{SenderID: sender, RecipientID: recipient, ClientID: fmt.Sprintf("edge-%d", i), Body: "cursor edge"}
+	}
+	if err := db.Create(&messages).Error; err != nil {
+		t.Fatal(err)
+	}
+	ids := []uint{messages[1].ID, messages[2].ID, messages[5].ID, messages[6].ID, messages[9].ID, messages[10].ID}
+	if r := requestOnDevice(t, h, http.MethodPost, "/api/messages/acks", token, testDeviceA, map[string]any{"ids": ids}); r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	// B has an independent exact singleton; A still sees that message as unread.
+	if r := requestOnDevice(t, h, http.MethodPost, fmt.Sprintf("/api/messages/%d/ack", messages[0].ID), token, testDeviceB, nil); r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	if r := requestOnDevice(t, h, http.MethodPost, fmt.Sprintf("/api/messages/%d/ack", messages[8].ID), token, "", nil); r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	for _, scope := range []struct {
+		name, device string
+		indices      []int
+	}{
+		{"ranges", testDeviceA, []int{0, 3, 4, 7, 11}},
+		{"exact", testDeviceB, []int{1, 2, 3, 4, 5, 6, 7, 9, 10, 11}},
+		{"legacy", "", []int{0, 1, 2, 3, 4, 5, 6, 7, 9, 10, 11}},
+	} {
+		for _, after := range []uint{0, messages[1].ID, messages[2].ID, messages[4].ID, messages[10].ID, messages[11].ID} {
+			t.Run(fmt.Sprintf("%s_after_%d", scope.name, after), func(t *testing.T) {
+				var want []uint
+				for _, i := range scope.indices {
+					if messages[i].ID > after {
+						want = append(want, messages[i].ID)
+					}
+				}
+				cursor := after
+				for {
+					r := requestOnDevice(t, h, http.MethodGet, fmt.Sprintf("/api/messages/unread?limit=2&after_id=%d", cursor), token, scope.device, nil)
+					var page struct {
+						Items []ChatMessage `json:"items"`
+						Next  uint          `json:"next_cursor"`
+						More  bool          `json:"has_more"`
+					}
+					if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &page) != nil {
+						t.Fatalf("page: %d %s", r.Code, r.Body.String())
+					}
+					count := min(2, len(want))
+					if len(page.Items) != count || page.More != (len(want) > count) {
+						t.Fatalf("page=%+v remaining=%v", page, want)
+					}
+					next := uint(0)
+					for i, m := range page.Items {
+						if m.ID != want[i] {
+							t.Fatalf("got=%d want=%d", m.ID, want[i])
+						}
+						next = m.ID
+					}
+					if page.Next != next {
+						t.Fatalf("next=%d want=%d", page.Next, next)
+					}
+					want = want[count:]
+					if !page.More {
+						break
+					}
+					if next <= cursor {
+						t.Fatal("cursor failed to advance")
+					}
+					cursor = next
+				}
+			})
+		}
+	}
+}

@@ -186,7 +186,7 @@ func (s *Server) websocket(c *gin.Context) {
 	_ = conn.SetReadDeadline(time.Now().Add(70 * time.Second))
 	conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(70 * time.Second)) })
 	_ = client.send(gin.H{"type": "ready"})
-	s.replayPending(userID, deviceID, client)
+	s.replayPending(c.Request.Context(), userID, deviceID, client)
 	s.replayPendingGroups(userID, deviceID, client)
 	for {
 		var e socketEvent
@@ -277,9 +277,9 @@ func (s *Server) recordLastSeen(userID uint) {
 	log.Printf("record last-seen for user %d failed: %v", userID, err)
 }
 
-func (s *Server) replayPending(userID uint, deviceID string, client *hubClient) {
-	var rows []ChatMessage
-	if err := s.pendingDirectMessages(userID, deviceID).Order("chat_messages.id ASC").Limit(101).Find(&rows).Error; err != nil {
+func (s *Server) replayPending(ctx context.Context, userID uint, deviceID string, client *hubClient) {
+	rows, err := s.loadPendingDirectMessages(ctx, userID, deviceID, 0, 101)
+	if err != nil {
 		_ = client.send(gin.H{"type": "error", "message": "pending messages could not be loaded"})
 		return
 	}

@@ -245,6 +245,15 @@ jobs:
       - name: Run real MySQL integration tests
         run: go test ./internal/platform -run '^TestMySQL' -count=1
 
+      - name: Profile sparse device receipts and deep unread cursors
+        env:
+          GOSTREAM_TEST_ACK_QUERY_PROFILE: '1'
+        run: |
+          uname -srmo
+          lscpu
+          free -m
+          go test ./internal/platform -run '^TestMySQLDeviceAckQueryProfile$' -count=1 -v -timeout=10m
+
       - name: Verify group ordering and device receipt transactions
         run: go test -race ./internal/platform -run '^TestMySQL(Group(CommitOrder|MemberRevocationRace)|DeviceAckRanges)$' -count=3
 

@@ -1,0 +1,1024 @@
+{
+  "source_commit": "98fe323d0706c2b4ecc1d55b3f608def9c55bc1c",
+  "ci_run": "https://github.com/liuzhouquan/GoStream/actions/runs/41164295488",
+  "mysql_job": 124428392133,
+  "environment": {
+    "go": "1.27.2",
+    "mysql": "8.4.13",
+    "runner": "ubuntu-24.04 GitHub-hosted",
+    "cpu": "AMD EPYC 7763 64-Core Processor (4 visible vCPUs)",
+    "memory_mib": 15983,
+    "mysql_settings": "{BufferPool:134217728 Isolation:REPEATABLE-READ Optimizer:index_merge=on,index_merge_union=on,index_merge_sort_union=on,index_merge_intersection=on,engine_condition_pushdown=on,index_condition_pushdown=on,mrr=on,mrr_cost_based=on,block_nested_loop=on,batched_key_access=off,materialization=on,semijoin=on,loosescan=on,firstmatch=on,duplicateweedout=on,subquery_materialization_cost_based=on,use_index_extensions=on,condition_fanout_filter=on,derived_merge=on,use_invisible_indexes=off,skip_scan=on,hash_join=on,subquery_to_derived=off,prefer_ordering_index=on,hypergraph_optimizer=off,derived_condition_pushdown=on,hash_set_operations=on}"
+  },
+  "method": "Warm read-only SQL fixture transaction; one initial warmup plus EXPLAIN ANALYZE, then three alternating samples. Runtime uses nested savepoint in fixture, so excludes production BEGIN/COMMIT. Not HTTP P95, ACK-write load, or WS throughput. Rows directly seeded in rollback-only fixture.",
+  "observations": [
+    {
+      "ranges": 1000,
+      "page": "first",
+      "variant": "v005",
+      "returned_rows": 101,
+      "samples_ms": [
+        73.714,
+        75.046,
+        75.094
+      ],
+      "median_ms": 75.046
+    },
+    {
+      "ranges": 1000,
+      "page": "first",
+      "variant": "predecessor",
+      "returned_rows": 101,
+      "samples_ms": [
+        246.852,
+        246.625,
+        247.287
+      ],
+      "median_ms": 246.852
+    },
+    {
+      "ranges": 1000,
+      "page": "first",
+      "variant": "runtime",
+      "returned_rows": 101,
+      "samples_ms": [
+        6.783,
+        6.673,
+        7.106
+      ],
+      "median_ms": 6.783
+    },
+    {
+      "ranges": 1000,
+      "page": "middle",
+      "variant": "v005",
+      "returned_rows": 101,
+      "samples_ms": [
+        31.298,
+        30.579,
+        34.19
+      ],
+      "median_ms": 31.298
+    },
+    {
+      "ranges": 1000,
+      "page": "middle",
+      "variant": "predecessor",
+      "returned_rows": 101,
+      "samples_ms": [
+        161.301,
+        161.65,
+        162.948
+      ],
+      "median_ms": 161.65
+    },
+    {
+      "ranges": 1000,
+      "page": "middle",
+      "variant": "runtime",
+      "returned_rows": 101,
+      "samples_ms": [
+        7.207,
+        7.809,
+        6.968
+      ],
+      "median_ms": 7.207
+    },
+    {
+      "ranges": 1000,
+      "page": "tail",
+      "variant": "v005",
+      "returned_rows": 100,
+      "samples_ms": [
+        307.047,
+        309.46,
+        307.522
+      ],
+      "median_ms": 307.522
+    },
+    {
+      "ranges": 1000,
+      "page": "tail",
+      "variant": "predecessor",
+      "returned_rows": 100,
+      "samples_ms": [
+        69.837,
+        73.851,
+        69.756
+      ],
+      "median_ms": 69.837
+    },
+    {
+      "ranges": 1000,
+      "page": "tail",
+      "variant": "runtime",
+      "returned_rows": 100,
+      "samples_ms": [
+        5.871,
+        5.716,
+        6.374
+      ],
+      "median_ms": 5.871
+    },
+    {
+      "ranges": 1000,
+      "page": "exhausted",
+      "variant": "v005",
+      "returned_rows": 0,
+      "samples_ms": [
+        0.651,
+        0.622,
+        0.708
+      ],
+      "median_ms": 0.651
+    },
+    {
+      "ranges": 1000,
+      "page": "exhausted",
+      "variant": "predecessor",
+      "returned_rows": 0,
+      "samples_ms": [
+        0.72,
+        0.7,
+        0.634
+      ],
+      "median_ms": 0.7
+    },
+    {
+      "ranges": 1000,
+      "page": "exhausted",
+      "variant": "runtime",
+      "returned_rows": 0,
+      "samples_ms": [
+        0.769,
+        0.773,
+        0.73
+      ],
+      "median_ms": 0.769
+    },
+    {
+      "ranges": 10000,
+      "page": "first",
+      "variant": "v005",
+      "returned_rows": 101,
+      "samples_ms": [
+        1185.771,
+        1174.381,
+        1185.553
+      ],
+      "median_ms": 1185.553
+    },
+    {
+      "ranges": 10000,
+      "page": "first",
+      "variant": "predecessor",
+      "returned_rows": 101,
+      "samples_ms": [
+        4287.725,
+        4266.003,
+        4294.741
+      ],
+      "median_ms": 4287.725
+    },
+    {
+      "ranges": 10000,
+      "page": "first",
+      "variant": "runtime",
+      "returned_rows": 101,
+      "samples_ms": [
+        7.287,
+        7.22,
+        7.058
+      ],
+      "median_ms": 7.22
+    },
+    {
+      "ranges": 10000,
+      "page": "middle",
+      "variant": "v005",
+      "returned_rows": 101,
+      "samples_ms": [
+        2248.354,
+        2248.217,
+        2254.712
+      ],
+      "median_ms": 2248.354
+    },
+    {
+      "ranges": 10000,
+      "page": "middle",
+      "variant": "predecessor",
+      "returned_rows": 101,
+      "samples_ms": [
+        2224.317,
+        2236.947,
+        2234.664
+      ],
+      "median_ms": 2234.664
+    },
+    {
+      "ranges": 10000,
+      "page": "middle",
+      "variant": "runtime",
+      "returned_rows": 101,
+      "samples_ms": [
+        8.435,
+        9.333,
+        8.415
+      ],
+      "median_ms": 8.435
+    },
+    {
+      "ranges": 10000,
+      "page": "tail",
+      "variant": "v005",
+      "returned_rows": 100,
+      "samples_ms": [
+        3161.192,
+        3188.949,
+        3172.522
+      ],
+      "median_ms": 3172.522
+    },
+    {
+      "ranges": 10000,
+      "page": "tail",
+      "variant": "predecessor",
+      "returned_rows": 100,
+      "samples_ms": [
+        254.545,
+        247.463,
+        250.626
+      ],
+      "median_ms": 250.626
+    },
+    {
+      "ranges": 10000,
+      "page": "tail",
+      "variant": "runtime",
+      "returned_rows": 100,
+      "samples_ms": [
+        7.677,
+        8.266,
+        7.872
+      ],
+      "median_ms": 7.872
+    },
+    {
+      "ranges": 10000,
+      "page": "exhausted",
+      "variant": "v005",
+      "returned_rows": 0,
+      "samples_ms": [
+        0.659,
+        0.717,
+        0.709
+      ],
+      "median_ms": 0.709
+    },
+    {
+      "ranges": 10000,
+      "page": "exhausted",
+      "variant": "predecessor",
+      "returned_rows": 0,
+      "samples_ms": [
+        0.696,
+        0.748,
+        0.658
+      ],
+      "median_ms": 0.696
+    },
+    {
+      "ranges": 10000,
+      "page": "exhausted",
+      "variant": "runtime",
+      "returned_rows": 0,
+      "samples_ms": [
+        0.807,
+        0.715,
+        0.771
+      ],
+      "median_ms": 0.771
+    }
+  ],
+  "plans": [
+    {
+      "ranges": 1000,
+      "page": "first",
+      "variant": "runtime",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=466 rows=12.5) (actual time=0.0218..0.898 rows=256 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=466 rows=12.5) (actual time=0.0185..0.879 rows=256 loops=1)",
+        "                -> Nested loop antijoin  (cost=466 rows=12.5) (actual time=0.0156..0.857 rows=256 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (chat_messages.id > 0))  (cost=450 rows=12.5) (actual time=0.0104..0.15 rows=341 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (0 < id)  (cost=450 rows=2251) (actual time=0.0071..0.11 rows=341 loops=1)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00196..0.00196 rows=0.249 loops=341)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "first",
+      "variant": "runtime",
+      "query": 1,
+      "explain_analyze": [
+        "        [-> Limit: 1 row(s)  (cost=0.71 rows=1) (actual time=0.0228..0.0228 rows=0 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001' AND first_message_id <= 512) (reverse), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 402) and (message_device_ack_ranges.first_message_id <= 512))  (cost=0.71 rows=1) (actual time=0.0105..0.0105 rows=0 loops=1)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "first",
+      "variant": "runtime",
+      "query": 2,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=38.5 rows=85) (actual time=0.0705..0.23 rows=85 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001' AND 512 < first_message_id <= 852), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 402) and (message_device_ack_ranges.first_message_id > 512) and (message_device_ack_ranges.first_message_id <= 852))  (cost=38.5 rows=85) (actual time=0.0701..0.224 rows=85 loops=1)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "first",
+      "variant": "runtime",
+      "query": 3,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=466 rows=12.5) (actual time=0.0169..0.939 rows=256 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=466 rows=12.5) (actual time=0.0165..0.923 rows=256 loops=1)",
+        "                -> Nested loop antijoin  (cost=466 rows=12.5) (actual time=0.0162..0.903 rows=256 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (chat_messages.id > 852))  (cost=450 rows=12.5) (actual time=0.0103..0.176 rows=341 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (852 < id)  (cost=450 rows=2251) (actual time=0.00942..0.137 rows=341 loops=1)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00199..0.00199 rows=0.249 loops=341)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "first",
+      "variant": "runtime",
+      "query": 4,
+      "explain_analyze": [
+        "        [-> Limit: 1 row(s)  (cost=39 rows=1) (actual time=0.0389..0.039 rows=1 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001' AND first_message_id <= 853) (reverse), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 402) and (message_device_ack_ranges.first_message_id <= 853))  (cost=39 rows=86) (actual time=0.0385..0.0385 rows=1 loops=1)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "first",
+      "variant": "runtime",
+      "query": 5,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=38.5 rows=85) (actual time=0.0539..0.163 rows=85 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001' AND 853 < first_message_id <= 1193), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 402) and (message_device_ack_ranges.first_message_id > 853) and (message_device_ack_ranges.first_message_id <= 1193))  (cost=38.5 rows=85) (actual time=0.0536..0.158 rows=85 loops=1)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "first",
+      "variant": "v005",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (actual time=74.6..74.7 rows=101 loops=1)",
+        "            -> Sort: chat_messages.id, limit input to 101 row(s) per chunk  (actual time=74.6..74.6 rows=101 loops=1)",
+        "                -> Stream results  (cost=81649 rows=12547) (actual time=0.617..74.5 rows=1001 loops=1)",
+        "                    -> Hash antijoin (no condition), extra conditions: (chat_messages.id between r.first_message_id and r.last_message_id)  (cost=81649 rows=12547) (actual time=0.61..74.1 rows=1001 loops=1)",
+        "                        -> Filter: (message_device_acks.id is null)  (cost=466 rows=12.5) (actual time=0.0137..10.7 rows=3001 loops=1)",
+        "                            -> Nested loop antijoin  (cost=466 rows=12.5) (actual time=0.0134..10.4 rows=3001 loops=1)",
+        "                                -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (chat_messages.id > 0))  (cost=450 rows=12.5) (actual time=0.00819..1.79 rows=4001 loops=1)",
+        "                                    -> Index range scan on chat_messages using PRIMARY over (0 < id)  (cost=450 rows=2251) (actual time=0.00743..1.33 rows=4001 loops=1)",
+        "                                -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00204..0.00204 rows=0.25 loops=4001)",
+        "                        -> Hash",
+        "                            -> Filter: ((r.device_id = '00000000-0000-4000-8000-000000000001') and (r.user_id = 402))  (cost=80394 rows=1002) (actual time=0.0144..0.468 rows=1000 loops=1)",
+        "                                -> Table scan on r  (cost=80394 rows=1002) (actual time=0.0138..0.199 rows=1002 loops=1)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "first",
+      "variant": "predecessor",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (cost=466 rows=12.5) (actual time=0.803..251 rows=101 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=466 rows=12.5) (actual time=0.802..251 rows=101 loops=1)",
+        "                -> Nested loop antijoin  (cost=466 rows=12.5) (actual time=0.801..251 rows=101 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (coalesce((select #2),0) < chat_messages.id) and (chat_messages.id > 0))  (cost=450 rows=12.5) (actual time=0.795..250 rows=201 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (0 < id)  (cost=450 rows=2251) (actual time=0.00978..0.16 rows=401 loops=1)",
+        "                        -> Select #2 (subquery in condition; dependent)",
+        "                            -> Limit: 1 row(s)  (cost=33.8 rows=1) (actual time=0.622..0.622 rows=0.998 loops=401)",
+        "                                -> Index range scan on r using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001') (reverse), with index condition: ((r.device_id = '00000000-0000-4000-8000-000000000001') and (r.user_id = 402) and (r.first_message_id <= chat_messages.id))  (cost=33.8 rows=1000) (actual time=0.622..0.622 rows=0.998 loops=401)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00249..0.00249 rows=0.498 loops=201)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "middle",
+      "variant": "runtime",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=466 rows=12.5) (actual time=0.0146..0.902 rows=256 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=466 rows=12.5) (actual time=0.0141..0.886 rows=256 loops=1)",
+        "                -> Nested loop antijoin  (cost=466 rows=12.5) (actual time=0.0135..0.866 rows=256 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (chat_messages.id > 2512))  (cost=450 rows=12.5) (actual time=0.00877..0.153 rows=341 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (2512 < id)  (cost=450 rows=2251) (actual time=0.00768..0.116 rows=341 loops=1)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00197..0.00197 rows=0.249 loops=341)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "middle",
+      "variant": "runtime",
+      "query": 1,
+      "explain_analyze": [
+        "        [-> Limit: 1 row(s)  (cost=100 rows=1) (actual time=0.142..0.142 rows=1 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001' AND first_message_id <= 2513) (reverse), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 402) and (message_device_ack_ranges.first_message_id <= 2513))  (cost=100 rows=501) (actual time=0.141..0.141 rows=1 loops=1)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "middle",
+      "variant": "runtime",
+      "query": 2,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=38.5 rows=85) (actual time=0.0713..0.267 rows=85 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001' AND 2513 < first_message_id <= 2853), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 402) and (message_device_ack_ranges.first_message_id > 2513) and (message_device_ack_ranges.first_message_id <= 2853))  (cost=38.5 rows=85) (actual time=0.0709..0.261 rows=85 loops=1)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "middle",
+      "variant": "runtime",
+      "query": 3,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=466 rows=12.5) (actual time=0.0237..0.972 rows=256 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=466 rows=12.5) (actual time=0.0233..0.956 rows=256 loops=1)",
+        "                -> Nested loop antijoin  (cost=466 rows=12.5) (actual time=0.023..0.937 rows=256 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (chat_messages.id > 2854))  (cost=450 rows=12.5) (actual time=0.0112..0.153 rows=342 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (2854 < id)  (cost=450 rows=2251) (actual time=0.0104..0.118 rows=342 loops=1)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00217..0.00217 rows=0.251 loops=342)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "middle",
+      "variant": "runtime",
+      "query": 4,
+      "explain_analyze": [
+        "        [-> Limit: 1 row(s)  (cost=100 rows=1) (actual time=0.0871..0.0872 rows=1 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001' AND first_message_id <= 2856) (reverse), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 402) and (message_device_ack_ranges.first_message_id <= 2856))  (cost=100 rows=586) (actual time=0.0867..0.0867 rows=1 loops=1)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "middle",
+      "variant": "runtime",
+      "query": 5,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=38.5 rows=85) (actual time=0.04..0.148 rows=85 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001' AND 2856 < first_message_id <= 3196), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 402) and (message_device_ack_ranges.first_message_id > 2856) and (message_device_ack_ranges.first_message_id <= 3196))  (cost=38.5 rows=85) (actual time=0.0397..0.143 rows=85 loops=1)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "middle",
+      "variant": "v005",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (actual time=30..30.1 rows=101 loops=1)",
+        "            -> Sort: chat_messages.id, limit input to 101 row(s) per chunk  (actual time=30..30 rows=101 loops=1)",
+        "                -> Stream results  (cost=81649 rows=12547) (actual time=0.611..29.9 rows=500 loops=1)",
+        "                    -> Hash antijoin (no condition), extra conditions: (chat_messages.id between r.first_message_id and r.last_message_id)  (cost=81649 rows=12547) (actual time=0.608..29.8 rows=500 loops=1)",
+        "                        -> Filter: (message_device_acks.id is null)  (cost=466 rows=12.5) (actual time=0.0134..5.74 rows=1500 loops=1)",
+        "                            -> Nested loop antijoin  (cost=466 rows=12.5) (actual time=0.0131..5.62 rows=1500 loops=1)",
+        "                                -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (chat_messages.id > 2512))  (cost=450 rows=12.5) (actual time=0.00818..0.852 rows=2000 loops=1)",
+        "                                    -> Index range scan on chat_messages using PRIMARY over (2512 < id)  (cost=450 rows=2251) (actual time=0.00741..0.62 rows=2000 loops=1)",
+        "                                -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00227..0.00227 rows=0.25 loops=2000)",
+        "                        -> Hash",
+        "                            -> Filter: ((r.device_id = '00000000-0000-4000-8000-000000000001') and (r.user_id = 402))  (cost=80394 rows=1002) (actual time=0.0147..0.457 rows=1000 loops=1)",
+        "                                -> Table scan on r  (cost=80394 rows=1002) (actual time=0.014..0.189 rows=1002 loops=1)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "middle",
+      "variant": "predecessor",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (cost=466 rows=12.5) (actual time=1.76..160 rows=101 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=466 rows=12.5) (actual time=1.76..160 rows=101 loops=1)",
+        "                -> Nested loop antijoin  (cost=466 rows=12.5) (actual time=1.76..160 rows=101 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (coalesce((select #2),0) < chat_messages.id) and (chat_messages.id > 2512))  (cost=450 rows=12.5) (actual time=1.32..159 rows=202 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (2512 < id)  (cost=450 rows=2251) (actual time=0.00898..0.156 rows=404 loops=1)",
+        "                        -> Select #2 (subquery in condition; dependent)",
+        "                            -> Limit: 1 row(s)  (cost=33.8 rows=1) (actual time=0.393..0.393 rows=1 loops=404)",
+        "                                -> Index range scan on r using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001') (reverse), with index condition: ((r.device_id = '00000000-0000-4000-8000-000000000001') and (r.user_id = 402) and (r.first_message_id <= chat_messages.id))  (cost=33.8 rows=1000) (actual time=0.393..0.393 rows=1 loops=404)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00239..0.00239 rows=0.5 loops=202)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "tail",
+      "variant": "runtime",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=83.2 rows=2.23) (actual time=0.0149..1.11 rows=256 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=83.2 rows=2.23) (actual time=0.0144..1.09 rows=256 loops=1)",
+        "                -> Nested loop antijoin  (cost=83.2 rows=2.23) (actual time=0.0138..1.07 rows=256 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (chat_messages.id > 4112))  (cost=80.4 rows=2.23) (actual time=0.00868..0.149 rows=341 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (4112 < id)  (cost=80.4 rows=400) (actual time=0.0077..0.111 rows=341 loops=1)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.254 rows=1) (actual time=0.00253..0.00253 rows=0.249 loops=341)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "tail",
+      "variant": "runtime",
+      "query": 1,
+      "explain_analyze": [
+        "        [-> Limit: 1 row(s)  (cost=100 rows=1) (actual time=0.152..0.152 rows=1 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001' AND first_message_id <= 4113) (reverse), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 402) and (message_device_ack_ranges.first_message_id <= 4113))  (cost=100 rows=901) (actual time=0.151..0.151 rows=1 loops=1)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "tail",
+      "variant": "runtime",
+      "query": 2,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=38.5 rows=85) (actual time=0.0479..0.141 rows=85 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001' AND 4113 < first_message_id <= 4453), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 402) and (message_device_ack_ranges.first_message_id > 4113) and (message_device_ack_ranges.first_message_id <= 4453))  (cost=38.5 rows=85) (actual time=0.0476..0.135 rows=85 loops=1)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "tail",
+      "variant": "runtime",
+      "query": 3,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=12.3 rows=0.323) (actual time=0.0189..0.256 rows=43 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=12.3 rows=0.323) (actual time=0.0186..0.253 rows=43 loops=1)",
+        "                -> Nested loop antijoin  (cost=12.3 rows=0.323) (actual time=0.0183..0.25 rows=43 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (chat_messages.id > 4454))  (cost=11.9 rows=0.323) (actual time=0.00798..0.0323 rows=58 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (4454 < id)  (cost=11.9 rows=58) (actual time=0.0073..0.0258 rows=58 loops=1)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.281 rows=1) (actual time=0.00362..0.00362 rows=0.259 loops=58)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "tail",
+      "variant": "runtime",
+      "query": 4,
+      "explain_analyze": [
+        "        [-> Limit: 1 row(s)  (cost=100 rows=1) (actual time=0.177..0.177 rows=1 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001' AND first_message_id <= 4456) (reverse), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 402) and (message_device_ack_ranges.first_message_id <= 4456))  (cost=100 rows=986) (actual time=0.176..0.176 rows=1 loops=1)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "tail",
+      "variant": "runtime",
+      "query": 5,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=6.56 rows=14) (actual time=0.0482..0.0528 rows=14 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001' AND 4456 < first_message_id <= 4512), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 402) and (message_device_ack_ranges.first_message_id > 4456) and (message_device_ack_ranges.first_message_id <= 4512))  (cost=6.56 rows=14) (actual time=0.0477..0.0514 rows=14 loops=1)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "tail",
+      "variant": "v005",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (cost=306 rows=101) (actual time=3.14..320 rows=100 loops=1)",
+        "            -> Nested loop antijoin  (cost=306 rows=2225) (actual time=3.14..320 rows=100 loops=1)",
+        "                -> Filter: (message_device_acks.id is null)  (cost=83.2 rows=2.23) (actual time=0.0164..1.51 rows=300 loops=1)",
+        "                    -> Nested loop antijoin  (cost=83.2 rows=2.23) (actual time=0.0162..1.47 rows=300 loops=1)",
+        "                        -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (chat_messages.id > 4112))  (cost=80.4 rows=2.23) (actual time=0.011..0.228 rows=400 loops=1)",
+        "                            -> Index range scan on chat_messages using PRIMARY over (4112 < id)  (cost=80.4 rows=400) (actual time=0.00974..0.153 rows=400 loops=1)",
+        "                        -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.254 rows=1) (actual time=0.00298..0.00298 rows=0.25 loops=400)",
+        "                -> Filter: (chat_messages.id between r.first_message_id and r.last_message_id)  (cost=450151 rows=1000) (actual time=1.06..1.06 rows=0.667 loops=300)",
+        "                    -> Index lookup on r using ux_device_ack_range (user_id=402, device_id='00000000-0000-4000-8000-000000000001')  (cost=450151 rows=1000) (actual time=0.0913..1.02 rows=967 loops=300)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "tail",
+      "variant": "predecessor",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (cost=83.2 rows=2.23) (actual time=0.92..72.1 rows=100 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=83.2 rows=2.23) (actual time=0.92..72.1 rows=100 loops=1)",
+        "                -> Nested loop antijoin  (cost=83.2 rows=2.23) (actual time=0.919..72.1 rows=100 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (coalesce((select #2),0) < chat_messages.id) and (chat_messages.id > 4112))  (cost=80.4 rows=2.23) (actual time=0.651..71.4 rows=200 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (4112 < id)  (cost=80.4 rows=400) (actual time=0.00865..0.185 rows=400 loops=1)",
+        "                        -> Select #2 (subquery in condition; dependent)",
+        "                            -> Limit: 1 row(s)  (cost=33.8 rows=1) (actual time=0.177..0.177 rows=1 loops=400)",
+        "                                -> Index range scan on r using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001') (reverse), with index condition: ((r.device_id = '00000000-0000-4000-8000-000000000001') and (r.user_id = 402) and (r.first_message_id <= chat_messages.id))  (cost=33.8 rows=1000) (actual time=0.177..0.177 rows=1 loops=400)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.254 rows=1) (actual time=0.00353..0.00353 rows=0.5 loops=200)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "exhausted",
+      "variant": "runtime",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=0.523 rows=0.05) (actual time=0.00604..0.00604 rows=0 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=0.523 rows=0.05) (actual time=0.00535..0.00535 rows=0 loops=1)",
+        "                -> Nested loop antijoin  (cost=0.523 rows=0.05) (actual time=0.00488..0.00488 rows=0 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (chat_messages.id > 4512))  (cost=0.46 rows=0.05) (actual time=0.0046..0.0046 rows=0 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (4512 < id)  (cost=0.46 rows=1) (actual time=0.00408..0.00408 rows=0 loops=1)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.45 rows=1) (never executed)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "exhausted",
+      "variant": "v005",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (cost=5.53 rows=50) (actual time=0.0056..0.0056 rows=0 loops=1)",
+        "            -> Nested loop antijoin  (cost=5.53 rows=50) (actual time=0.00533..0.00533 rows=0 loops=1)",
+        "                -> Filter: (message_device_acks.id is null)  (cost=0.523 rows=0.05) (actual time=0.00507..0.00507 rows=0 loops=1)",
+        "                    -> Nested loop antijoin  (cost=0.523 rows=0.05) (actual time=0.00493..0.00493 rows=0 loops=1)",
+        "                        -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (chat_messages.id > 4512))  (cost=0.46 rows=0.05) (actual time=0.00472..0.00472 rows=0 loops=1)",
+        "                            -> Index range scan on chat_messages using PRIMARY over (4512 < id)  (cost=0.46 rows=1) (actual time=0.00447..0.00447 rows=0 loops=1)",
+        "                        -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.45 rows=1) (never executed)",
+        "                -> Filter: (chat_messages.id between r.first_message_id and r.last_message_id)  (cost=20e+6 rows=1000) (never executed)",
+        "                    -> Index lookup on r using ux_device_ack_range (user_id=402, device_id='00000000-0000-4000-8000-000000000001')  (cost=20e+6 rows=1000) (never executed)"
+      ]
+    },
+    {
+      "ranges": 1000,
+      "page": "exhausted",
+      "variant": "predecessor",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (cost=0.523 rows=0.05) (actual time=0.00506..0.00506 rows=0 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=0.523 rows=0.05) (actual time=0.00475..0.00475 rows=0 loops=1)",
+        "                -> Nested loop antijoin  (cost=0.523 rows=0.05) (actual time=0.00455..0.00455 rows=0 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 402) and (chat_messages.acked_at is null) and (coalesce((select #2),0) < chat_messages.id) and (chat_messages.id > 4512))  (cost=0.46 rows=0.05) (actual time=0.00432..0.00432 rows=0 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (4512 < id)  (cost=0.46 rows=1) (actual time=0.00405..0.00405 rows=0 loops=1)",
+        "                        -> Select #2 (subquery in condition; dependent)",
+        "                            -> Limit: 1 row(s)  (cost=33.8 rows=1) (never executed)",
+        "                                -> Index range scan on r using ux_device_ack_range over (user_id = 402 AND device_id = '00000000-0000-4000-8000-000000000001') (reverse), with index condition: ((r.device_id = '00000000-0000-4000-8000-000000000001') and (r.user_id = 402) and (r.first_message_id <= chat_messages.id))  (cost=33.8 rows=1000) (never executed)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=402, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.45 rows=1) (never executed)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "first",
+      "variant": "runtime",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=4466 rows=12.5) (actual time=0.0145..1.09 rows=256 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=4466 rows=12.5) (actual time=0.014..1.07 rows=256 loops=1)",
+        "                -> Nested loop antijoin  (cost=4466 rows=12.5) (actual time=0.0135..1.05 rows=256 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (chat_messages.id > 0))  (cost=4451 rows=12.5) (actual time=0.00762..0.146 rows=341 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (0 < id)  (cost=4451 rows=22252) (actual time=0.00661..0.111 rows=341 loops=1)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00254..0.00254 rows=0.249 loops=341)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "first",
+      "variant": "runtime",
+      "query": 1,
+      "explain_analyze": [
+        "        [-> Limit: 1 row(s)  (cost=0.71 rows=1) (actual time=0.0113..0.0113 rows=0 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 404 AND device_id = '00000000-0000-4000-8000-000000000001' AND first_message_id <= 4513) (reverse), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 404) and (message_device_ack_ranges.first_message_id <= 4513))  (cost=0.71 rows=1) (actual time=0.0106..0.0106 rows=0 loops=1)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "first",
+      "variant": "runtime",
+      "query": 2,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=38.5 rows=85) (actual time=0.063..0.163 rows=85 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 404 AND device_id = '00000000-0000-4000-8000-000000000001' AND 4513 < first_message_id <= 4853), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 404) and (message_device_ack_ranges.first_message_id > 4513) and (message_device_ack_ranges.first_message_id <= 4853))  (cost=38.5 rows=85) (actual time=0.0627..0.157 rows=85 loops=1)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "first",
+      "variant": "runtime",
+      "query": 3,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=4466 rows=12.5) (actual time=0.0183..1.15 rows=256 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=4466 rows=12.5) (actual time=0.0179..1.14 rows=256 loops=1)",
+        "                -> Nested loop antijoin  (cost=4466 rows=12.5) (actual time=0.0176..1.12 rows=256 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (chat_messages.id > 4853))  (cost=4451 rows=12.5) (actual time=0.0106..0.172 rows=341 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (4853 < id)  (cost=4451 rows=22252) (actual time=0.00973..0.13 rows=341 loops=1)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00264..0.00264 rows=0.249 loops=341)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "first",
+      "variant": "runtime",
+      "query": 4,
+      "explain_analyze": [
+        "        [-> Limit: 1 row(s)  (cost=39 rows=1) (actual time=0.0405..0.0406 rows=1 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 404 AND device_id = '00000000-0000-4000-8000-000000000001' AND first_message_id <= 4854) (reverse), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 404) and (message_device_ack_ranges.first_message_id <= 4854))  (cost=39 rows=86) (actual time=0.04..0.04 rows=1 loops=1)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "first",
+      "variant": "runtime",
+      "query": 5,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=38.5 rows=85) (actual time=0.0694..0.163 rows=85 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 404 AND device_id = '00000000-0000-4000-8000-000000000001' AND 4854 < first_message_id <= 5194), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 404) and (message_device_ack_ranges.first_message_id > 4854) and (message_device_ack_ranges.first_message_id <= 5194))  (cost=38.5 rows=85) (actual time=0.069..0.157 rows=85 loops=1)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "first",
+      "variant": "v005",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (cost=11359 rows=101) (actual time=11.2..1251 rows=101 loops=1)",
+        "            -> Nested loop antijoin  (cost=11359 rows=68913) (actual time=11.2..1251 rows=101 loops=1)",
+        "                -> Filter: (message_device_acks.id is null)  (cost=4466 rows=12.5) (actual time=0.0178..1.65 rows=301 loops=1)",
+        "                    -> Nested loop antijoin  (cost=4466 rows=12.5) (actual time=0.0177..1.6 rows=301 loops=1)",
+        "                        -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (chat_messages.id > 0))  (cost=4451 rows=12.5) (actual time=0.0107..0.291 rows=401 loops=1)",
+        "                            -> Index range scan on chat_messages using PRIMARY over (0 < id)  (cost=4451 rows=22252) (actual time=0.00966..0.187 rows=401 loops=1)",
+        "                        -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00311..0.00311 rows=0.249 loops=401)",
+        "                -> Filter: (chat_messages.id between r.first_message_id and r.last_message_id)  (cost=2.42e+6 rows=5502) (actual time=4.15..4.15 rows=0.664 loops=301)",
+        "                    -> Index lookup on r using ux_device_ack_range (user_id=404, device_id='00000000-0000-4000-8000-000000000001')  (cost=2.42e+6 rows=5502) (actual time=0.536..4 rows=3389 loops=301)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "first",
+      "variant": "predecessor",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (cost=4019 rows=12.5) (actual time=11.1..4483 rows=101 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=4019 rows=12.5) (actual time=11.1..4483 rows=101 loops=1)",
+        "                -> Nested loop antijoin  (cost=4019 rows=12.5) (actual time=11.1..4483 rows=101 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (coalesce((select #2),0) < chat_messages.id) and (chat_messages.id > 0))  (cost=4003 rows=12.5) (actual time=11.1..4482 rows=201 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (0 < id)  (cost=4003 rows=19962) (actual time=0.0108..0.287 rows=401 loops=1)",
+        "                        -> Select #2 (subquery in condition; dependent)",
+        "                            -> Limit: 1 row(s)  (cost=184 rows=1) (actual time=11.2..11.2 rows=0.998 loops=401)",
+        "                                -> Filter: (r.first_message_id <= chat_messages.id)  (cost=184 rows=1834) (actual time=11.2..11.2 rows=0.998 loops=401)",
+        "                                    -> Index lookup on r using ux_device_ack_range (user_id=404, device_id='00000000-0000-4000-8000-000000000001') (reverse)  (cost=184 rows=5502) (actual time=0.61..10.8 rows=9951 loops=401)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00424..0.00424 rows=0.498 loops=201)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "middle",
+      "variant": "runtime",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=4019 rows=12.5) (actual time=0.0141..0.839 rows=256 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=4019 rows=12.5) (actual time=0.0136..0.823 rows=256 loops=1)",
+        "                -> Nested loop antijoin  (cost=4019 rows=12.5) (actual time=0.013..0.804 rows=256 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (chat_messages.id > 24513))  (cost=4003 rows=12.5) (actual time=0.00792..0.147 rows=341 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (24513 < id)  (cost=4003 rows=19962) (actual time=0.00707..0.111 rows=341 loops=1)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00181..0.00181 rows=0.249 loops=341)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "middle",
+      "variant": "runtime",
+      "query": 1,
+      "explain_analyze": [
+        "        [-> Limit: 1 row(s)  (cost=1101 rows=1) (actual time=1.39..1.39 rows=1 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 404 AND device_id = '00000000-0000-4000-8000-000000000001' AND first_message_id <= 24514) (reverse), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 404) and (message_device_ack_ranges.first_message_id <= 24514))  (cost=1101 rows=5502) (actual time=1.39..1.39 rows=1 loops=1)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "middle",
+      "variant": "runtime",
+      "query": 2,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=38.5 rows=85) (actual time=0.07..0.239 rows=85 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 404 AND device_id = '00000000-0000-4000-8000-000000000001' AND 24514 < first_message_id <= 24854), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 404) and (message_device_ack_ranges.first_message_id > 24514) and (message_device_ack_ranges.first_message_id <= 24854))  (cost=38.5 rows=85) (actual time=0.0696..0.233 rows=85 loops=1)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "middle",
+      "variant": "runtime",
+      "query": 3,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=4019 rows=12.5) (actual time=0.0179..0.906 rows=256 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=4019 rows=12.5) (actual time=0.0176..0.89 rows=256 loops=1)",
+        "                -> Nested loop antijoin  (cost=4019 rows=12.5) (actual time=0.0172..0.872 rows=256 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (chat_messages.id > 24855))  (cost=4003 rows=12.5) (actual time=0.00872..0.157 rows=342 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (24855 < id)  (cost=4003 rows=19962) (actual time=0.00797..0.118 rows=342 loops=1)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00197..0.00197 rows=0.251 loops=342)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "middle",
+      "variant": "runtime",
+      "query": 4,
+      "explain_analyze": [
+        "        [-> Limit: 1 row(s)  (cost=1101 rows=1) (actual time=0.929..0.929 rows=1 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 404 AND device_id = '00000000-0000-4000-8000-000000000001' AND first_message_id <= 24857) (reverse), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 404) and (message_device_ack_ranges.first_message_id <= 24857))  (cost=1101 rows=5502) (actual time=0.929..0.929 rows=1 loops=1)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "middle",
+      "variant": "runtime",
+      "query": 5,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=38.5 rows=85) (actual time=0.0487..0.16 rows=85 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 404 AND device_id = '00000000-0000-4000-8000-000000000001' AND 24857 < first_message_id <= 25197), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 404) and (message_device_ack_ranges.first_message_id > 24857) and (message_device_ack_ranges.first_message_id <= 25197))  (cost=38.5 rows=85) (actual time=0.0484..0.154 rows=85 loops=1)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "middle",
+      "variant": "v005",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (cost=10911 rows=101) (actual time=23.3..2362 rows=101 loops=1)",
+        "            -> Nested loop antijoin  (cost=10911 rows=68913) (actual time=23.3..2362 rows=101 loops=1)",
+        "                -> Filter: (message_device_acks.id is null)  (cost=4019 rows=12.5) (actual time=0.0175..1.49 rows=303 loops=1)",
+        "                    -> Nested loop antijoin  (cost=4019 rows=12.5) (actual time=0.0173..1.45 rows=303 loops=1)",
+        "                        -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (chat_messages.id > 24513))  (cost=4003 rows=12.5) (actual time=0.0111..0.332 rows=404 loops=1)",
+        "                            -> Index range scan on chat_messages using PRIMARY over (24513 < id)  (cost=4003 rows=19962) (actual time=0.00989..0.212 rows=404 loops=1)",
+        "                        -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00258..0.00258 rows=0.25 loops=404)",
+        "                -> Filter: (chat_messages.id between r.first_message_id and r.last_message_id)  (cost=2.42e+6 rows=5502) (actual time=7.79..7.79 rows=0.667 loops=303)",
+        "                    -> Index lookup on r using ux_device_ack_range (user_id=404, device_id='00000000-0000-4000-8000-000000000001')  (cost=2.42e+6 rows=5502) (actual time=0.535..7.5 rows=6701 loops=303)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "middle",
+      "variant": "predecessor",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (cost=4019 rows=12.5) (actual time=24.6..2333 rows=101 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=4019 rows=12.5) (actual time=24.6..2333 rows=101 loops=1)",
+        "                -> Nested loop antijoin  (cost=4019 rows=12.5) (actual time=24.6..2333 rows=101 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (coalesce((select #2),0) < chat_messages.id) and (chat_messages.id > 24513))  (cost=4003 rows=12.5) (actual time=18.4..2333 rows=202 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (24513 < id)  (cost=4003 rows=19962) (actual time=0.0171..0.243 rows=404 loops=1)",
+        "                        -> Select #2 (subquery in condition; dependent)",
+        "                            -> Limit: 1 row(s)  (cost=184 rows=1) (actual time=5.77..5.77 rows=1 loops=404)",
+        "                                -> Filter: (r.first_message_id <= chat_messages.id)  (cost=184 rows=1834) (actual time=5.77..5.77 rows=1 loops=404)",
+        "                                    -> Index lookup on r using ux_device_ack_range (user_id=404, device_id='00000000-0000-4000-8000-000000000001') (reverse)  (cost=184 rows=5502) (actual time=0.607..5.58 rows=4950 loops=404)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.251 rows=1) (actual time=0.00315..0.00315 rows=0.5 loops=202)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "tail",
+      "variant": "runtime",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=80.8 rows=0.251) (actual time=0.0158..1.56 rows=256 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=80.8 rows=0.251) (actual time=0.0152..1.55 rows=256 loops=1)",
+        "                -> Nested loop antijoin  (cost=80.8 rows=0.251) (actual time=0.0146..1.53 rows=256 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (chat_messages.id > 44113))  (cost=80.5 rows=0.251) (actual time=0.00787..0.148 rows=341 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (44113 < id)  (cost=80.5 rows=400) (actual time=0.00691..0.111 rows=341 loops=1)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.29 rows=1) (actual time=0.00393..0.00393 rows=0.249 loops=341)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "tail",
+      "variant": "runtime",
+      "query": 1,
+      "explain_analyze": [
+        "        [-> Limit: 1 row(s)  (cost=1101 rows=1) (actual time=1.45..1.45 rows=1 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 404 AND device_id = '00000000-0000-4000-8000-000000000001' AND first_message_id <= 44114) (reverse), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 404) and (message_device_ack_ranges.first_message_id <= 44114))  (cost=1101 rows=5502) (actual time=1.45..1.45 rows=1 loops=1)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "tail",
+      "variant": "runtime",
+      "query": 2,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=38.5 rows=85) (actual time=0.0488..0.145 rows=85 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 404 AND device_id = '00000000-0000-4000-8000-000000000001' AND 44114 < first_message_id <= 44454), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 404) and (message_device_ack_ranges.first_message_id > 44114) and (message_device_ack_ranges.first_message_id <= 44454))  (cost=38.5 rows=85) (actual time=0.0485..0.139 rows=85 loops=1)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "tail",
+      "variant": "runtime",
+      "query": 3,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=12 rows=0.05) (actual time=0.053..0.363 rows=43 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=12 rows=0.05) (actual time=0.0527..0.36 rows=43 loops=1)",
+        "                -> Nested loop antijoin  (cost=12 rows=0.05) (actual time=0.0523..0.356 rows=43 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (chat_messages.id > 44455))  (cost=11.9 rows=0.05) (actual time=0.00741..0.0335 rows=58 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (44455 < id)  (cost=11.9 rows=58) (actual time=0.0067..0.0258 rows=58 loops=1)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.45 rows=1) (actual time=0.00544..0.00544 rows=0.259 loops=58)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "tail",
+      "variant": "runtime",
+      "query": 4,
+      "explain_analyze": [
+        "        [-> Limit: 1 row(s)  (cost=1101 rows=1) (actual time=0.82..0.82 rows=1 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 404 AND device_id = '00000000-0000-4000-8000-000000000001' AND first_message_id <= 44457) (reverse), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 404) and (message_device_ack_ranges.first_message_id <= 44457))  (cost=1101 rows=5502) (actual time=0.819..0.819 rows=1 loops=1)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "tail",
+      "variant": "runtime",
+      "query": 5,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=6.56 rows=14) (actual time=0.0425..0.0476 rows=14 loops=1)",
+        "            -> Index range scan on message_device_ack_ranges using ux_device_ack_range over (user_id = 404 AND device_id = '00000000-0000-4000-8000-000000000001' AND 44457 < first_message_id <= 44513), with index condition: ((message_device_ack_ranges.device_id = '00000000-0000-4000-8000-000000000001') and (message_device_ack_ranges.user_id = 404) and (message_device_ack_ranges.first_message_id > 44457) and (message_device_ack_ranges.first_message_id <= 44513))  (cost=6.56 rows=14) (actual time=0.0421..0.0463 rows=14 loops=1)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "tail",
+      "variant": "v005",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (cost=219 rows=101) (actual time=33.4..3326 rows=100 loops=1)",
+        "            -> Nested loop antijoin  (cost=219 rows=1381) (actual time=33.4..3326 rows=100 loops=1)",
+        "                -> Filter: (message_device_acks.id is null)  (cost=80.8 rows=0.251) (actual time=0.0225..2.46 rows=300 loops=1)",
+        "                    -> Nested loop antijoin  (cost=80.8 rows=0.251) (actual time=0.0223..2.41 rows=300 loops=1)",
+        "                        -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (chat_messages.id > 44113))  (cost=80.5 rows=0.251) (actual time=0.0131..0.363 rows=400 loops=1)",
+        "                            -> Index range scan on chat_messages using PRIMARY over (44113 < id)  (cost=80.5 rows=400) (actual time=0.0118..0.241 rows=400 loops=1)",
+        "                        -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.29 rows=1) (actual time=0.00492..0.00492 rows=0.25 loops=400)",
+        "                -> Filter: (chat_messages.id between r.first_message_id and r.last_message_id)  (cost=121e+6 rows=5502) (actual time=11.1..11.1 rows=0.667 loops=300)",
+        "                    -> Index lookup on r using ux_device_ack_range (user_id=404, device_id='00000000-0000-4000-8000-000000000001')  (cost=121e+6 rows=5502) (actual time=0.53..10.6 rows=9967 loops=300)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "tail",
+      "variant": "predecessor",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (cost=80.8 rows=0.251) (actual time=2.84..247 rows=100 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=80.8 rows=0.251) (actual time=2.84..247 rows=100 loops=1)",
+        "                -> Nested loop antijoin  (cost=80.8 rows=0.251) (actual time=2.84..247 rows=100 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (coalesce((select #2),0) < chat_messages.id) and (chat_messages.id > 44113))  (cost=80.5 rows=0.251) (actual time=2.17..246 rows=200 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (44113 < id)  (cost=80.5 rows=400) (actual time=0.0115..0.161 rows=400 loops=1)",
+        "                        -> Select #2 (subquery in condition; dependent)",
+        "                            -> Limit: 1 row(s)  (cost=184 rows=1) (actual time=0.613..0.613 rows=1 loops=400)",
+        "                                -> Filter: (r.first_message_id <= chat_messages.id)  (cost=184 rows=1834) (actual time=0.613..0.613 rows=1 loops=400)",
+        "                                    -> Index lookup on r using ux_device_ack_range (user_id=404, device_id='00000000-0000-4000-8000-000000000001') (reverse)  (cost=184 rows=5502) (actual time=0.597..0.611 rows=50.5 loops=400)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.29 rows=1) (actual time=0.00462..0.00462 rows=0.5 loops=200)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "exhausted",
+      "variant": "runtime",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 256 row(s)  (cost=0.523 rows=0.05) (actual time=0.00576..0.00576 rows=0 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=0.523 rows=0.05) (actual time=0.00523..0.00523 rows=0 loops=1)",
+        "                -> Nested loop antijoin  (cost=0.523 rows=0.05) (actual time=0.00476..0.00476 rows=0 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (chat_messages.id > 44513))  (cost=0.46 rows=0.05) (actual time=0.00452..0.00452 rows=0 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (44513 < id)  (cost=0.46 rows=1) (actual time=0.004..0.004 rows=0 loops=1)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.45 rows=1) (never executed)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "exhausted",
+      "variant": "v005",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (cost=28 rows=101) (actual time=0.00552..0.00552 rows=0 loops=1)",
+        "            -> Nested loop antijoin  (cost=28 rows=275) (actual time=0.00525..0.00525 rows=0 loops=1)",
+        "                -> Filter: (message_device_acks.id is null)  (cost=0.523 rows=0.05) (actual time=0.00498..0.00498 rows=0 loops=1)",
+        "                    -> Nested loop antijoin  (cost=0.523 rows=0.05) (actual time=0.00482..0.00482 rows=0 loops=1)",
+        "                        -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (chat_messages.id > 44513))  (cost=0.46 rows=0.05) (actual time=0.00459..0.00459 rows=0 loops=1)",
+        "                            -> Index range scan on chat_messages using PRIMARY over (44513 < id)  (cost=0.46 rows=1) (actual time=0.00435..0.00435 rows=0 loops=1)",
+        "                        -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.45 rows=1) (never executed)",
+        "                -> Filter: (chat_messages.id between r.first_message_id and r.last_message_id)  (cost=605e+6 rows=5502) (never executed)",
+        "                    -> Index lookup on r using ux_device_ack_range (user_id=404, device_id='00000000-0000-4000-8000-000000000001')  (cost=605e+6 rows=5502) (never executed)"
+      ]
+    },
+    {
+      "ranges": 10000,
+      "page": "exhausted",
+      "variant": "predecessor",
+      "query": 0,
+      "explain_analyze": [
+        "        [-> Limit: 101 row(s)  (cost=0.523 rows=0.05) (actual time=0.00519..0.00519 rows=0 loops=1)",
+        "            -> Filter: (message_device_acks.id is null)  (cost=0.523 rows=0.05) (actual time=0.00485..0.00485 rows=0 loops=1)",
+        "                -> Nested loop antijoin  (cost=0.523 rows=0.05) (actual time=0.00466..0.00466 rows=0 loops=1)",
+        "                    -> Filter: ((chat_messages.recipient_id = 404) and (chat_messages.acked_at is null) and (coalesce((select #2),0) < chat_messages.id) and (chat_messages.id > 44513))  (cost=0.46 rows=0.05) (actual time=0.00443..0.00443 rows=0 loops=1)",
+        "                        -> Index range scan on chat_messages using PRIMARY over (44513 < id)  (cost=0.46 rows=1) (actual time=0.00417..0.00417 rows=0 loops=1)",
+        "                        -> Select #2 (subquery in condition; dependent)",
+        "                            -> Limit: 1 row(s)  (cost=184 rows=1) (never executed)",
+        "                                -> Filter: (r.first_message_id <= chat_messages.id)  (cost=184 rows=1834) (never executed)",
+        "                                    -> Index lookup on r using ux_device_ack_range (user_id=404, device_id='00000000-0000-4000-8000-000000000001') (reverse)  (cost=184 rows=5502) (never executed)",
+        "                    -> Single-row covering index lookup on message_device_acks using ux_message_device_ack (user_id=404, device_id='00000000-0000-4000-8000-000000000001', message_id=chat_messages.id)  (cost=0.45 rows=1) (never executed)"
+      ]
+    }
+  ]
+}

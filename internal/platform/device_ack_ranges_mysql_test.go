@@ -222,4 +222,80 @@ func TestMySQLDeviceAckRanges(t *testing.T) {
 	if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &page) != nil || len(page.Items) != 2 || page.Items[0].ID != ids[3] || page.Items[1].ID != late.ID {
 		t.Fatalf("late commit lost: %d %s", r.Code, r.Body.String())
 	}
+	t.Run("unread_snapshot_survives_concurrent_compaction", func(t *testing.T) {
+		entered, release := make(chan struct{}), make(chan struct{})
+		var once, releaseOnce sync.Once
+		var snapshotTasks sync.WaitGroup
+		unlock := func() { releaseOnce.Do(func() { close(release) }) }
+		defer unlock()
+		const hook = "test:pause_unread_snapshot"
+		if err := pools[0].Callback().Query().After("gorm:query").Register(hook, func(tx *gorm.DB) {
+			if tx.Statement.Table == "chat_messages" {
+				once.Do(func() {
+					close(entered)
+					select {
+					case <-release:
+					case <-time.After(8 * time.Second):
+						tx.AddError(fmt.Errorf("snapshot barrier timed out"))
+					}
+				})
+			}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			unlock()
+			snapshotTasks.Wait()
+			if err := pools[0].Callback().Query().Remove(hook); err != nil {
+				t.Error(err)
+			}
+		}()
+		responses := make(chan *httptest.ResponseRecorder, 1)
+		snapshotTasks.Go(func() {
+			responses <- requestOnDevice(t, ha, http.MethodGet, "/api/messages/unread", token, testDeviceB, nil)
+		})
+		select {
+		case <-entered:
+		case <-time.After(5 * time.Second):
+			t.Fatal("reader did not establish snapshot")
+		}
+		allIDs := append(append(append([]uint{}, ids...), late.ID), laterIDs...)
+		write := make(chan *httptest.ResponseRecorder, 1)
+		snapshotTasks.Go(func() {
+			write <- requestOnDevice(t, hb, http.MethodPost, "/api/messages/acks", token, testDeviceB, map[string]any{"ids": allIDs})
+		})
+		select {
+		case r := <-write:
+			if r.Code != 200 {
+				t.Fatalf("concurrent ACK: %d %s", r.Code, r.Body.String())
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("read-only snapshot blocked ACK writer")
+		}
+		unlock()
+		select {
+		case r := <-responses:
+			var snapshot struct {
+				Items []ChatMessage `json:"items"`
+			}
+			if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &snapshot) != nil || len(snapshot.Items) != len(allIDs) {
+				t.Fatalf("mixed read snapshots: %d %s", r.Code, r.Body.String())
+			}
+			for i, m := range snapshot.Items {
+				if m.ID != allIDs[i] {
+					t.Fatalf("snapshot ID %d want %d", m.ID, allIDs[i])
+				}
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("snapshot reader did not finish")
+		}
+		r := requestOnDevice(t, hb, http.MethodGet, "/api/messages/unread", token, testDeviceB, nil)
+		var fresh struct {
+			Items []ChatMessage `json:"items"`
+		}
+		if r.Code != 200 || json.Unmarshal(r.Body.Bytes(), &fresh) != nil || len(fresh.Items) != 0 {
+			t.Fatalf("next request missed committed ACK: %d %s", r.Code, r.Body.String())
+		}
+	})
+
 }
