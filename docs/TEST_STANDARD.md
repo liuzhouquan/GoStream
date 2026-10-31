@@ -151,3 +151,10 @@ IM 双进程故障验证运行 `python3 tests/integration/im_smoke.py --go-bin /
 - 查询计划的新 MySQL 探针使用每张业务表 500 行和回滚事务，输出实际 EXPLAIN；查询仍是索引探针，不能等同于生产完整双向私信/混合 Feed SQL 的规模验收。见 `QUERY_PLANS.md`。
 - RabbitMQ 增补暂停 broker 后强杀已领取源事件、50 条有限积压、确认发布后 SQL 完成遗漏重试及 DLQ 原消息恢复。领取状态不证明已收到确认，省略 SQL 更新不等于真实断连；消费者提交后 ACK 前的实际进程强杀、持续负载和 DLQ 容量边界仍待验证。
 - WebM/MOV 新测试仍是容器头识别。新增搜索/未发布视频隐私在本地和真实 MinIO 复用同一矩阵；真实 WebM/MOV 转码及规模恢复仍待完成。
+
+
+## 2026-10-31 逐设备回执压缩工作包
+
+`TestDeviceAckRange*` 覆盖精确缺口、1,000 条连续 ACK、重试、新设备/旧客户端、WebSocket 重放、区间写入后的回滚与过期删除；`TestConcurrentDeviceAckRangesSQLite` 验证八个并发请求的新增总量。`TestMySQLDeviceAckRanges` 用独立连接池、事务屏障、重叠 ACK 与其他用户并行，以及低 ID 迟提交验证相同语义；MySQL CI 普通运行并额外重复三次 race。迁移 CI 在隔离 legacy 库验证 v004→v005，现有恢复脚本检查五个版本。IM 进程矩阵增加压缩后 SIGKILL/重启、设备间未读隔离与严格的重放结束屏障。真实组件证据以本工作包 PR 最终提交的 CI 为准，本地跳过不是通过。
+
+该方案不承诺稀疏回执常数空间或生产吞吐收益。更大规模区间查询、规定 IM 负载及最终全组件浏览器仍需单独验收，A07 保持部分通过。升级前停止旧 API 并备份；回退不能只删除区间表。详见 [设计及升级约束](DEVICE_ACK_RANGES.md)。

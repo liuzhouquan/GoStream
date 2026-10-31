@@ -8,7 +8,7 @@ func MigrateSchema(db *gorm.DB) error {
 	return db.AutoMigrate(
 		&User{}, &MediaAsset{}, &UploadSession{}, &UploadChunk{}, &Video{},
 		&VideoProcessJob{}, &Follow{}, &VideoAction{}, &Comment{}, &Notification{},
-		&ChatMessage{}, &MessageDeviceAck{}, &MessageDevice{}, &ChatGroup{},
+		&ChatMessage{}, &MessageDeviceAck{}, &MessageDeviceAckRange{}, &MessageDevice{}, &ChatGroup{},
 		&GroupMember{}, &GroupMessage{}, &GroupRead{}, &GroupDeviceRead{},
 		&OutboxEvent{}, &SchemaMigration{},
 		&FeedFanoutJob{}, &FeedInbox{},

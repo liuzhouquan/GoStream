@@ -394,4 +394,28 @@ func TestIMProcessRecovery(t *testing.T) {
 			t.Fatal("removed member sent a message")
 		}
 	})
+	check("compacted_device_receipts_survive_process_loss", func(t *testing.T) {
+		if count("SELECT COUNT(*) FROM message_device_ack_ranges WHERE user_id=? AND device_id=?", member.User.ID, memberOne) == 0 {
+			t.Fatal("fixture did not actually compact receipts")
+		}
+		b.stop(t, true)
+		b.start(t)
+		subscribed()
+		if p := unread(t, memberOne); len(p.Items) != 0 {
+			t.Fatal("compacted ACKs were lost on process restart")
+		}
+		if p := unread(t, memberTwo); len(p.Items) != 100 || !p.More {
+			t.Fatal("compaction suppressed the other device's backlog")
+		}
+		memberB = open(b.base, member, memberOne)
+		memberB.write(t, map[string]any{"type": "ping"})
+		select {
+		case frame, ok := <-memberB.read:
+			if !ok || frame.Type != "pong" {
+				t.Fatalf("unexpected replay after compacted ACK: %+v open=%v", frame, ok)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("restarted device never completed replay")
+		}
+	})
 }

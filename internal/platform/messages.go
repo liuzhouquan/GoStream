@@ -1,20 +1,23 @@
 package platform
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
 
 func (s *Server) pendingDirectMessages(userID uint, deviceID string) *gorm.DB {
 	q := s.DB.Model(&ChatMessage{}).Where("chat_messages.recipient_id = ? AND chat_messages.acked_at IS NULL", userID)
 	if deviceID != "" {
 		q = q.Joins("LEFT JOIN message_device_acks ON message_device_acks.message_id = chat_messages.id AND message_device_acks.user_id = ? AND message_device_acks.device_id = ?", userID, deviceID).
-			Where("message_device_acks.id IS NULL").Select("chat_messages.*")
+			Where("message_device_acks.id IS NULL").
+			Where("NOT EXISTS (SELECT 1 FROM message_device_ack_ranges r WHERE r.user_id = ? AND r.device_id = ? AND chat_messages.id BETWEEN r.first_message_id AND r.last_message_id)", userID, deviceID).
+			Select("chat_messages.*")
 	}
 	return q
 }
@@ -107,8 +110,12 @@ func (s *Server) ackMessage(c *gin.Context) {
 			respondError(c, 404, "message not found")
 			return
 		}
-		created, err := s.ackDeviceMessages(uid(c), deviceID, []uint{uint(id)})
+		created, err := s.ackDeviceMessages(c.Request.Context(), uid(c), deviceID, []uint{uint(id)})
 		if err != nil {
+			if errors.Is(err, errDeviceLimit) {
+				respondDeviceError(c, err)
+				return
+			}
 			respondError(c, 500, "could not acknowledge message")
 			return
 		}
@@ -165,8 +172,12 @@ func (s *Server) ackMessages(c *gin.Context) {
 		return
 	}
 	if deviceID != "" {
-		created, err := s.ackDeviceMessages(uid(c), deviceID, in.IDs)
+		created, err := s.ackDeviceMessages(c.Request.Context(), uid(c), deviceID, in.IDs)
 		if err != nil {
+			if errors.Is(err, errDeviceLimit) {
+				respondDeviceError(c, err)
+				return
+			}
 			respondError(c, http.StatusInternalServerError, "could not acknowledge messages")
 			return
 		}
@@ -181,11 +192,16 @@ func (s *Server) ackMessages(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"acked": true, "acked_count": res.RowsAffected})
 }
 
-func (s *Server) ackDeviceMessages(userID uint, deviceID string, ids []uint) (int64, error) {
-	rows := make([]MessageDeviceAck, 0, len(ids))
-	for _, id := range ids {
-		rows = append(rows, MessageDeviceAck{UserID: userID, DeviceID: deviceID, MessageID: id})
-	}
-	result := s.DB.Clauses(clause.OnConflict{DoNothing: true}).Create(&rows)
-	return result.RowsAffected, result.Error
+func (s *Server) ackDeviceMessages(ctx context.Context, userID uint, deviceID string, ids []uint) (int64, error) {
+	var created int64
+	err := transactionWithDeadlockRetry(ctx, s.DB, func(tx *gorm.DB) error {
+		created = 0
+		if err := ensureMessageDeviceTx(tx, userID, deviceID, time.Now().UTC()); err != nil {
+			return err
+		}
+		var err error
+		created, err = storeDeviceReceipts(tx, userID, deviceID, ids)
+		return err
+	})
+	return created, err
 }

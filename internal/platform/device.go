@@ -96,39 +96,58 @@ func (s *Server) ensureMessageDevice(ctx context.Context, userID uint, deviceID 
 		return err
 	}
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var user User
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&user, userID).Error; err != nil {
-			return err
-		}
-		var existing MessageDevice
-		err := tx.Where("user_id = ? AND device_id = ?", userID, deviceID).Take(&existing).Error
-		if err == nil {
-			return tx.Model(&existing).UpdateColumn("last_seen_at", now).Error
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return err
-		}
-		var count int64
-		if err := tx.Model(&MessageDevice{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
-			return err
-		}
-		if count >= maxMessageDevices {
-			var oldest MessageDevice
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", userID).Order("last_seen_at ASC, id ASC").First(&oldest).Error; err != nil {
-				return err
-			}
-			if !oldest.LastSeenAt.Before(now.Add(-deviceEvictionAge)) {
-				return errDeviceLimit
-			}
-			if err := deleteMessageDeviceState(tx, oldest); err != nil {
-				return err
-			}
-		}
-		return tx.Create(&MessageDevice{UserID: userID, DeviceID: deviceID, CreatedAt: now, LastSeenAt: now}).Error
+		return ensureMessageDeviceTx(tx, userID, deviceID, now)
 	})
 }
 
+// Registration, cleanup and receipt writes share this user-row lock. Call only
+// inside a transaction, before reading or changing device-specific state.
+func ensureMessageDeviceTx(tx *gorm.DB, userID uint, deviceID string, now time.Time) error {
+	// SQLite has no row locks. Reserve its writer before the first snapshot
+	// read, avoiding a failed deferred read-to-write upgrade under concurrent ACKs.
+	if tx.Dialector.Name() == "sqlite" {
+		if err := tx.Exec("UPDATE users SET id = id WHERE id = ?", userID).Error; err != nil {
+			return err
+		}
+	}
+	var user User
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&user, userID).Error; err != nil {
+		return err
+	}
+	var existing MessageDevice
+	err := tx.Where("user_id = ? AND device_id = ?", userID, deviceID).Take(&existing).Error
+	if err == nil {
+		if !existing.LastSeenAt.Before(now.Add(-deviceTouchInterval)) {
+			return nil
+		}
+		return tx.Model(&existing).UpdateColumn("last_seen_at", now).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	var count int64
+	if err := tx.Model(&MessageDevice{}).Where("user_id = ?", userID).Count(&count).Error; err != nil {
+		return err
+	}
+	if count >= maxMessageDevices {
+		var oldest MessageDevice
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ?", userID).Order("last_seen_at ASC, id ASC").First(&oldest).Error; err != nil {
+			return err
+		}
+		if !oldest.LastSeenAt.Before(now.Add(-deviceEvictionAge)) {
+			return errDeviceLimit
+		}
+		if err := deleteMessageDeviceState(tx, oldest); err != nil {
+			return err
+		}
+	}
+	return tx.Create(&MessageDevice{UserID: userID, DeviceID: deviceID, CreatedAt: now, LastSeenAt: now}).Error
+}
+
 func deleteMessageDeviceState(tx *gorm.DB, device MessageDevice) error {
+	if err := tx.Where("user_id = ? AND device_id = ?", device.UserID, device.DeviceID).Delete(&MessageDeviceAckRange{}).Error; err != nil {
+		return err
+	}
 	if err := tx.Where("user_id = ? AND device_id = ?", device.UserID, device.DeviceID).Delete(&MessageDeviceAck{}).Error; err != nil {
 		return err
 	}

@@ -43,11 +43,13 @@ The web client stays at <http://localhost:8080>; the MinIO console is at <http:/
 
 The normal and object overlays both bind API port 8080; stop the normal stack before starting the object stack, or use the isolated two-replica ports in [the test procedure](docs/TEST_STANDARD.md).
 
+Existing installations upgrading to schema v005 must stop all API replicas and back up SQL before starting the new binary. Older replicas cannot read compressed receipts; do not mix old and new versions. Downgrade requires expanding ranges or restoring a pre-upgrade backup. See [receipt lifecycle and migration](docs/DEVICE_ACK_RANGES.md).
+
 ## Current design
 
 - Go 1.27.2, Gin, GORM, SQLite for zero-service local development
 - MySQL and Redis Compose profile, verified with real end-to-end requests
-- Frozen SQLite/MySQL `schema_v001` SQL, v002 outbox index, v003 durable Feed fanout/inbox tables, and v004 indexed pull/backfill upgrade, with MySQL startup locking and existing-database adoption; an isolated MySQL backup/restore and v002 rollback drill is in `tests/integration/mysql_recovery.sh`
+- Frozen SQLite/MySQL `schema_v001` SQL, v002 outbox index, v003 durable Feed fanout/inbox tables, v004 indexed pull/backfill upgrade, and v005 lossless per-device ACK ranges, with MySQL startup locking and existing-database adoption; an isolated MySQL backup/restore and v002 rollback drill is in `tests/integration/mysql_recovery.sh`
 - CI workflow for exact Go version, tests, race checks, vet, build, web syntax, and Compose validation
 - Optional Redis cache for anonymous timeline/recommend/hot pages and each viewer's following first page; database fallback and bounded staleness
 - Following Feed push/pull index with durable 128-follower batches for ordinary authors and direct reads for higher-follower authors; configure `FEED_FANOUT_MAX_FOLLOWERS` (`0` SQL-only default, `1000` to enable the current hybrid strategy). [Design and measured limits](docs/FEED_HYBRID.md)
@@ -62,7 +64,7 @@ The normal and object overlays both bind API port 8080; stop the normal stack be
 - Paged notification inbox with bounded mark-read updates, unread counts, and WebSocket push
 - User and video search with independent ID cursor pages, literal wildcard matching, and playable web results
 - One-level comment threads with separate root/reply cursor pages, lazy loading in the web client, and reply notifications
-- Direct/group WebSocket messaging, paged direct history, batch recipient ACKs, per-device direct read state and group cursors, bounded device registration with idle cleanup, offline replay, and optional Redis cross-instance event relay and presence
+- Direct/group WebSocket messaging, paged direct history, batch recipient ACKs, per-device direct read state and group cursors, bounded device registration with idle cleanup, [lossless adjacent-ID receipt compaction](docs/DEVICE_ACK_RANGES.md), offline replay, and optional Redis cross-instance event relay and presence
 - Real two-process IM recovery tests with MySQL/Redis, SIGKILL, per-device ACKs and 105-message backlog synchronization; [guarantees and reproduction](docs/IM.md)
 - Multiple WebSocket connections per account (up to eight per API instance), with committed direct/group messages sent to each active device and control replies kept on the originating connection
 - `/health`, database-backed `/ready`, `/metrics`, and optional `PPROF_ADDR`
