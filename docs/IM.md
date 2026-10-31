@@ -132,3 +132,7 @@ V005 adds the interval table without rewriting old receipts. Per-request neighbo
 ## Bounded sparse-receipt reads
 
 HTTP unread and direct reconnect replay share `direct_unread.go`. A read-only RR snapshot combines 256-message candidate batches with one predecessor and at most 256 following intervals. Full interval batches resume at a known boundary, and only explicitly ACKed ranges permit jumps. Range-read errors fail the whole page; request context reaches all SQL operations. [The measured MySQL comparison](DEVICE_ACK_QUERY.md) preserves raw samples and exact-page checks. This closes a SQL query-cost work package, while prescribed WS traffic and final Compose/browser acceptance remain open.
+
+## Twenty-client load acceptance
+
+The separate [load work package](IM_LOAD.md) now records real two-process/MySQL/Redis normal and race runs: 20 connected accounts, three rounds of 1,000 cross-instance direct messages, exact identities, client-side ACK/delivery distributions, sampled process resources, retries and a 125-message offline recovery. It publishes raw reports only after successful cleanup. The process-fault matrix above and this short closed-loop workload provide different evidence; group fanout, sustained traffic, ten-video processing and final combined Compose/two-browser acceptance remain open.

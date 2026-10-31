@@ -1,0 +1,283 @@
+{
+  "source_head": "1f84780ea64d895da8e32e2f6d764eb9e342398a",
+  "ci_run": "https://github.com/liuzhouquan/GoStream/actions/runs/41178501091",
+  "im_job": 124470900114,
+  "builds": [
+    {
+      "registration_rate_limit_wait_ms": 18000.959,
+      "format_version": 1,
+      "go_version": "go1.27.2",
+      "checkout_revision": "96a7f12b4501b9735609a4ad40bd50791ff52f9a",
+      "race_instrumented": false,
+      "mysql_version": "8.4.13",
+      "redis_version": "8.2.9",
+      "visible_cpus": 4,
+      "body_bytes": 256,
+      "offline_messages": 125,
+      "persisted_messages": 3125,
+      "retry_checks": 60,
+      "host": {
+        "kernel": "7.0.0-1017-azure",
+        "machine": "x86_64",
+        "cpu_model": "AMD EPYC 7763 64-Core Processor",
+        "memory_bytes": 16760344576
+      },
+      "launcher_cleanup": {
+        "processes": 0,
+        "schemas": 0,
+        "users": 0,
+        "redis_containers": 0
+      },
+      "rounds": [
+        {
+          "round": 1,
+          "clients": 20,
+          "messages": 1000,
+          "elapsed_seconds": 1.53822298,
+          "duplicate_ack_frames": 0,
+          "duplicate_delivery_frames": 0,
+          "sender_ack": {
+            "count": 1000,
+            "p50_ms": 23.799,
+            "p95_ms": 40.037,
+            "p99_ms": 119.904,
+            "max_ms": 146.246
+          },
+          "recipient_delivery": {
+            "count": 1000,
+            "p50_ms": 310.709,
+            "p95_ms": 495.732,
+            "p99_ms": 524.309,
+            "max_ms": 547.505
+          },
+          "api_resources": [
+            {
+              "cpu_seconds_delta": 0.79,
+              "peak_sampled_rss_bytes": 37924864,
+              "total_scrape_ms": 181.178,
+              "sample_count": 17
+            },
+            {
+              "cpu_seconds_delta": 0.79,
+              "peak_sampled_rss_bytes": 37978112,
+              "total_scrape_ms": 192.84699999999998,
+              "sample_count": 17
+            }
+          ]
+        },
+        {
+          "round": 2,
+          "clients": 20,
+          "messages": 1000,
+          "elapsed_seconds": 1.477354354,
+          "duplicate_ack_frames": 0,
+          "duplicate_delivery_frames": 0,
+          "sender_ack": {
+            "count": 1000,
+            "p50_ms": 24.573,
+            "p95_ms": 37.89,
+            "p99_ms": 46.823,
+            "max_ms": 61.71
+          },
+          "recipient_delivery": {
+            "count": 1000,
+            "p50_ms": 267.164,
+            "p95_ms": 496.73,
+            "p99_ms": 522.358,
+            "max_ms": 534.386
+          },
+          "api_resources": [
+            {
+              "cpu_seconds_delta": 0.79,
+              "peak_sampled_rss_bytes": 41103360,
+              "total_scrape_ms": 219.016,
+              "sample_count": 16
+            },
+            {
+              "cpu_seconds_delta": 0.7799999999999998,
+              "peak_sampled_rss_bytes": 38088704,
+              "total_scrape_ms": 134.16300000000004,
+              "sample_count": 16
+            }
+          ]
+        },
+        {
+          "round": 3,
+          "clients": 20,
+          "messages": 1000,
+          "elapsed_seconds": 1.533380398,
+          "duplicate_ack_frames": 0,
+          "duplicate_delivery_frames": 0,
+          "sender_ack": {
+            "count": 1000,
+            "p50_ms": 25.19,
+            "p95_ms": 41.809,
+            "p99_ms": 51.979,
+            "max_ms": 59.614
+          },
+          "recipient_delivery": {
+            "count": 1000,
+            "p50_ms": 268.223,
+            "p95_ms": 425.608,
+            "p99_ms": 452.198,
+            "max_ms": 464.975
+          },
+          "api_resources": [
+            {
+              "cpu_seconds_delta": 0.8300000000000001,
+              "peak_sampled_rss_bytes": 38199296,
+              "total_scrape_ms": 166.884,
+              "sample_count": 17
+            },
+            {
+              "cpu_seconds_delta": 0.7800000000000002,
+              "peak_sampled_rss_bytes": 39407616,
+              "total_scrape_ms": 208.953,
+              "sample_count": 17
+            }
+          ]
+        }
+      ],
+      "raw_file": "im-load-2026-10-31.json.gz",
+      "raw_sha256": "a85fcc8eb10685f026b4e81afaa278477d29721333b04154e0a67e990ca18214"
+    },
+    {
+      "registration_rate_limit_wait_ms": 6004.774,
+      "format_version": 1,
+      "go_version": "go1.27.2",
+      "checkout_revision": "96a7f12b4501b9735609a4ad40bd50791ff52f9a",
+      "race_instrumented": true,
+      "mysql_version": "8.4.13",
+      "redis_version": "8.2.9",
+      "visible_cpus": 4,
+      "body_bytes": 256,
+      "offline_messages": 125,
+      "persisted_messages": 3125,
+      "retry_checks": 60,
+      "host": {
+        "kernel": "7.0.0-1017-azure",
+        "machine": "x86_64",
+        "cpu_model": "AMD EPYC 7763 64-Core Processor",
+        "memory_bytes": 16760344576
+      },
+      "launcher_cleanup": {
+        "processes": 0,
+        "schemas": 0,
+        "users": 0,
+        "redis_containers": 0
+      },
+      "rounds": [
+        {
+          "round": 1,
+          "clients": 20,
+          "messages": 1000,
+          "elapsed_seconds": 2.719101153,
+          "duplicate_ack_frames": 0,
+          "duplicate_delivery_frames": 0,
+          "sender_ack": {
+            "count": 1000,
+            "p50_ms": 40.867,
+            "p95_ms": 69.186,
+            "p99_ms": 83.781,
+            "max_ms": 108.615
+          },
+          "recipient_delivery": {
+            "count": 1000,
+            "p50_ms": 728.756,
+            "p95_ms": 1144.905,
+            "p99_ms": 1192.262,
+            "max_ms": 1211.677
+          },
+          "api_resources": [
+            {
+              "cpu_seconds_delta": 2.360000000000001,
+              "peak_sampled_rss_bytes": 116289536,
+              "total_scrape_ms": 1101.7530000000002,
+              "sample_count": 21
+            },
+            {
+              "cpu_seconds_delta": 2.3500000000000014,
+              "peak_sampled_rss_bytes": 115879936,
+              "total_scrape_ms": 1293.7540000000001,
+              "sample_count": 21
+            }
+          ]
+        },
+        {
+          "round": 2,
+          "clients": 20,
+          "messages": 1000,
+          "elapsed_seconds": 2.750099616,
+          "duplicate_ack_frames": 0,
+          "duplicate_delivery_frames": 0,
+          "sender_ack": {
+            "count": 1000,
+            "p50_ms": 40.866,
+            "p95_ms": 65.476,
+            "p99_ms": 77.968,
+            "max_ms": 89.213
+          },
+          "recipient_delivery": {
+            "count": 1000,
+            "p50_ms": 781.526,
+            "p95_ms": 1159.186,
+            "p99_ms": 1241.377,
+            "max_ms": 1258.343
+          },
+          "api_resources": [
+            {
+              "cpu_seconds_delta": 2.3599999999999994,
+              "peak_sampled_rss_bytes": 118751232,
+              "total_scrape_ms": 1248.842,
+              "sample_count": 21
+            },
+            {
+              "cpu_seconds_delta": 2.369999999999999,
+              "peak_sampled_rss_bytes": 122429440,
+              "total_scrape_ms": 1152.946,
+              "sample_count": 20
+            }
+          ]
+        },
+        {
+          "round": 3,
+          "clients": 20,
+          "messages": 1000,
+          "elapsed_seconds": 2.741718516,
+          "duplicate_ack_frames": 0,
+          "duplicate_delivery_frames": 0,
+          "sender_ack": {
+            "count": 1000,
+            "p50_ms": 41.974,
+            "p95_ms": 67.197,
+            "p99_ms": 76.474,
+            "max_ms": 102.428
+          },
+          "recipient_delivery": {
+            "count": 1000,
+            "p50_ms": 770.712,
+            "p95_ms": 1243.049,
+            "p99_ms": 1269.248,
+            "max_ms": 1281.558
+          },
+          "api_resources": [
+            {
+              "cpu_seconds_delta": 2.33,
+              "peak_sampled_rss_bytes": 126373888,
+              "total_scrape_ms": 1249.2800000000002,
+              "sample_count": 21
+            },
+            {
+              "cpu_seconds_delta": 2.3500000000000014,
+              "peak_sampled_rss_bytes": 123174912,
+              "total_scrape_ms": 1217.8840000000002,
+              "sample_count": 21
+            }
+          ]
+        }
+      ],
+      "raw_file": "im-load-race-2026-10-31.json.gz",
+      "raw_sha256": "49fa714152688fc8e70a1c4814da2791c839d2cd72fc98245e3f2ddae8ab4503"
+    }
+  ]
+}
