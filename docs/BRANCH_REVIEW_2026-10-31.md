@@ -23,7 +23,7 @@
 | P2 媒体：minio_outage_test.go 原197–238行 | hijack 失败的 HTTP502 fallback 也可通过；恢复仅检查 complete200 | 实际 TCP 关闭计数、严格503、失败分片零行、completed 会话、唯一资产与对象字节检查 |
 | 证据范围：finaldelivery | 唯一新执行路径是 SQLite pool.Close，不是最终全组件配置 | 测试命名及文档限定到 SQL 探针；不扩大 A01/A09/A12 通过范围 |
 
-未发现需要为风格进行大规模重构的依据。原缺陷已在集成候选修正；修正后的独立复核及真实组件结果在下方补充。
+未发现需要为风格进行大规模重构的依据。修正后的独立只读复核固定 `9f3f0d1...9ed7ab2`：原审核问题已修正，未发现新增阻断；未执行测试，执行证据见下方。
 
 ## Spec
 
@@ -38,15 +38,21 @@
 - 删除预查询只减少活跃读者一次往返；零关注者由便宜 EXISTS 改为 UNION，成本收益须实测。500 视频 SQLite 模式比较不证明 20% P95 改善，默认仍为 SQL-only。
 - `TestLivenessSurvivesClosedSQLPool` 没有 broker/Redis/MinIO；已有 OpenAPI 路由映射及代表性响应校验不表示所有49路由的所有参数/响应变体都经过验证；已有浏览器工作流是 SQLite/FFmpeg，最终联合 Compose 待验。
 
-精确进程窗口、满 DLQ、持续流量及最终配置继续开放，没有将未实现工作改成通过。
+精确进程窗口、满 DLQ、持续流量及最终配置继续开放，没有将未实现工作改成通过。独立 Spec 对 `9f3f0d1...9ed7ab2` 的复核确认原问题解决、未发现新增阻断，审核未运行测试。
+
+当前 Standards 0 项未关闭；Spec 0 项未关闭。两个轴各自的初稿发现与复核保留，源码审核不代替实际运行。
 
 ## 实际验证
 
-本机 Go 1.27.2，Docker WSL 集成不可用。原分支合并的全量普通测试通过（platform17.152s）；它不能证明外部依赖分支已执行。修正后验证记录及最终候选 CI 待补。
+本机 Go 1.27.2，Docker WSL 集成不可用。原分支合并的全量普通测试通过（platform17.152s）；它不能证明外部依赖分支已执行。修正后全量普通测试通过（platform19.394s）、全量 race 通过（platform163.107s），vet、三个程序构建、Web/Python 语法、八任务工作流及文档链接检查通过。
 
 已实际复现的 benchmark 夹具问题：加入真实存储标志检查后，原夹具失败，输出 `completed-push fixture has 500 pull rows`。显式写 false、修正关注时间并检查精确页面后，`go test ./internal/platform -run '^$' -bench '^BenchmarkFollowingFeed$' -benchtime=100x -count=3` 通过：SQL-only 440067/428639/406127 ns/op；Hybrid 866695/825537/789622 ns/op。环境为本地 Ryzen 7 5800H / Go1.27.2 / SQLite 内存库 / 500 视频。不是优化前后对照，没有 MySQL、网络或 P95 数据，不能作为性能收益。
 
 broker 管理 API 的批量检查使用 ack_requeue_true 保留毒消息供 CLI：RabbitMQ4.3.7 的 [管理实现](https://github.com/rabbitmq/rabbitmq-server/blob/v4.3.7/deps/rabbitmq_management/src/rabbit_mgmt_wm_queue_get.erl) 先取整批再重新入队；测试仍需实际检查完整 ID，不能只相信该机制。
+
+候选 `9ed7ab2` 的 [CI 41199335119](https://github.com/liuzhouquan/GoStream/actions/runs/41199335119) 八项全部通过。真实 RabbitMQ 4.3.7/MySQL 矩阵通过（51.95s 用例耗时，非吞吐）：TCP 断连子例3.07s、20有效/5毒消息子例0.22s；实际 API 脚本完成原子预提交去重、10独立有效/3毒消息并发与 CLI 精确重投，清理报告 remaining_schema=0、remaining_user=0、remaining_api=false。真实 MinIO 的格式/头像权限和严格 TCP 断连/恢复用例通过（断连用例2.80s），这是签名/权限/存储链路测试，未增加实际编解码格式证据。
+
+其余 MySQL、Redis、视频恢复、IM 恢复/20客户端 normal+race、浏览器及质量任务通过。最终文档和 benchmark 夹具冒烟步骤提交必须另通过八项检查才合并；最终提交及合并记录见 [PR #22](https://github.com/liuzhouquan/GoStream/pull/22)。CI 增加的一次 benchmark 迭代仅验证夹具/精确页面，不以单次计时断言性能。
 
 ## 是否已经到尾声
 
