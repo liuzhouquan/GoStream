@@ -31,12 +31,14 @@
 
 26. **What happens when Redis or one IM process disappears?** SQL commits precede the sender ACK; remote real-time hints can be missed. Unread/history and bounded reconnect replay recover the durable rows. The real two-process matrix kills both production APIs with SIGKILL, restarts them, retries the same client key, stops/restarts Redis, and verifies 105-message backlogs with device-isolated ACKs. It checks one persisted identity and actual public protocol results, not just process health. See `tests/integration/im`, `tests/integration/im_smoke.py` and `docs/IM.md`. Subscriber recovery does not retroactively replay lost hints, and ID pagination over completed writes does not prove late-commit group-cursor safety.
 
+27. **How are active-device receipts compacted without swallowing unread gaps?** Only explicitly ACKed adjacent integer IDs merge into a device-specific closed interval. Missing IDs, including late lower-ID commits, stay unread; a new device inherits no ranges. Registration, exact inserts, interval merges and receipt deletion share a user-row transaction, and retry counts are logical newly-acknowledged IDs. V005 preserves old receipts, with gradual compaction bounded by each request's neighboring keys. Sparse global IDs and untouched history may still grow. See `device_ack_ranges.go`, `device_ack_ranges_test.go`, `device_ack_ranges_mysql_test.go` and [the design](DEVICE_ACK_RANGES.md); prescribed load and sparse-query costs remain pending.
+
 ## Planned questions after later stages
 
 - How would producer/consumer process kills at each commit/confirm/ACK boundary affect the implemented RabbitMQ path, and which additional windows still need a real process fault test?
 - How could per-video card and count caches stay consistent without invalidating every page?
 - At what follower threshold does bounded push beat the pull join on the required dataset, and how should old inbox rows be compacted?
-- How can exact receipts for continuously active devices be compacted without skipping uncommitted or out-of-order messages?
+- How does sparse ACK-interval growth affect unread query cost, and would a nearest-preceding-interval lookup improve it on the measured MySQL workload?
 - Where does `context.Context` cancellation propagate during bounded worker concurrency?
 
 Do not present a topic as implemented until `PROGRESS.md` points to code and verification evidence.

@@ -162,6 +162,16 @@ type MessageDeviceAck struct {
 	CreatedAt time.Time `gorm:"not null"`
 }
 
+// MessageDeviceAckRange contains only consecutive, explicitly acknowledged IDs.
+// Missing IDs are never inferred to be read, including transactions committing late.
+type MessageDeviceAckRange struct {
+	ID             uint   `gorm:"primaryKey"`
+	UserID         uint   `gorm:"uniqueIndex:ux_device_ack_range,priority:1;not null"`
+	DeviceID       string `gorm:"uniqueIndex:ux_device_ack_range,priority:2;size:36;not null"`
+	FirstMessageID uint   `gorm:"uniqueIndex:ux_device_ack_range,priority:3;not null"`
+	LastMessageID  uint   `gorm:"not null"`
+}
+
 // MessageDevice bounds the number of device-specific read states per account.
 type MessageDevice struct {
 	ID         uint      `json:"-" gorm:"primaryKey"`

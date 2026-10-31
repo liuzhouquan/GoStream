@@ -32,11 +32,11 @@ Local recipients and the sender's other local devices are also reached by the pr
 | Sender retries | Unique `(sender_id, client_id)` within each direct/group table; an exact retry returns the original ID; changed content is rejected | Preserve the same client ID until the application accepts its ACK |
 | Real-time relay | Other instances load committed SQL rows and check current recipient/group membership | Pub/Sub events can be missed or repeated; reconnecting the subscriber does not republish missed hints |
 | Recovery | Reconnect replays up to 100 direct and 100 group rows, then emits `sync_required` / `group_sync_required`; unread/history APIs page the rest | Clients must explicitly synchronize missed data and deduplicate by server ID |
-| Direct device ACK | Exact unique `(user, device, message)` receipts; batch ownership is checked before writes | Legacy account-level ACK still suppresses replay on all devices |
+| Direct device ACK | Exact receipts plus lossless per-device adjacent-ID ranges; batch ownership is checked before writes | Legacy account-level ACK still suppresses replay on all devices |
 | Group device ACK | Monotonic per-group/user/device cursor, starting from the account join/read baseline | ACK means every message through that ID is read; clients must synchronize gaps before advancing it |
 | History order | Descending server-ID keyset pages; reconnect/unread direct pages ascend by ID | Same-group sends serialize ID allocation and commit; there is no cross-group commit order or live arrival order guarantee |
 | Presence | Local hub plus expiring Redis node entries; Redis failure falls back to local visibility | Default refresh is 30 seconds and node expiry 75 seconds; the process matrix now checks the stored default lease and waits through real expiry after SIGKILL |
-| Device retention | New IDs capped at 32; 30-day idle eviction and 90-day expiry remove device-specific state, retaining messages | Continuously active devices' exact receipts are not compacted yet |
+| Device retention | New IDs capped at 32; 30-day idle eviction and 90-day expiry remove device-specific state, retaining messages | Adjacent explicit IDs compact incrementally; sparse IDs and untouched history remain unbounded (see [design](DEVICE_ACK_RANGES.md)) |
 
 Group removal blocks later sends/history reads and removes that member's device cursors. Remote group hints recheck current SQL membership before dispatch. Data already delivered before removal cannot be recalled. The server commit-order regression below is separate from the process matrix. The web client pages older group history before advancing ACK beyond an unread backlog. Every live hint triggers paged SQL-history synchronization back to its verified boundary. Failed synchronization blocks ACK advancement; stale requests and ACK responses are discarded when switching groups. Browser fixtures verify these paths; final combined-deployment browser acceptance remains pending.
 
@@ -98,14 +98,14 @@ Direct invocation of `TestIMProcessRecovery` requires all of `GOSTREAM_TEST_IM_B
 
 Local execution used Go 1.27.2, MySQL 8.4.11, Redis 8.2.9 and WSL2 Linux x86_64; actual run results are in [`PROGRESS.md`](../PROGRESS.md). Test duration is correctness-check runtime, not a message latency or capacity measurement. This work does not claim the 20-client/1,000-message performance gate has passed.
 
-A07 remains partial pending the final two-browser/full-component workflow, long-lived active-device receipt compaction and the prescribed load run. Device eviction/expiry have separate existing SQLite/MySQL tests; this process matrix does not simulate 90 days. RabbitMQ commit/confirm/ACK kill windows remain separate A06 work. A disconnect can produce duplicate real-time events; SQL history and receipts, with client synchronization, provide recovery.
+A07 remains partial pending the final two-browser/full-component workflow, sparse receipt-range query costs and the prescribed load run. Device eviction/expiry have separate existing SQLite/MySQL tests; this process matrix does not simulate 90 days. RabbitMQ commit/confirm/ACK kill windows remain separate A06 work. A disconnect can produce duplicate real-time events; SQL history and receipts, with client synchronization, provide recovery.
 
 ## Code reading order
 
 1. [`hub.go`](../internal/platform/hub.go): authenticate, persist, ACK, local fanout and replay.
 2. [`realtime.go`](../internal/platform/realtime.go): committed-ID relay, membership checks, reconnect and presence.
 3. [`messages.go`](../internal/platform/messages.go), [`groups.go`](../internal/platform/groups.go): pagination and receipt/cursor semantics.
-4. [`device.go`](../internal/platform/device.go): registration cap and idle cleanup.
+4. [`device.go`](../internal/platform/device.go), [`device_ack_ranges.go`](../internal/platform/device_ack_ranges.go): registration cap, idle cleanup and lossless incremental compaction.
 5. [`recovery_test.go`](../tests/integration/im/recovery_test.go), [`helpers_test.go`](../tests/integration/im/helpers_test.go), [`im_smoke.py`](../tests/integration/im_smoke.py): public-protocol fault assertions, real process ownership and resource isolation.
 
 
@@ -113,11 +113,18 @@ A07 remains partial pending the final two-browser/full-component workflow, long-
 
 A current member can read the full retained group history, including messages before first invitation and during an absence. Invitation/re-invitation sets the shared unread baseline to the latest committed group message, so older messages remain readable but do not become a new unread backlog. Removal deletes membership and account/device group read state and denies history, unread, ACK and new sends. `TestGroupMembershipLifecycleAndHistorySemantics` verifies the sequential lifecycle; concurrent send/ACK removal is a separate MySQL regression.
 
-The proposed `feat/im-device-lifecycle` compaction is withheld: promoting device receipts to account-wide `acked_at` suppresses unread on a newly registered device, and its device-count check is not serialized with registration. Existing 30/90-day eviction/expiry remains in place. Full default 75-second crash-presence observation and safe active-device receipt compaction are still pending. See [seven-branch review](BRANCH_REVIEW.md).
+The proposed `feat/im-device-lifecycle` compaction is withheld: promoting device receipts to account-wide `acked_at` suppresses unread on a newly registered device, and its device-count check is not serialized with registration. Existing 30/90-day eviction/expiry remains in place. That decision remains historical evidence in the [seven-branch review](BRANCH_REVIEW.md). The default 75-second expiry is now covered by the real process matrix; the v005 implementation below keeps ACK ranges device-specific.
 
 
 ## Presence lifecycle revision
 
 `PRESENCE_LEASE` and `PRESENCE_RENEW` configure startup timing. Unset values retain 75s/30s; an explicit lease with no renewal uses half the lease. Invalid durations, zero values and `renew >= lease` are rejected. `SetPresenceLease` is startup configuration and must precede workers/requests. The real process matrix leaves these variables unset, checks a fresh Redis score has approximately 75 seconds remaining, kills the recipient and waits up to 85 seconds for offline visibility. The surviving sender is kept alive with normal ping/pong. Miniredis's 80ms unit check is separate evidence, not a substitute for the default process test. CI results are in the current review/PR.
 
-This branch adds regression coverage for new-device unread, expiration and concurrent registration without introducing the previously rejected global `acked_at` compaction. Safe compaction for continuously active devices remains unfinished.
+The earlier presence revision added new-device, expiration and concurrent-registration regressions without global `acked_at` promotion. The v005 revision below implements device-specific lossless compaction.
+
+
+## V005 exact receipt compaction
+
+Single and batch device ACKs store only explicitly acknowledged IDs. Consecutive numeric IDs become a closed interval under the same user-row transaction used by registration/cleanup; unacknowledged holes, including lower IDs committed later, remain unread. New/other devices inherit no intervals. Exact rows and ranges are excluded together by unread and socket replay, and both are deleted by device expiry/eviction. Logical `acked_count` remains idempotent. SQLite reserves its writer before snapshot reads.
+
+V005 adds the interval table without rewriting old receipts. Per-request neighbor windows are bounded by the 100-ID input; sparse IDs and untouched old history can still grow. Stop old API replicas and back up SQL before upgrading; old binaries cannot interpret ranges. Detailed design, local red/green results, independent reviews and final [PR #19](https://github.com/liuzhouquan/GoStream/pull/19) CI evidence are in [DEVICE_ACK_RANGES.md](DEVICE_ACK_RANGES.md). This does not close the prescribed load or final combined-deployment gates.

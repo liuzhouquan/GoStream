@@ -20,6 +20,7 @@ const baselineKey = "schema_v001"
 const upgradeV002Key = "schema_v002"
 const upgradeV003Key = "schema_v003"
 const upgradeV004Key = "schema_v004"
+const upgradeV005Key = "schema_v005"
 const mysqlLockName = "gostream_schema_migrations"
 
 // These are immutable snapshots of the schema before the first explicit
@@ -55,6 +56,12 @@ var sqliteV004 string
 //go:embed sql/v004_mysql.sql
 var mysqlV004 string
 
+//go:embed sql/v005_sqlite.sql
+var sqliteV005 string
+
+//go:embed sql/v005_mysql.sql
+var mysqlV005 string
+
 var mysqlIndexStatement = regexp.MustCompile("^CREATE (?:UNIQUE )?INDEX `([^`]+)` ON `([^`]+)` ")
 var sqliteIndexStatement = regexp.MustCompile("^CREATE (?:UNIQUE )?INDEX IF NOT EXISTS `([^`]+)` ON `([^`]+)`\\(")
 
@@ -85,6 +92,7 @@ func apply(ctx context.Context, db *gorm.DB) error {
 	upgradeApplied := false
 	v003Applied := false
 	v004Applied := false
+	v005Applied := false
 	for _, record := range records {
 		switch record.Key {
 		case baselineKey:
@@ -95,6 +103,8 @@ func apply(ctx context.Context, db *gorm.DB) error {
 			v003Applied = true
 		case upgradeV004Key:
 			v004Applied = true
+		case upgradeV005Key:
+			v005Applied = true
 		default:
 			if strings.HasPrefix(record.Key, "schema_v") {
 				return fmt.Errorf("unsupported schema version %q; start a compatible GoStream binary", record.Key)
@@ -109,6 +119,9 @@ func apply(ctx context.Context, db *gorm.DB) error {
 	}
 	if v004Applied && !v003Applied {
 		return errors.New("schema_v004 is recorded without schema_v003")
+	}
+	if v005Applied && !v004Applied {
+		return errors.New("schema_v005 is recorded without schema_v004")
 	}
 	if !baselineApplied {
 		if err := applyV001(db, script); err != nil {
@@ -141,6 +154,57 @@ func apply(ctx context.Context, db *gorm.DB) error {
 		if err := db.Create(&platform.SchemaMigration{Key: upgradeV004Key, AppliedAt: time.Now().UTC()}).Error; err != nil {
 			return fmt.Errorf("record %s: %w", upgradeV004Key, err)
 		}
+	}
+	if !v005Applied {
+		if err := applyV005(db); err != nil {
+			return fmt.Errorf("apply %s: %w", upgradeV005Key, err)
+		}
+		if err := db.Create(&platform.SchemaMigration{Key: upgradeV005Key, AppliedAt: time.Now().UTC()}).Error; err != nil {
+			return fmt.Errorf("record %s: %w", upgradeV005Key, err)
+		}
+	}
+	return nil
+}
+
+func applyV005(db *gorm.DB) error {
+	script := sqliteV005
+	if db.Dialector.Name() == "mysql" {
+		script = mysqlV005
+	}
+	for _, statement := range splitSQL(script) {
+		if err := db.Exec(statement).Error; err != nil {
+			return err
+		}
+	}
+	for _, column := range []string{"id", "user_id", "device_id", "first_message_id", "last_message_id"} {
+		if !db.Migrator().HasColumn("message_device_ack_ranges", column) {
+			return fmt.Errorf("v005 required column message_device_ack_ranges.%s is missing", column)
+		}
+	}
+	var columns []string
+	var err error
+	if db.Dialector.Name() == "mysql" {
+		columns, err = mysqlIndexColumns(db, "message_device_ack_ranges", "ux_device_ack_range")
+		if err == nil && len(columns) == 0 {
+			if err = db.Exec("CREATE UNIQUE INDEX ux_device_ack_range ON message_device_ack_ranges(user_id,device_id,first_message_id)").Error; err == nil {
+				columns, err = mysqlIndexColumns(db, "message_device_ack_ranges", "ux_device_ack_range")
+			}
+		}
+	} else {
+		columns, err = sqliteIndexColumns(db, "ux_device_ack_range")
+	}
+	if err != nil {
+		return err
+	}
+	if !slices.Equal(columns, []string{"user_id", "device_id", "first_message_id"}) {
+		return fmt.Errorf("v005 index ux_device_ack_range columns differ: %v", columns)
+	}
+	unique, err := indexUnique(db, "message_device_ack_ranges", "ux_device_ack_range")
+	if err != nil {
+		return err
+	}
+	if !unique {
+		return errors.New("v005 index ux_device_ack_range must be unique")
 	}
 	return nil
 }

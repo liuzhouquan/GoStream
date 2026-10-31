@@ -82,7 +82,7 @@ INSERT INTO outbox_events (event_key, topic, payload, available_at, created_at)
 VALUES ('recovery-event', 'notification.created', '{}', UTC_TIMESTAMP(3), UTC_TIMESTAMP(3));
 SQL
 
-assert_query "$source_db" "SELECT COUNT(*) FROM schema_migrations WHERE \`key\` IN ('schema_v001','schema_v002','schema_v003','schema_v004');" 4
+assert_query "$source_db" "SELECT COUNT(*) FROM schema_migrations WHERE \`key\` IN ('schema_v001','schema_v002','schema_v003','schema_v004','schema_v005');" 5
 assert_query "$source_db" "SELECT COUNT(*) FROM videos v JOIN users u ON u.id = v.author_id WHERE u.username = 'recovery-user' AND v.title = 'Recovery video';" 1
 assert_query "$source_db" "SELECT COUNT(*) FROM outbox_events WHERE event_key = 'recovery-event';" 1
 
@@ -95,7 +95,7 @@ sha256sum "$workdir/backup.sql"
 
 echo "Restoring into isolated database $restored_db"
 mysql_db "$restored_db" < "$workdir/backup.sql"
-assert_query "$restored_db" "SELECT COUNT(*) FROM schema_migrations WHERE \`key\` IN ('schema_v001','schema_v002','schema_v003','schema_v004');" 4
+assert_query "$restored_db" "SELECT COUNT(*) FROM schema_migrations WHERE \`key\` IN ('schema_v001','schema_v002','schema_v003','schema_v004','schema_v005');" 5
 assert_query "$restored_db" "SELECT COUNT(*) FROM videos v JOIN users u ON u.id = v.author_id WHERE u.username = 'recovery-user' AND v.title = 'Recovery video';" 1
 assert_query "$restored_db" "SELECT COUNT(*) FROM outbox_events WHERE event_key = 'recovery-event' AND payload = '{}';" 1
 assert_query "$restored_db" "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'outbox_events' AND index_name = 'idx_outbox_dispatch';" 4
@@ -103,6 +103,7 @@ assert_query "$restored_db" "SELECT COUNT(*) FROM information_schema.statistics 
 echo "Rehearsing v002 rollback and forward migration on $restored_db"
 cat <<'SQL' | mysql_db "$restored_db"
 DROP INDEX idx_outbox_dispatch ON outbox_events;
+DELETE FROM schema_migrations WHERE `key` = 'schema_v005';
 DELETE FROM schema_migrations WHERE `key` = 'schema_v004';
 DELETE FROM schema_migrations WHERE `key` = 'schema_v003';
 DELETE FROM schema_migrations WHERE `key` = 'schema_v002';

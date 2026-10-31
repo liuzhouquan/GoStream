@@ -63,7 +63,7 @@ func TestFrozenV001SQLiteMatchesCurrentModels(t *testing.T) {
 	}
 	left := sqliteSchemaDDL(t, frozen)
 	right := sqliteSchemaDDL(t, models)
-	for _, name := range []string{"feed_fanout_jobs", "feed_inboxes", "idx_feed_fanout_jobs_video_id", "idx_feed_fanout_dispatch", "ux_feed_inbox", "idx_feed_inbox_user", "idx_video_feed_pull"} {
+	for _, name := range []string{"feed_fanout_jobs", "feed_inboxes", "idx_feed_fanout_jobs_video_id", "idx_feed_fanout_dispatch", "ux_feed_inbox", "idx_feed_inbox_user", "idx_video_feed_pull", "message_device_ack_ranges", "ux_device_ack_range"} {
 		delete(right, name)
 	}
 	right["videos"] = strings.Replace(right["videos"], ",`feed_pull` numeric NOT NULL DEFAULT true", "", 1)
@@ -139,7 +139,7 @@ func TestApplyAdoptsExistingAutoMigrateDatabase(t *testing.T) {
 	if err := db.Model(&platform.User{}).Where("id = ?", user.ID).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("existing user: count=%d err=%v", count, err)
 	}
-	if err := db.Model(&platform.SchemaMigration{}).Count(&count).Error; err != nil || count != 5 {
+	if err := db.Model(&platform.SchemaMigration{}).Count(&count).Error; err != nil || count != 6 {
 		t.Fatalf("migration markers: count=%d err=%v", count, err)
 	}
 }
@@ -165,7 +165,7 @@ func TestApplyRejectsNewerSchemaAfterBaseline(t *testing.T) {
 	if err := Apply(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Create(&platform.SchemaMigration{Key: "schema_v005", AppliedAt: time.Now().UTC()}).Error; err != nil {
+	if err := db.Create(&platform.SchemaMigration{Key: "schema_v006", AppliedAt: time.Now().UTC()}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := Apply(context.Background(), db); err == nil || !strings.Contains(err.Error(), "unsupported schema version") {
@@ -228,7 +228,7 @@ func TestApplyRejectsWrongV002Index(t *testing.T) {
 	if err := db.Exec("CREATE INDEX idx_outbox_dispatch ON outbox_events(id)").Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Where("`key` IN ?", []string{upgradeV003Key, upgradeV004Key}).Delete(&platform.SchemaMigration{}).Error; err != nil {
+	if err := db.Where("`key` IN ?", []string{upgradeV003Key, upgradeV004Key, upgradeV005Key}).Delete(&platform.SchemaMigration{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Where("`key` = ?", upgradeV002Key).Delete(&platform.SchemaMigration{}).Error; err != nil {
@@ -268,7 +268,7 @@ func TestApplyRetriesInterruptedV003WithoutLosingRows(t *testing.T) {
 	if err := db.Create(&user).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Where("`key` IN ?", []string{upgradeV003Key, upgradeV004Key}).Delete(&platform.SchemaMigration{}).Error; err != nil {
+	if err := db.Where("`key` IN ?", []string{upgradeV003Key, upgradeV004Key, upgradeV005Key}).Delete(&platform.SchemaMigration{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Exec("DROP INDEX idx_feed_inbox_user").Error; err != nil {
@@ -318,7 +318,7 @@ func TestApplyV004BackfillsCompletedFanoutAndRetries(t *testing.T) {
 	if err := db.Create(&job).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Where("`key` = ?", upgradeV004Key).Delete(&platform.SchemaMigration{}).Error; err != nil {
+	if err := db.Where("`key` IN ?", []string{upgradeV004Key, upgradeV005Key}).Delete(&platform.SchemaMigration{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Migrator().DropIndex(&platform.Video{}, "idx_video_feed_pull"); err != nil {
@@ -342,7 +342,7 @@ func TestApplyRejectsNonUniqueV003InboxIndex(t *testing.T) {
 	if err := Apply(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Where("`key` IN ?", []string{upgradeV003Key, upgradeV004Key}).Delete(&platform.SchemaMigration{}).Error; err != nil {
+	if err := db.Where("`key` IN ?", []string{upgradeV003Key, upgradeV004Key, upgradeV005Key}).Delete(&platform.SchemaMigration{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Exec("DROP INDEX ux_feed_inbox").Error; err != nil {
@@ -480,13 +480,13 @@ func TestApplyMySQLLegacyIntegration(t *testing.T) {
 	if err := db.Model(&platform.User{}).Where("id = ?", user.ID).Count(&count).Error; err != nil || count != 1 {
 		t.Fatalf("legacy MySQL user after migration: count=%d err=%v", count, err)
 	}
-	if err := db.Model(&platform.SchemaMigration{}).Count(&count).Error; err != nil || count != 5 {
+	if err := db.Model(&platform.SchemaMigration{}).Count(&count).Error; err != nil || count != 6 {
 		t.Fatalf("legacy MySQL markers: count=%d err=%v", count, err)
 	}
 	if err := Apply(context.Background(), db); err != nil {
 		t.Fatalf("repeat legacy migration: %v", err)
 	}
-	if err := db.Model(&platform.SchemaMigration{}).Count(&count).Error; err != nil || count != 5 {
+	if err := db.Model(&platform.SchemaMigration{}).Count(&count).Error; err != nil || count != 6 {
 		t.Fatalf("legacy MySQL markers after repeat: count=%d err=%v", count, err)
 	}
 }
@@ -509,7 +509,7 @@ func TestMySQLV002UpgradeIntegration(t *testing.T) {
 	if err := db.Migrator().DropIndex(&platform.OutboxEvent{}, "idx_outbox_dispatch"); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Where("`key` IN ?", []string{upgradeV003Key, upgradeV004Key}).Delete(&platform.SchemaMigration{}).Error; err != nil {
+	if err := db.Where("`key` IN ?", []string{upgradeV003Key, upgradeV004Key, upgradeV005Key}).Delete(&platform.SchemaMigration{}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Migrator().DropTable(&platform.FeedInbox{}, &platform.FeedFanoutJob{}); err != nil {

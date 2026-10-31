@@ -231,6 +231,9 @@ jobs:
       - name: Upgrade the prior MySQL version without losing outbox data
         run: go test ./internal/migrations -run '^TestMySQLV002UpgradeIntegration$' -count=1
 
+      - name: Upgrade v004 to v005 without rewriting device receipts
+        run: go test ./internal/migrations -run '^TestMySQLV005UpgradeIntegration$' -count=1
+
       - name: Compare frozen and previous MySQL schema metadata
         run: go test ./internal/migrations -run '^TestMySQLMigratedSchemaMatchesLegacyModels$' -count=1
 
@@ -242,8 +245,8 @@ jobs:
       - name: Run real MySQL integration tests
         run: go test ./internal/platform -run '^TestMySQL' -count=1
 
-      - name: Verify group commit ordering under concurrent sends
-        run: go test -race ./internal/platform -run '^TestMySQLGroup(CommitOrder|MemberRevocationRace)$' -count=3
+      - name: Verify group ordering and device receipt transactions
+        run: go test -race ./internal/platform -run '^TestMySQL(Group(CommitOrder|MemberRevocationRace)|DeviceAckRanges)$' -count=3
 
   minio-integration:
     runs-on: ubuntu-24.04
