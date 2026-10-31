@@ -78,9 +78,10 @@ RabbitMQ 通知链路已接入确认发布、消费者持久化幂等、延迟�
 
 这些是工作包，不是按日期承诺。已实现的版本化迁移、CI、对象存储和混合 Feed 不再列为“从零实现”；它们剩余的故障、容量及最终配置验收仍按矩阵保留。
 
-
 2026-10-30 十分支复核：新增的组件测试、真实默认 presence 过期、OpenAPI 和浏览器 CI 是验收证据的补充，不能将 A01–A12 全部或任意整项自动改成通过。当前决定及实测记录见 [BRANCH_REVIEW_2026-10-30.md](BRANCH_REVIEW_2026-10-30.md)。此前否决的全局回执压缩仍未纳入。
 
 2026-10-31 A07 回执生命周期：新增每设备连续 ID 区间，在保留未确认缺口和新设备未读语义的前提下渐进压缩；v005 增量迁移不修改已有回执或消息。实现、升级限制与本轮证据见 [DEVICE_ACK_RANGES.md](DEVICE_ACK_RANGES.md)。规定负载和最终全组件验收仍未关闭。
 
 2026-10-31 A06 broker 故障边界：补齐消费提交后 ACK 丢失的断连重试与幂等校验、发布确认重发去重断言、并发混合流量与毒消息投递至 Quorum DLQ 及运维回放。真实 API 进程演练在 `rabbitmq_smoke.py` 中增加 pre-ACK 崩溃重放、并发毒消息死信队列深度和全队列排空检查。实现与边界见 [RABBITMQ.md](RABBITMQ.md)。
+
+2026-10-31 A03/A04/A05 剩余验收与混合 Feed 优化：优化 `following_feed.go` 去除多余 `SELECT EXISTS` 往返，预分配 UNION 缓冲区；`TestMinIOCompleteStorageOutage` 补齐 TCP 连接中断与恢复验证；`TestMediaPermissionAndOwnershipMatrix` 增加跨用户头像所有权和格式规则；并发互动与播放计数在 race 检测下验证。详见 [FEED_HYBRID.md](FEED_HYBRID.md)。

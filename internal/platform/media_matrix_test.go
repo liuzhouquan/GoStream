@@ -302,6 +302,39 @@ func testMediaPermissionAndOwnershipMatrix(t *testing.T, h http.Handler, db *gor
 		if r.Code != http.StatusCreated {
 			t.Fatalf("valid video publish: expected 201, got %d: %s", r.Code, r.Body.String())
 		}
+
+		// 4. Avatar ownership & kind rules
+		// User B tries to set avatar using User A's image asset -> 400
+		r = request(t, h, http.MethodPatch, "/api/users/me", tokenB, map[string]string{
+			"avatar_url": assetImage.URL,
+		})
+		if r.Code != http.StatusBadRequest {
+			t.Fatalf("user B setting user A avatar: expected 400, got %d: %s", r.Code, r.Body.String())
+		}
+
+		// User A tries to set avatar using a video asset -> 400
+		r = request(t, h, http.MethodPatch, "/api/users/me", tokenA, map[string]string{
+			"avatar_url": assetVideo.URL,
+		})
+		if r.Code != http.StatusBadRequest {
+			t.Fatalf("user A setting video asset as avatar: expected 400, got %d: %s", r.Code, r.Body.String())
+		}
+
+		// User A tries to set avatar using a non-existent asset -> 400
+		r = request(t, h, http.MethodPatch, "/api/users/me", tokenA, map[string]string{
+			"avatar_url": "/media/0123456789abcdef0123456789abcdef.png",
+		})
+		if r.Code != http.StatusBadRequest {
+			t.Fatalf("user A setting non-existent avatar: expected 400, got %d: %s", r.Code, r.Body.String())
+		}
+
+		// User A sets avatar using own valid image asset -> 200 OK
+		r = request(t, h, http.MethodPatch, "/api/users/me", tokenA, map[string]string{
+			"avatar_url": assetImage.URL,
+		})
+		if r.Code != http.StatusOK {
+			t.Fatalf("valid avatar update: expected 200, got %d: %s", r.Code, r.Body.String())
+		}
 	})
 }
 
