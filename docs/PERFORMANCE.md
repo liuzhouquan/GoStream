@@ -1,5 +1,11 @@
 # Testing and performance report
 
+## Twenty-client direct IM load, 2026-10-31
+
+[The IM load report](IM_LOAD.md) runs two real API processes with 20 WebSocket accounts and 1,000 cross-instance direct messages per round, three rounds. Normal-build sender ACK P95 was 40.037 / 37.890 / 41.809 ms; recipient delivery P95 was 495.732 / 496.730 / 425.608 ms. Each round checked every intended identity and payload. Retries, 125 offline messages, complete history/unread paging and independent device ACKs ended with exactly 3,125 persisted messages. A separate race build completed the same workload. [Machine-readable summary](benchmarks/im-load-summary-2026-10-31.json) links lossless compressed raw samples, environment and resource data.
+
+This was a short closed-loop test with at most 20 sender commands awaiting ACK, 256-byte bodies and 100ms-target process sampling on a four-vCPU CI runner. It does not measure saturation, sustained traffic, group fanout, ten-video processing or the final Compose deployment. Initial registration respects the shared Redis limit outside the measurement window. Report CPU includes background and metric work; sampled RSS and scrape durations are retained with their limits. A07 remains partial.
+
 ## Device ACK sparse-query comparison, 2026-10-31
 
 [The measured query work package](DEVICE_ACK_QUERY.md) compares 1,000/10,000 sparse ranges at first/middle/tail/exhausted cursors on one isolated MySQL 8.4.13 transaction. The batched snapshot reader replaces a correlated range containment query. In the 10,000-range fixture, three alternating samples had median first-page costs of 1185.553 ms (v005) and 7.220 ms (batch), and tail costs of 3172.522 / 7.872 ms. All returned IDs matched expected pages. Empty-page cost did not improve. [Raw samples, environment and EXPLAIN ANALYZE](benchmarks/device-ack-query-2026-10-31.json) are retained. These are warm SQL-path timings on a shared four-vCPU CI runner, excluding production BEGIN/COMMIT, HTTP, auth and device registration; they are not HTTP P95, WS throughput or A07 load acceptance.
