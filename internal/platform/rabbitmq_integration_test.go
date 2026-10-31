@@ -418,11 +418,48 @@ func TestRabbitMQNotificationIntegration(t *testing.T) {
 			t.Fatalf("expected confirmed source after retry: %+v", stored)
 		}
 		// Consumer handles potential duplicate and ensures exactly 1 delivery job
+		beforeDup := testutil.ToFloat64(b.metrics.brokerMessages.WithLabelValues("duplicate"))
 		stop := consumer(t)
 		defer stop()
 		awaitRabbit(t, "deduplicated delivery after confirm window retry", 10*time.Second, func() bool {
-			return jobCount(t, source) == 1
+			return jobCount(t, source) == 1 && testutil.ToFloat64(b.metrics.brokerMessages.WithLabelValues("duplicate")) >= beforeDup+1
 		})
+	})
+	t.Run("consumer_commit_pre_ack_disconnect_and_redelivery", func(t *testing.T) {
+		source := fixture(t)
+		if err := a.broker.publish(context.Background(), source); err != nil {
+			t.Fatal(err)
+		}
+		// Dedicated session reads delivery and commits to SQL without sending ACK
+		session := open(t)
+		delivery := rabbitGet(t, session, queue, 5*time.Second)
+		if delivery.MessageId != source.EventKey {
+			t.Fatalf("unexpected message id: %q vs %q", delivery.MessageId, source.EventKey)
+		}
+		// Consumer commits broker-delivery row to SQL
+		duplicate, err := b.acceptBrokerNotification(context.Background(), delivery.Body, delivery.MessageId)
+		if err != nil || duplicate {
+			t.Fatalf("consumer commit before ACK: duplicate=%v err=%v", duplicate, err)
+		}
+		if jobCount(t, source) != 1 {
+			t.Fatalf("expected 1 delivery job committed to SQL, got %d", jobCount(t, source))
+		}
+		// Sever connection abruptly without sending ACK to simulate consumer crash
+		session.close()
+
+		// Start background consumer. RabbitMQ redelivers the unacknowledged message.
+		beforeDup := testutil.ToFloat64(b.metrics.brokerMessages.WithLabelValues("duplicate"))
+		stop := consumer(t)
+		defer stop()
+
+		awaitRabbit(t, "duplicate delivery detected and acknowledged", 10*time.Second, func() bool {
+			return testutil.ToFloat64(b.metrics.brokerMessages.WithLabelValues("duplicate")) >= beforeDup+1
+		})
+
+		// Assert SQL row was not duplicated
+		if jobCount(t, source) != 1 {
+			t.Fatalf("redelivered message caused duplicate delivery row in SQL: count=%d", jobCount(t, source))
+		}
 	})
 	t.Run("dlq_target_outage_and_recovery", func(t *testing.T) {
 		stop := consumer(t)
@@ -534,5 +571,64 @@ func TestRabbitMQNotificationIntegration(t *testing.T) {
 		awaitRabbit(t, "all 50 sustained redeliveries detected as duplicates", 20*time.Second, func() bool {
 			return testutil.ToFloat64(b.metrics.brokerMessages.WithLabelValues("duplicate")) >= beforeDup+float64(backlogCount)
 		})
+	})
+	t.Run("concurrent_mixed_traffic_with_quorum_dlq_routing", func(t *testing.T) {
+		const validCount = 20
+		const poisonCount = 5
+
+		validSources := make([]OutboxEvent, validCount)
+		for i := 0; i < validCount; i++ {
+			validSources[i] = fixture(t)
+		}
+
+		stop := consumer(t)
+		defer stop()
+
+		var wg sync.WaitGroup
+		// Concurrently publish 20 valid notifications
+		for i := 0; i < validCount; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				if err := a.broker.publish(context.Background(), validSources[idx]); err != nil {
+					t.Errorf("publish valid %d: %v", idx, err)
+				}
+			}(i)
+		}
+		// Concurrently publish 5 poison envelopes
+		for i := 0; i < poisonCount; i++ {
+			wg.Add(1)
+			go func(idx int) {
+				defer wg.Done()
+				poisonBody := []byte(fmt.Sprintf(`{"version":99,"topic":"invalid","notification_id":%d}`, 9900+idx))
+				if err := a.broker.publishBody(context.Background(), poisonBody, fmt.Sprintf("poison-%s-%d", tag, idx)); err != nil {
+					t.Errorf("publish poison %d: %v", idx, err)
+				}
+			}(i)
+		}
+		wg.Wait()
+
+		// Wait for all 20 valid deliveries to be committed to MySQL
+		for i := 0; i < validCount; i++ {
+			src := validSources[i]
+			awaitRabbit(t, fmt.Sprintf("valid delivery for %s", src.EventKey), 15*time.Second, func() bool {
+				return jobCount(t, src) == 1
+			})
+		}
+
+		// Verify 5 poison envelopes reached the dead letter queue
+		session := open(t)
+		defer session.close()
+		deadReceived := 0
+		for deadReceived < poisonCount {
+			dead := rabbitGet(t, session, queue+".dead", 15*time.Second)
+			if dead.DeliveryMode != amqp.Persistent || !strings.HasPrefix(dead.MessageId, "poison-"+tag) {
+				t.Fatalf("unexpected dead letter: id=%q mode=%d", dead.MessageId, dead.DeliveryMode)
+			}
+			if err := dead.Ack(false); err != nil {
+				t.Fatal(err)
+			}
+			deadReceived++
+		}
 	})
 }

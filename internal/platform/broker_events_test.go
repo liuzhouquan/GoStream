@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -513,5 +514,82 @@ func TestBrokerNotificationBurstAndIdempotency(t *testing.T) {
 	var jobCount int64
 	if err := db.Model(&OutboxEvent{}).Where("event_key = ?", "broker-delivery:"+item.EventKey).Count(&jobCount).Error; err != nil || jobCount != 1 {
 		t.Fatalf("expected exactly 1 delivery job, got %d", jobCount)
+	}
+}
+
+func TestBrokerConsumerConcurrentDeliveriesAndPoisonMatrix(t *testing.T) {
+	s, _, db := testServer(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	ctx := context.Background()
+
+	const count = 16
+	items := make([]OutboxEvent, count)
+	bodies := make([][]byte, count)
+	u := User{Username: "matrix-target", PasswordHash: "fixture", Nickname: "Target"}
+	if err := db.Create(&u).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < count; i++ {
+		key := fmt.Sprintf("matrix-event-%d", i)
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			return enqueueNotification(tx, Notification{UserID: u.ID, ActorID: u.ID, Kind: "follow", EventKey: key, Text: "notice " + key})
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var n Notification
+		if err := db.Where("event_key = ?", key).First(&n).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Where("event_key = ?", fmt.Sprintf("notification:%d", n.ID)).First(&items[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		bodies[i], err = marshalBrokerNotification(items[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Concurrently accept all 16 valid messages
+	var wg sync.WaitGroup
+	var errCount atomic.Int64
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			dup, err := s.acceptBrokerNotification(ctx, bodies[idx], items[idx].EventKey)
+			if err != nil || dup {
+				errCount.Add(1)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if errCount.Load() != 0 {
+		t.Fatalf("%d valid concurrent deliveries failed", errCount.Load())
+	}
+
+	// Concurrently test poison rejection
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_, err := s.acceptBrokerNotification(ctx, []byte(`{"version":99}`), fmt.Sprintf("matrix-poison-%d", idx))
+			if !errors.Is(err, errInvalidBrokerEvent) {
+				errCount.Add(1)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if errCount.Load() != 0 {
+		t.Fatalf("%d poison envelopes failed rejection", errCount.Load())
+	}
+
+	var jobs int64
+	if err := db.Model(&OutboxEvent{}).Where("topic = ?", notificationDeliverTopic).Count(&jobs).Error; err != nil || jobs != count {
+		t.Fatalf("expected exactly %d delivery jobs, got %d", count, jobs)
 	}
 }

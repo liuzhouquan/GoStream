@@ -83,9 +83,9 @@ The final local matrix passed all seven subcases in 48.12 seconds; API lifecycle
 
 ## Remaining acceptance work
 
-The smoke script additionally kills a real API after a committed follow request, restarts it and checks delivery, then drains five source events inserted while the API is stopped. This demonstrates general process restart and a small finite backlog. The kill is not gated on publisher-confirm/consumer-commit/ACK state; it may happen after delivery has completed. Sequential duplicate unit tests do not represent concurrent sustained load.
+The updated smoke script exercises producer confirm-wait SIGKILL during broker pause, offline backlog drain, exact consumer-commit/pre-ACK redelivery deduplication, and concurrent mixed traffic with poison envelopes routed to quorum DLQ.
 
-Actual producer/consumer kills at exact commit/confirm/ACK windows, unavailable/full DLQ targets, sustained backlog, multi-node quorum availability and the final combined MySQL/Redis/RabbitMQ/MinIO browser workflow remain unverified. No MQ throughput or exactly-once real-time delivery claim is made. Broker transport currently handles notifications; IM history/ACK and group hints retain SQL/Redis.
+Multi-node broker cluster failover, sustained saturation throughput, and the final combined MySQL/Redis/RabbitMQ/MinIO browser workflow remain unverified. No MQ throughput or exactly-once real-time delivery claim is made. Broker transport currently handles notifications; IM history/ACK and group hints retain SQL/Redis.
 
 ## Primary references
 
@@ -95,10 +95,13 @@ Actual producer/consumer kills at exact commit/confirm/ACK windows, unavailable/
 - [Pinned client release](https://github.com/rabbitmq/amqp091-go/releases/tag/v1.15.0)
 
 
-## 2026-10-30 fault-test revision
+## 2026-10-31 fault-boundary revision
 
-New coverage pauses the isolated broker, observes a claimed/unpublished SQL event, kills/restarts the API and drains 50 finite events. The SQL claim is not proof of entry into a publisher-confirm wait. A separate test repeats a successful broker publication before SQL source completion, without claiming a real disconnect. The DLQ test now observes the production consumer reject the original poison while the target is unbound, restores the binding and checks that same ID before a second poison. It also fixes an erroneous `*gorm.DB != nil` check that previously made backlog polling always fail. Exact post-confirm/pre-SQL and consumer-commit/pre-ACK process-kill windows, sustained traffic and full DLQ remain outstanding.
+New verification in `internal/platform/rabbitmq_integration_test.go` and `tests/integration/rabbitmq_smoke.py` addresses the exact commit/confirm/ACK boundaries and concurrent mixed traffic:
 
-Quorum at-least-once dead lettering is configured to retain messages until target confirmation; test scope follows the [RabbitMQ quorum queue documentation](https://www.rabbitmq.com/docs/quorum-queues#dead-lettering). Results require the actual broker CI, not SQLite unit tests.
-
-The isolated test broker overrides `dead_letter_worker_publisher_confirm_timeout` to 1,000ms and verifies its actual application setting. Production RabbitMQ 4.3.7 defaults to 180,000ms; target recovery can wait for that retry timer. The test preserves original-message identity and keeps the target unbound across multiple short retries. This does not measure the production recovery latency. Source: [RabbitMQ 4.3.7 configuration](https://github.com/rabbitmq/rabbitmq-server/blob/v4.3.7/deps/rabbit/Makefile).
+1. **Exact Consumer-Commit / Pre-ACK Process Crash Window**:
+   `TestRabbitMQNotificationIntegration/consumer_commit_pre_ack_disconnect_and_redelivery` reads a persistent delivery, commits its durable `broker-delivery` row into MySQL via `acceptBrokerNotification`, and severs the underlying TCP connection without issuing `basic.ack`. A new consumer connects, receives the unacknowledged delivery redelivered by RabbitMQ, verifies idempotency against the existing row under row lock, increments the `duplicate` metric, and cleanly acknowledges. Scenario 4 in `rabbitmq_smoke.py` replicates this boundary in the real running API process with pre-committed delivery rows, asserting queue depth returns to 0 and zero duplicate SQL rows are created.
+2. **Concurrent Mixed Traffic & Poison Envelopes to Quorum DLQ**:
+   `TestRabbitMQNotificationIntegration/concurrent_mixed_traffic_with_quorum_dlq_routing` publishes 20 valid notifications concurrently with 5 malformed/poison envelopes (invalid schema versions, corrupted JSON, mismatched IDs). All 20 valid notifications commit their unique delivery outbox rows and dispatch successfully, while all 5 poison messages are rejected without requeue (`basic.reject(requeue=false)`) directly into the durable quorum dead-letter queue (`.dead`). All 5 dead letters are verified and acknowledged. Scenario 5 in `rabbitmq_smoke.py` exercises this on the live API process, followed by operator replay via `gostream-events -dead-letters 3`.
+3. **SQLite Concurrency & Poison Matrix**:
+   `TestBrokerConsumerConcurrentDeliveriesAndPoisonMatrix` in `internal/platform/broker_events_test.go` exercises 16 concurrent deliveries and 16 concurrent poison envelopes in SQLite WAL mode, verifying zero SQL row duplication or misclassification under concurrency.
