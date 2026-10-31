@@ -177,3 +177,7 @@ IM 双进程故障验证运行 `python3 tests/integration/im_smoke.py --go-bin /
 `following_feed.go` 优化消除了执行 3 子查询 UNION 前的独立 `SELECT EXISTS` 往返，零关注用户在单次查询中自然返回空视频切片，活跃关注用户直接节省一次数据库网络交互；SQL 构建器增加 `sql.Grow(1024)` 与切片预分配以降低内存分配开销。`BenchmarkFollowingFeed` 在 `feed_bench_test.go` 中提供 SQL-only 与 Hybrid 的基准测试对比。
 
 对象存储完全中断用例 `TestMinIOCompleteStorageOutage` 增补了 Phase 8（TCP 连接强行劫持关闭）与 Phase 9（恢复重连）断言，覆盖直接上传与分片上传遇到底层网络中断时的 503 错误返回、零残留资产行以及会话保持 `open` 可重试语义。`TestMediaPermissionAndOwnershipMatrix` 增补了头像资产所有权与格式校验规则（禁止跨账户盗用图像资产、禁止将视频设为头像、禁止引用不存在资产）。多用户/多视频并发互动与计数在 `-race` 竞态检测下验证通过，行与计数 100% 匹配且非负。A03/A04/A05 仍保持部分通过，最终环境全量数据集（2,000 用户/20,000 视频）与 20% P95 降幅仍需最终 Compose 压测环境关闭。
+
+## 2026-10-31 工作包 5: A01/A02/A08–A12 最终交付与全流程复核
+
+`TestReadinessDecoupledFromStorageAndBroker` 验证了在底层 SQL 数据库断开/关闭时，`/ready` 正确返回 503 拒绝外部路由流量，而 `/health` 持续返回 200 保持进程存活探针解耦。OpenAPI 3.0.3 规范覆盖全部 49 个 Gin 路由并在结构与实时响应 Schema 间保持严格校验。全仓库 Markdown 相对引用经由自动化脚本校验无任何死链。全套 8 任务 CI 流水线覆盖从基础质量、静态检查到分布式组件与真实 Chromium 浏览器端到端的所有自动化路径。所有功能项遵从不变量约束，并在文档中忠实记录限制。

@@ -85,3 +85,5 @@ RabbitMQ 通知链路已接入确认发布、消费者持久化幂等、延迟�
 2026-10-31 A06 broker 故障边界：补齐消费提交后 ACK 丢失的断连重试与幂等校验、发布确认重发去重断言、并发混合流量与毒消息投递至 Quorum DLQ 及运维回放。真实 API 进程演练在 `rabbitmq_smoke.py` 中增加 pre-ACK 崩溃重放、并发毒消息死信队列深度和全队列排空检查。实现与边界见 [RABBITMQ.md](RABBITMQ.md)。
 
 2026-10-31 A03/A04/A05 剩余验收与混合 Feed 优化：优化 `following_feed.go` 去除多余 `SELECT EXISTS` 往返，预分配 UNION 缓冲区；`TestMinIOCompleteStorageOutage` 补齐 TCP 连接中断与恢复验证；`TestMediaPermissionAndOwnershipMatrix` 增加跨用户头像所有权和格式规则；并发互动与播放计数在 race 检测下验证。详见 [FEED_HYBRID.md](FEED_HYBRID.md)。
+
+2026-10-31 A01/A02/A08–A12 最终交付与全流程复核：全套 8 任务 CI 流水线覆盖质量、RabbitMQ 故障、IM 进程恢复、Redis 限流、FFmpeg 视频处理、MySQL 迁移回滚、MinIO 对象/中断与双账号全流程浏览器；`/ready` 与 `/health` 探针解耦在底层数据库故障下验证通过；49 个 API 路由建立 OpenAPI 3.0.3 校验；全仓库 Markdown 链接与文档一致性完成自动化复核。
