@@ -554,38 +554,43 @@ func TestBrokerConsumerConcurrentDeliveriesAndPoisonMatrix(t *testing.T) {
 		}
 	}
 
-	// Concurrently accept all 16 valid messages
+	// Concurrent callers, with SQLite writes intentionally serialized on one
+	// connection. Cross-connection SQL behavior belongs to the MySQL matrix.
 	var wg sync.WaitGroup
-	var errCount atomic.Int64
-	for i := 0; i < count; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			dup, err := s.acceptBrokerNotification(ctx, bodies[idx], items[idx].EventKey)
-			if err != nil || dup {
-				errCount.Add(1)
-			}
-		}(i)
-	}
-	wg.Wait()
-	if errCount.Load() != 0 {
-		t.Fatalf("%d valid concurrent deliveries failed", errCount.Load())
-	}
-
-	// Concurrently test poison rejection
-	for i := 0; i < count; i++ {
-		wg.Add(1)
-		go func(idx int) {
-			defer wg.Done()
-			_, err := s.acceptBrokerNotification(ctx, []byte(`{"version":99}`), fmt.Sprintf("matrix-poison-%d", idx))
+	var errCount, created, duplicates atomic.Int64
+	start := make(chan struct{})
+	for i := range count {
+		for range 2 {
+			wg.Go(func() {
+				<-start
+				dup, err := s.acceptBrokerNotification(ctx, bodies[i], items[i].EventKey)
+				if err != nil {
+					errCount.Add(1)
+				} else if dup {
+					duplicates.Add(1)
+				} else {
+					created.Add(1)
+				}
+			})
+		}
+		wg.Go(func() {
+			<-start
+			_, err := s.acceptBrokerNotification(ctx, []byte(`{"version":99}`), fmt.Sprintf("matrix-poison-%d", i))
 			if !errors.Is(err, errInvalidBrokerEvent) {
 				errCount.Add(1)
 			}
-		}(i)
+		})
 	}
+	close(start)
 	wg.Wait()
-	if errCount.Load() != 0 {
-		t.Fatalf("%d poison envelopes failed rejection", errCount.Load())
+	if errCount.Load() != 0 || created.Load() != count || duplicates.Load() != count {
+		t.Fatalf("mixed results errors=%d created=%d duplicates=%d", errCount.Load(), created.Load(), duplicates.Load())
+	}
+	for _, source := range items {
+		var rows int64
+		if err := db.Model(&OutboxEvent{}).Where("event_key = ?", "broker-delivery:"+source.EventKey).Count(&rows).Error; err != nil || rows != 1 {
+			t.Fatalf("event %s rows=%d err=%v", source.EventKey, rows, err)
+		}
 	}
 
 	var jobs int64

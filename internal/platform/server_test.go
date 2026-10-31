@@ -1038,7 +1038,7 @@ func TestReadinessAndPrometheusMetrics(t *testing.T) {
 	}
 }
 
-func TestReadinessDecoupledFromStorageAndBroker(t *testing.T) {
+func TestLivenessSurvivesClosedSQLPool(t *testing.T) {
 	_, h, db := testServer(t)
 	if r := request(t, h, http.MethodGet, "/health", "", nil); r.Code != http.StatusOK {
 		t.Fatalf("health: %d", r.Code)

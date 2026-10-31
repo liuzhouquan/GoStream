@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -404,7 +405,8 @@ func TestRabbitMQNotificationIntegration(t *testing.T) {
 	})
 	t.Run("confirmed_publish_before_sql_completion_retry", func(t *testing.T) {
 		source := fixture(t)
-		// Simulate publish reaching broker but publisher dropping connection before SQL confirmation
+		// Publish is confirmed, but leave SQL completion unset to model a retry.
+		// This does not kill a process or observe a post-confirm crash window.
 		if err := a.broker.publish(context.Background(), source); err != nil {
 			t.Fatal(err)
 		}
@@ -432,6 +434,7 @@ func TestRabbitMQNotificationIntegration(t *testing.T) {
 		}
 		// Dedicated session reads delivery and commits to SQL without sending ACK
 		session := open(t)
+		defer session.close()
 		delivery := rabbitGet(t, session, queue, 5*time.Second)
 		if delivery.MessageId != source.EventKey {
 			t.Fatalf("unexpected message id: %q vs %q", delivery.MessageId, source.EventKey)
@@ -444,8 +447,20 @@ func TestRabbitMQNotificationIntegration(t *testing.T) {
 		if jobCount(t, source) != 1 {
 			t.Fatalf("expected 1 delivery job committed to SQL, got %d", jobCount(t, source))
 		}
-		// Sever connection abruptly without sending ACK to simulate consumer crash
-		session.close()
+		// Close the TCP socket without AMQP Close/ACK, then inspect the broker's
+		// actual redelivery flag and identity before the production consumer.
+		if err := session.wire.Close(); err != nil {
+			t.Fatal(err)
+		}
+		probe := open(t)
+		defer probe.close()
+		replay := rabbitGet(t, probe, queue, 5*time.Second)
+		if !replay.Redelivered || replay.MessageId != source.EventKey || !bytes.Equal(replay.Body, delivery.Body) {
+			t.Fatal("broker did not redeliver the exact unacknowledged event")
+		}
+		if err := probe.wire.Close(); err != nil {
+			t.Fatal(err)
+		}
 
 		// Start background consumer. RabbitMQ redelivers the unacknowledged message.
 		beforeDup := testutil.ToFloat64(b.metrics.brokerMessages.WithLabelValues("duplicate"))
@@ -460,6 +475,13 @@ func TestRabbitMQNotificationIntegration(t *testing.T) {
 		if jobCount(t, source) != 1 {
 			t.Fatalf("redelivered message caused duplicate delivery row in SQL: count=%d", jobCount(t, source))
 		}
+		stop()
+		check := open(t)
+		defer check.close()
+		if q, err := check.ch.QueueInspect(queue); err != nil || q.Messages != 0 {
+			t.Fatalf("redelivery not ACKed: queue=%+v err=%v", q, err)
+		}
+
 	})
 	t.Run("dlq_target_outage_and_recovery", func(t *testing.T) {
 		stop := consumer(t)
@@ -590,7 +612,11 @@ func TestRabbitMQNotificationIntegration(t *testing.T) {
 			wg.Add(1)
 			go func(idx int) {
 				defer wg.Done()
-				if err := a.broker.publish(context.Background(), validSources[idx]); err != nil {
+				publisher := a.broker
+				if idx%2 == 1 {
+					publisher = b.broker
+				}
+				if err := publisher.publish(context.Background(), validSources[idx]); err != nil {
 					t.Errorf("publish valid %d: %v", idx, err)
 				}
 			}(i)
@@ -619,16 +645,27 @@ func TestRabbitMQNotificationIntegration(t *testing.T) {
 		// Verify 5 poison envelopes reached the dead letter queue
 		session := open(t)
 		defer session.close()
-		deadReceived := 0
-		for deadReceived < poisonCount {
+		seen := make(map[string]bool, poisonCount)
+		for len(seen) < poisonCount {
 			dead := rabbitGet(t, session, queue+".dead", 15*time.Second)
-			if dead.DeliveryMode != amqp.Persistent || !strings.HasPrefix(dead.MessageId, "poison-"+tag) {
-				t.Fatalf("unexpected dead letter: id=%q mode=%d", dead.MessageId, dead.DeliveryMode)
+			validID := false
+			for i := range poisonCount {
+				if dead.MessageId == fmt.Sprintf("poison-%s-%d", tag, i) {
+					validID = true
+				}
 			}
+			if !validID || seen[dead.MessageId] || dead.DeliveryMode != amqp.Persistent || dead.Headers["x-first-death-reason"] != "rejected" {
+				t.Fatalf("unexpected/duplicate poison delivery: id=%q headers=%v", dead.MessageId, dead.Headers)
+			}
+			seen[dead.MessageId] = true
 			if err := dead.Ack(false); err != nil {
 				t.Fatal(err)
 			}
-			deadReceived++
 		}
+		stop()
+		if q, err := session.ch.QueueInspect(queue); err != nil || q.Messages != 0 {
+			t.Fatalf("mixed source queue not drained: %+v %v", q, err)
+		}
+
 	})
 }

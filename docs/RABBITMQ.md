@@ -83,9 +83,9 @@ The final local matrix passed all seven subcases in 48.12 seconds; API lifecycle
 
 ## Remaining acceptance work
 
-The updated smoke script exercises producer confirm-wait SIGKILL during broker pause, offline backlog drain, exact consumer-commit/pre-ACK redelivery deduplication, and concurrent mixed traffic with poison envelopes routed to quorum DLQ.
+The smoke script additionally kills a real API after a committed follow request, restarts it and checks delivery, then drains five source events inserted while the API is stopped. This demonstrates general process restart and a small finite backlog. The kill is not gated on publisher-confirm/consumer-commit/ACK state; it may happen after delivery has completed. Sequential duplicate unit tests do not represent concurrent sustained load.
 
-Multi-node broker cluster failover, sustained saturation throughput, and the final combined MySQL/Redis/RabbitMQ/MinIO browser workflow remain unverified. No MQ throughput or exactly-once real-time delivery claim is made. Broker transport currently handles notifications; IM history/ACK and group hints retain SQL/Redis.
+Actual producer/consumer kills at exact commit/confirm/ACK windows, unavailable/full DLQ targets, sustained backlog, multi-node quorum availability and the final combined MySQL/Redis/RabbitMQ/MinIO browser workflow remain unverified. No MQ throughput or exactly-once real-time delivery claim is made. Broker transport currently handles notifications; IM history/ACK and group hints retain SQL/Redis.
 
 ## Primary references
 
@@ -95,13 +95,23 @@ Multi-node broker cluster failover, sustained saturation throughput, and the fin
 - [Pinned client release](https://github.com/rabbitmq/amqp091-go/releases/tag/v1.15.0)
 
 
-## 2026-10-31 fault-boundary revision
+## 2026-10-30 fault-test revision
 
-New verification in `internal/platform/rabbitmq_integration_test.go` and `tests/integration/rabbitmq_smoke.py` addresses the exact commit/confirm/ACK boundaries and concurrent mixed traffic:
+New coverage pauses the isolated broker, observes a claimed/unpublished SQL event, kills/restarts the API and drains 50 finite events. The SQL claim is not proof of entry into a publisher-confirm wait. A separate test repeats a successful broker publication before SQL source completion, without claiming a real disconnect. The DLQ test now observes the production consumer reject the original poison while the target is unbound, restores the binding and checks that same ID before a second poison. It also fixes an erroneous `*gorm.DB != nil` check that previously made backlog polling always fail. Exact post-confirm/pre-SQL and consumer-commit/pre-ACK process-kill windows, sustained traffic and full DLQ remain outstanding.
 
-1. **Exact Consumer-Commit / Pre-ACK Process Crash Window**:
-   `TestRabbitMQNotificationIntegration/consumer_commit_pre_ack_disconnect_and_redelivery` reads a persistent delivery, commits its durable `broker-delivery` row into MySQL via `acceptBrokerNotification`, and severs the underlying TCP connection without issuing `basic.ack`. A new consumer connects, receives the unacknowledged delivery redelivered by RabbitMQ, verifies idempotency against the existing row under row lock, increments the `duplicate` metric, and cleanly acknowledges. Scenario 4 in `rabbitmq_smoke.py` replicates this boundary in the real running API process with pre-committed delivery rows, asserting queue depth returns to 0 and zero duplicate SQL rows are created.
-2. **Concurrent Mixed Traffic & Poison Envelopes to Quorum DLQ**:
-   `TestRabbitMQNotificationIntegration/concurrent_mixed_traffic_with_quorum_dlq_routing` publishes 20 valid notifications concurrently with 5 malformed/poison envelopes (invalid schema versions, corrupted JSON, mismatched IDs). All 20 valid notifications commit their unique delivery outbox rows and dispatch successfully, while all 5 poison messages are rejected without requeue (`basic.reject(requeue=false)`) directly into the durable quorum dead-letter queue (`.dead`). All 5 dead letters are verified and acknowledged. Scenario 5 in `rabbitmq_smoke.py` exercises this on the live API process, followed by operator replay via `gostream-events -dead-letters 3`.
-3. **SQLite Concurrency & Poison Matrix**:
-   `TestBrokerConsumerConcurrentDeliveriesAndPoisonMatrix` in `internal/platform/broker_events_test.go` exercises 16 concurrent deliveries and 16 concurrent poison envelopes in SQLite WAL mode, verifying zero SQL row duplication or misclassification under concurrency.
+Quorum at-least-once dead lettering is configured to retain messages until target confirmation; test scope follows the [RabbitMQ quorum queue documentation](https://www.rabbitmq.com/docs/quorum-queues#dead-lettering). Results require the actual broker CI, not SQLite unit tests.
+
+The isolated test broker overrides `dead_letter_worker_publisher_confirm_timeout` to 1,000ms and verifies its actual application setting. Production RabbitMQ 4.3.7 defaults to 180,000ms; target recovery can wait for that retry timer. The test preserves original-message identity and keeps the target unbound across multiple short retries. This does not measure the production recovery latency. Source: [RabbitMQ 4.3.7 configuration](https://github.com/rabbitmq/rabbitmq-server/blob/v4.3.7/deps/rabbit/Makefile).
+
+
+## 2026-10-31 三分支审核后的补充覆盖
+
+`test/broker-fault-boundaries` 的有效增量在集成审核后保留并增强，不能据此删除上方待验项。
+
+- `consumer_commit_pre_ack_disconnect_and_redelivery`：真实 AMQP Get 后调用生产持久接收方法提交 MySQL，再直接关闭底层 TCP，未发送 AMQP Close/ACK；新会话核对相同 ID/正文与 Redelivered 标志，再让生产消费者重投去重，检查 duplicate 指标、单一 SQL 行及停止消费者后的空队列。这是确定性的连接中断组件验证，未强杀生产 API。
+- `confirmed_publish_before_sql_completion_retry`：确认发布后保留 SQL 未完成状态，重发相同 key 并核对去重指标。没有在真实生产者进程的 post-confirm/pre-SQL 时刻暂停或强杀。
+- Go 混合矩阵：20 个独立有效事件通过两个 publisher 连接提交，5 个毒消息进入 DLQ；核对每个持久接收身份、全部互不重复的毒消息 ID、持久性与 rejected 原因。该用例验证接收，不单独宣称通知实时派发完成。
+- Python API/worker 场景：在事务中准备 source 和可选去重行，source 已标记发送以免与后台发布者争抢；管理 API 发布后必须 routed=true。预提交去重场景检查生产消费者 duplicate 指标；混合场景并发发布 10 个独立有效 ID 和 3 个毒消息，逐 ID 检查实际 delivery 完成。检查全部 DLQ 身份/正文/原因后重新入队供运维 CLI，要求精确 replayed=3 及队列状态。夹具预置不等同于 pre-ACK 崩溃。
+- SQLite 矩阵：32 次有效调用（16 个身份各重复两次）与 16 个毒消息同时启动；单连接串行写，检查 created/duplicate 各 16、毒消息拒绝、每个 SQL 身份恰一行。不能把单写池称为 MySQL 并行事务证明。
+
+发布/消费精确进程强杀窗口、满 DLQ 与持续负载仍待完成；最终 MySQL/Redis/RabbitMQ/MinIO 联合配置也未关闭。真实组件执行以本次集成 PR 最终 CI 为准，未配置环境的本地跳过不算通过。

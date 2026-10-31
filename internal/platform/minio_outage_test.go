@@ -69,6 +69,7 @@ func TestMinIOCompleteStorageOutage(t *testing.T) {
 		t.Fatal(err)
 	}
 	reverse := httputil.NewSingleHostReverseProxy(upstream)
+	var tcpDrops atomic.Int64
 	var outageMode atomic.Int32 // 0: healthy, 1: HTTP 503 outage, 2: hard TCP drop (hijack & close)
 
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -79,11 +80,15 @@ func TestMinIOCompleteStorageOutage(t *testing.T) {
 		case 2:
 			if hj, ok := w.(http.Hijacker); ok {
 				if conn, _, err := hj.Hijack(); err == nil {
-					conn.Close()
+					tcpDrops.Add(1)
+					if err := conn.Close(); err != nil {
+						t.Errorf("proxy TCP close: %v", err)
+					}
 					return
 				}
 			}
-			http.Error(w, "connection reset by peer", http.StatusBadGateway)
+			t.Error("proxy did not establish a TCP-drop fault")
+			http.Error(w, "fault injection unavailable", http.StatusInternalServerError)
 			return
 		default:
 			reverse.ServeHTTP(w, r)
@@ -196,9 +201,13 @@ func TestMinIOCompleteStorageOutage(t *testing.T) {
 
 	// 8. Abrupt TCP socket drop (hijack & close connection)
 	outageMode.Store(2)
+	dropsBefore := tcpDrops.Load()
 	tcpDropRes := uploadTestMedia(t, h, token, "tcpdrop.mp4", sampleMP4)
-	if tcpDropRes.Code != http.StatusServiceUnavailable && tcpDropRes.Code != http.StatusBadGateway {
-		t.Fatalf("direct upload during TCP disconnect expected 503/502, got %d: %s", tcpDropRes.Code, tcpDropRes.Body.String())
+	if tcpDropRes.Code != http.StatusServiceUnavailable {
+		t.Fatalf("direct upload during TCP disconnect expected 503, got %d: %s", tcpDropRes.Code, tcpDropRes.Body.String())
+	}
+	if tcpDrops.Load() <= dropsBefore {
+		t.Fatal("direct upload did not hit TCP fault")
 	}
 	// Assert zero leaked asset rows
 	var assetsAfterTCPDrop int64
@@ -216,11 +225,21 @@ func TestMinIOCompleteStorageOutage(t *testing.T) {
 		t.Fatalf("create session 2 expected 201, got %d", createSession2.Code)
 	}
 	var session2 struct{ ID string }
-	_ = json.Unmarshal(createSession2.Body.Bytes(), &session2)
+	if err := json.Unmarshal(createSession2.Body.Bytes(), &session2); err != nil || session2.ID == "" {
+		t.Fatal("invalid second session response")
+	}
 
+	dropsBefore = tcpDrops.Load()
 	chunkTCPDrop := putTestChunk(h, token, session2.ID, 0, sampleMP4)
-	if chunkTCPDrop.Code != http.StatusServiceUnavailable && chunkTCPDrop.Code != http.StatusBadGateway {
-		t.Fatalf("chunk upload during TCP disconnect expected 503/502, got %d: %s", chunkTCPDrop.Code, chunkTCPDrop.Body.String())
+	if chunkTCPDrop.Code != http.StatusServiceUnavailable {
+		t.Fatalf("chunk upload during TCP disconnect expected 503, got %d: %s", chunkTCPDrop.Code, chunkTCPDrop.Body.String())
+	}
+	if tcpDrops.Load() <= dropsBefore {
+		t.Fatal("chunk upload did not hit TCP fault")
+	}
+	var failedChunks int64
+	if err := db.Model(&UploadChunk{}).Where("session_id = ?", session2.ID).Count(&failedChunks).Error; err != nil || failedChunks != 0 {
+		t.Fatalf("failed chunk persisted: %d %v", failedChunks, err)
 	}
 	var sessRow2 UploadSession
 	if err := db.First(&sessRow2, "id = ?", session2.ID).Error; err != nil || sessRow2.Status != "open" {
@@ -237,4 +256,27 @@ func TestMinIOCompleteStorageOutage(t *testing.T) {
 	if compRetry2.Code != http.StatusOK {
 		t.Fatalf("complete retry after TCP recovery expected 200, got %d: %s", compRetry2.Code, compRetry2.Body.String())
 	}
+	var recovered struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(compRetry2.Body.Bytes(), &recovered); err != nil || recovered.URL == "" {
+		t.Fatal("invalid recovered asset response")
+	}
+	var recoveredAssets int64
+	if err := db.Model(&MediaAsset{}).Where("url = ?", recovered.URL).Count(&recoveredAssets).Error; err != nil || recoveredAssets != 1 {
+		t.Fatalf("recovered asset rows=%d err=%v", recoveredAssets, err)
+	}
+	if err := db.First(&sessRow2, "id = ?", session2.ID).Error; err != nil || sessRow2.Status != "completed" {
+		t.Fatalf("recovered session=%s err=%v", sessRow2.Status, err)
+	}
+	fetched := request(t, h, http.MethodGet, recovered.URL, "", nil)
+	if fetched.Code != 200 || !bytes.Equal(fetched.Body.Bytes(), sampleMP4) {
+		t.Fatal("TCP recovery object bytes mismatch")
+	}
+
+	var totalAssets int64
+	if err := db.Model(&MediaAsset{}).Count(&totalAssets).Error; err != nil || totalAssets != assetsBefore+2 {
+		t.Fatalf("unexpected total asset rows %d err=%v", totalAssets, err)
+	}
+
 }
