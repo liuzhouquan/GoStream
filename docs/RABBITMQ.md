@@ -102,3 +102,16 @@ New coverage pauses the isolated broker, observes a claimed/unpublished SQL even
 Quorum at-least-once dead lettering is configured to retain messages until target confirmation; test scope follows the [RabbitMQ quorum queue documentation](https://www.rabbitmq.com/docs/quorum-queues#dead-lettering). Results require the actual broker CI, not SQLite unit tests.
 
 The isolated test broker overrides `dead_letter_worker_publisher_confirm_timeout` to 1,000ms and verifies its actual application setting. Production RabbitMQ 4.3.7 defaults to 180,000ms; target recovery can wait for that retry timer. The test preserves original-message identity and keeps the target unbound across multiple short retries. This does not measure the production recovery latency. Source: [RabbitMQ 4.3.7 configuration](https://github.com/rabbitmq/rabbitmq-server/blob/v4.3.7/deps/rabbit/Makefile).
+
+
+## 2026-10-31 三分支审核后的补充覆盖
+
+`test/broker-fault-boundaries` 的有效增量在集成审核后保留并增强，不能据此删除上方待验项。
+
+- `consumer_commit_pre_ack_disconnect_and_redelivery`：真实 AMQP Get 后调用生产持久接收方法提交 MySQL，再直接关闭底层 TCP，未发送 AMQP Close/ACK；新会话核对相同 ID/正文与 Redelivered 标志，再让生产消费者重投去重，检查 duplicate 指标、单一 SQL 行及停止消费者后的空队列。这是确定性的连接中断组件验证，未强杀生产 API。
+- `confirmed_publish_before_sql_completion_retry`：确认发布后保留 SQL 未完成状态，重发相同 key 并核对去重指标。没有在真实生产者进程的 post-confirm/pre-SQL 时刻暂停或强杀。
+- Go 混合矩阵：20 个独立有效事件通过两个 publisher 连接提交，5 个毒消息进入 DLQ；核对每个持久接收身份、全部互不重复的毒消息 ID、持久性与 rejected 原因。该用例验证接收，不单独宣称通知实时派发完成。
+- Python API/worker 场景：在事务中准备 source 和可选去重行，source 已标记发送以免与后台发布者争抢；管理 API 发布后必须 routed=true。预提交去重场景检查生产消费者 duplicate 指标；混合场景并发发布 10 个独立有效 ID 和 3 个毒消息，逐 ID 检查实际 delivery 完成。检查全部 DLQ 身份/正文/原因后重新入队供运维 CLI，要求精确 replayed=3 及队列状态。夹具预置不等同于 pre-ACK 崩溃。
+- SQLite 矩阵：32 次有效调用（16 个身份各重复两次）与 16 个毒消息同时启动；单连接串行写，检查 created/duplicate 各 16、毒消息拒绝、每个 SQL 身份恰一行。不能把单写池称为 MySQL 并行事务证明。
+
+发布/消费精确进程强杀窗口、满 DLQ 与持续负载仍待完成；最终 MySQL/Redis/RabbitMQ/MinIO 联合配置也未关闭。真实组件执行以本次集成 PR 最终 CI 为准，未配置环境的本地跳过不算通过。

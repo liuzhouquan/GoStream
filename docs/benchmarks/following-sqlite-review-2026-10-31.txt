@@ -1,0 +1,16 @@
+Go 1.27.2; local WSL2; 500 videos; completed push inbox; follow before publication; Redis disabled.
+Command: go test ./internal/platform -run '^$' -bench '^BenchmarkFollowingFeed$' -benchtime=100x -count=3
+Mode comparison, not before/after or P95.
+
+goos: linux
+goarch: amd64
+pkg: github.com/liuzhouquan/GoStream/internal/platform
+cpu: AMD Ryzen 7 5800H with Radeon Graphics
+BenchmarkFollowingFeed/SQLOnly-16         	     100	    440067 ns/op	  120410 B/op	    1178 allocs/op
+BenchmarkFollowingFeed/SQLOnly-16         	     100	    428639 ns/op	  119529 B/op	    1177 allocs/op
+BenchmarkFollowingFeed/SQLOnly-16         	     100	    406127 ns/op	  118817 B/op	    1177 allocs/op
+BenchmarkFollowingFeed/Hybrid-16          	     100	    866695 ns/op	  132947 B/op	    1219 allocs/op
+BenchmarkFollowingFeed/Hybrid-16          	     100	    825537 ns/op	  132388 B/op	    1219 allocs/op
+BenchmarkFollowingFeed/Hybrid-16          	     100	    789622 ns/op	  131587 B/op	    1218 allocs/op
+PASS
+ok  	github.com/liuzhouquan/GoStream/internal/platform	0.453s

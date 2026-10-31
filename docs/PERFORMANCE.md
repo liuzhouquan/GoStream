@@ -1,5 +1,9 @@
 # Testing and performance report
 
+## Following branch-review characterization, 2026-10-31
+
+The [three-branch review](BRANCH_REVIEW_2026-10-31.md) found that the proposed 500-video SQLite benchmark did not represent a completed push inbox: GORM applied default:true and all 500 videos remained pull-eligible; the follow timestamp also selected the late-follow branch. After explicit state/time correction and exact page checks, three 100-operation runs gave SQL-only 440067/428639/406127 ns/op and hybrid 866695/825537/789622 ns/op. [Raw output](benchmarks/following-sqlite-review-2026-10-31.txt) preserves the command/environment. These are current-mode comparisons on an in-memory database, not before/after optimization evidence or MySQL HTTP P95. Hybrid is slower in this fixture; A04's original acceptance gates remain open.
+
 ## Twenty-client direct IM load, 2026-10-31
 
 [The IM load report](IM_LOAD.md) runs two real API processes with 20 WebSocket accounts and 1,000 cross-instance direct messages per round, three rounds. Normal-build sender ACK P95 was 40.037 / 37.890 / 41.809 ms; recipient delivery P95 was 495.732 / 496.730 / 425.608 ms. Each round checked every intended identity and payload. Retries, 125 offline messages, complete history/unread paging and independent device ACKs ended with exactly 3,125 persisted messages. A separate race build completed the same workload. [Machine-readable summary](benchmarks/im-load-summary-2026-10-31.json) links lossless compressed raw samples, environment and resource data.

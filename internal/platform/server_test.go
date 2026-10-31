@@ -1037,3 +1037,31 @@ func TestReadinessAndPrometheusMetrics(t *testing.T) {
 		}
 	}
 }
+
+func TestLivenessSurvivesClosedSQLPool(t *testing.T) {
+	_, h, db := testServer(t)
+	if r := request(t, h, http.MethodGet, "/health", "", nil); r.Code != http.StatusOK {
+		t.Fatalf("health: %d", r.Code)
+	}
+	if r := request(t, h, http.MethodGet, "/ready", "", nil); r.Code != http.StatusOK {
+		t.Fatalf("ready: %d", r.Code)
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// /health must remain 200 OK (liveness probe independent of DB)
+	if r := request(t, h, http.MethodGet, "/health", "", nil); r.Code != http.StatusOK {
+		t.Fatalf("health during db failure expected 200, got %d", r.Code)
+	}
+
+	// /ready must return 503 (readiness probe reflects DB availability)
+	if r := request(t, h, http.MethodGet, "/ready", "", nil); r.Code != http.StatusServiceUnavailable {
+		t.Fatalf("ready during db failure expected 503, got %d", r.Code)
+	}
+}

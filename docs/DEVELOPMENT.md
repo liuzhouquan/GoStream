@@ -55,3 +55,5 @@ git diff --check
 已有八项 CI：质量、MySQL、Redis、MinIO、RabbitMQ、视频恢复、IM 恢复及浏览器工作流。相关代码改变时按实际依赖检查，不把仅解析 Compose YAML 当作已部署验收。
 
 本地学习笔记 `docs/LOCAL_STUDY_GUIDE.md` 保持在 Git 排除列表中，不加入 PR。提交前检查 `git check-ignore -v docs/LOCAL_STUDY_GUIDE.md` 及暂存文件列表。
+
+当前三分支集成和收尾判断见 [2026-10-31 审核](BRANCH_REVIEW_2026-10-31.md)。后续按其中的三个交付出口推进；分支名称中的 final/optimization 不能代替真实完整验收。质量 CI 额外以一次迭代检查 Following benchmark 的夹具和精确页面，该步骤不设延迟阈值。

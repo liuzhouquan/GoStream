@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -513,5 +514,87 @@ func TestBrokerNotificationBurstAndIdempotency(t *testing.T) {
 	var jobCount int64
 	if err := db.Model(&OutboxEvent{}).Where("event_key = ?", "broker-delivery:"+item.EventKey).Count(&jobCount).Error; err != nil || jobCount != 1 {
 		t.Fatalf("expected exactly 1 delivery job, got %d", jobCount)
+	}
+}
+
+func TestBrokerConsumerConcurrentDeliveriesAndPoisonMatrix(t *testing.T) {
+	s, _, db := testServer(t)
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	ctx := context.Background()
+
+	const count = 16
+	items := make([]OutboxEvent, count)
+	bodies := make([][]byte, count)
+	u := User{Username: "matrix-target", PasswordHash: "fixture", Nickname: "Target"}
+	if err := db.Create(&u).Error; err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < count; i++ {
+		key := fmt.Sprintf("matrix-event-%d", i)
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			return enqueueNotification(tx, Notification{UserID: u.ID, ActorID: u.ID, Kind: "follow", EventKey: key, Text: "notice " + key})
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var n Notification
+		if err := db.Where("event_key = ?", key).First(&n).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Where("event_key = ?", fmt.Sprintf("notification:%d", n.ID)).First(&items[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+		var err error
+		bodies[i], err = marshalBrokerNotification(items[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Concurrent callers, with SQLite writes intentionally serialized on one
+	// connection. Cross-connection SQL behavior belongs to the MySQL matrix.
+	var wg sync.WaitGroup
+	var errCount, created, duplicates atomic.Int64
+	start := make(chan struct{})
+	for i := range count {
+		for range 2 {
+			wg.Go(func() {
+				<-start
+				dup, err := s.acceptBrokerNotification(ctx, bodies[i], items[i].EventKey)
+				if err != nil {
+					errCount.Add(1)
+				} else if dup {
+					duplicates.Add(1)
+				} else {
+					created.Add(1)
+				}
+			})
+		}
+		wg.Go(func() {
+			<-start
+			_, err := s.acceptBrokerNotification(ctx, []byte(`{"version":99}`), fmt.Sprintf("matrix-poison-%d", i))
+			if !errors.Is(err, errInvalidBrokerEvent) {
+				errCount.Add(1)
+			}
+		})
+	}
+	close(start)
+	wg.Wait()
+	if errCount.Load() != 0 || created.Load() != count || duplicates.Load() != count {
+		t.Fatalf("mixed results errors=%d created=%d duplicates=%d", errCount.Load(), created.Load(), duplicates.Load())
+	}
+	for _, source := range items {
+		var rows int64
+		if err := db.Model(&OutboxEvent{}).Where("event_key = ?", "broker-delivery:"+source.EventKey).Count(&rows).Error; err != nil || rows != 1 {
+			t.Fatalf("event %s rows=%d err=%v", source.EventKey, rows, err)
+		}
+	}
+
+	var jobs int64
+	if err := db.Model(&OutboxEvent{}).Where("topic = ?", notificationDeliverTopic).Count(&jobs).Error; err != nil || jobs != count {
+		t.Fatalf("expected exactly %d delivery jobs, got %d", count, jobs)
 	}
 }

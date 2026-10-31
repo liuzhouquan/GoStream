@@ -210,3 +210,36 @@ func TestFeedFanoutBatchResumeAndIdempotency(t *testing.T) {
 		t.Fatalf("fanout completion metrics missing: status=%d body=%s", metrics.Code, metrics.Body.String())
 	}
 }
+
+func TestHybridFollowingZeroFollowsIgnoresStaleInbox(t *testing.T) {
+	s, h, db := testServer(t)
+	s.UseFeedFanout(1000)
+	viewer, token := registerTestUser(t, h, "empty_hybrid_viewer")
+	author, _ := registerTestUser(t, h, "empty_hybrid_author")
+	video := Video{AuthorID: author, Title: "stale inbox", MediaURL: "/media/stale.mp4", Status: "published", CreatedAt: time.Now().UTC().Add(-time.Hour)}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&video).UpdateColumn("feed_pull", false).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&FeedInbox{UserID: viewer, VideoID: video.ID, CreatedAt: video.CreatedAt}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if ids := collectFollowingIDs(t, h, token); len(ids) != 0 {
+		t.Fatalf("zero-follow viewer sees stale IDs: %v", ids)
+	}
+	path := fmt.Sprintf("/api/users/me/following/%d", author)
+	if r := request(t, h, http.MethodPut, path, token, nil); r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	if ids := collectFollowingIDs(t, h, token); len(ids) != 1 || ids[0] != video.ID {
+		t.Fatalf("follow did not reveal exact video: %v", ids)
+	}
+	if r := request(t, h, http.MethodDelete, path, token, nil); r.Code != 200 {
+		t.Fatal(r.Body.String())
+	}
+	if ids := collectFollowingIDs(t, h, token); len(ids) != 0 {
+		t.Fatalf("unfollow leaked stale inbox: %v", ids)
+	}
+}

@@ -9,18 +9,11 @@ import (
 // leave the ordinary pull index, while a separate indexed range keeps videos
 // visible to followers who joined after publication.
 func (s *Server) followingVideos(ctx context.Context, viewerID uint, cursor feedCursor, limit int) ([]Video, error) {
-	// Fast-path: if the viewer does not follow any authors, avoid running the 3-subquery UNION.
-	var hasFollows bool
-	if err := s.DB.WithContext(ctx).Raw("SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = ?)", viewerID).Scan(&hasFollows).Error; err != nil {
-		return nil, err
-	}
-	if !hasFollows {
-		return []Video{}, nil
-	}
-
 	cursorTime := cursor.createdTime()
 	var sql strings.Builder
-	args := []any{viewerID, "published", true}
+	sql.Grow(1024)
+	args := make([]any, 0, 16)
+	args = append(args, viewerID, "published", true)
 	sql.WriteString(`JOIN (
 SELECT id, created_at FROM (
   SELECT videos.id, videos.created_at FROM videos
@@ -64,5 +57,11 @@ SELECT id, created_at FROM (
 	err := s.DB.WithContext(ctx).Model(&Video{}).Preload("Author").
 		Joins(sql.String(), args...).Where("videos.status = ?", "published").
 		Order("feed_page.created_at DESC, feed_page.id DESC").Limit(limit + 1).Find(&videos).Error
-	return videos, err
+	if err != nil {
+		return nil, err
+	}
+	if videos == nil {
+		videos = []Video{}
+	}
+	return videos, nil
 }

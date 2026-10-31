@@ -5,6 +5,7 @@ Creates a random schema/user and a disposable broker; never writes demo tables.
 Requires an existing MySQL container exposing MYSQL_ROOT_PASSWORD internally.
 """
 import argparse
+import concurrent.futures
 import json
 import os
 from pathlib import Path
@@ -191,14 +192,99 @@ def main():
             auth_handler = urllib.request.HTTPBasicAuthHandler()
             auth_handler.add_password(realm="RabbitMQ Management", uri=f"http://127.0.0.1:{http_port}", user="gostream-test", passwd=broker_password)
             opener = urllib.request.build_opener(auth_handler)
-            def queue_depth():
+            def queue_depth(qname=f"gostream.process.{tag}"):
                 try:
-                    with opener.open(f"http://127.0.0.1:{http_port}/api/queues/%2f/gostream.process.{tag}", timeout=2) as r:
+                    with opener.open(f"http://127.0.0.1:{http_port}/api/queues/%2f/{qname}", timeout=2) as r:
                         data = json.load(r)
                         return data.get("messages", -1)
                 except Exception:
                     return -1
             wait("broker queue depth returns to 0", lambda: queue_depth() == 0, seconds=15)
+
+            def publish_envelope(event_id, payload):
+                request = urllib.request.Request(
+                    f"http://127.0.0.1:{http_port}/api/exchanges/%2f/gostream.process.{tag}.exchange/publish",
+                    data=json.dumps({"properties": {"delivery_mode": 2, "message_id": event_id},
+                                     "routing_key": "notification.created", "payload": payload,
+                                     "payload_encoding": "string"}).encode(),
+                    headers={"Content-Type": "application/json"}, method="POST")
+                with opener.open(request, timeout=5) as response:
+                    if not json.load(response).get("routed", False):
+                        raise AssertionError("broker did not route fixture " + event_id)
+
+            def seed_source(label, with_delivery=False):
+                # Both source and optional dedup row become visible atomically.
+                # Source is already marked sent: the running SQL publisher must
+                # not race this manual management-API producer.
+                delivery = ("INSERT INTO `{schema}`.outbox_events(event_key,topic,payload,attempts,available_at,created_at) "
+                            "VALUES(CONCAT('broker-delivery:notification:',@nid),'notification.deliver',"
+                            "CONCAT('{{\"notification_id\":',@nid,'}}'),0,UTC_TIMESTAMP(3),UTC_TIMESTAMP(3));").format(schema=schema) if with_delivery else ""
+                nid = mysql(f"START TRANSACTION; INSERT INTO `{schema}`.notifications(user_id,actor_id,kind,text,event_key,created_at) "
+                            f"VALUES({owner['user']['id']},{actor3['user']['id']},'follow','{label}','{label}-{tag}',UTC_TIMESTAMP(3)); "
+                            "SET @nid=LAST_INSERT_ID(); "
+                            f"INSERT INTO `{schema}`.outbox_events(event_key,topic,payload,attempts,available_at,created_at,published_at) "
+                            "VALUES(CONCAT('notification:',@nid),'notification.created',"
+                            "CONCAT('{\"notification_id\":',@nid,'}'),1,UTC_TIMESTAMP(3),UTC_TIMESTAMP(3),UTC_TIMESTAMP(3)); "
+                            + delivery + "SELECT @nid; COMMIT;")
+                event_id = "notification:" + nid
+                payload = json.dumps({"version": 1, "event_id": event_id, "topic": "notification.created", "notification_id": int(nid)})
+                return event_id, payload
+
+            def duplicate_metric():
+                with urllib.request.urlopen(base + "/metrics", timeout=2) as response:
+                    body = response.read().decode()
+                match = re.search(r'^gostream_rabbitmq_messages_total\{result="duplicate"\} ([0-9.eE+\-]+)$', body, re.M)
+                return float(match.group(1)) if match else 0
+
+            # Scenario 4 is deduplication against a precommitted fixture, not
+            # a process kill or a delivery held between commit and basic.ack.
+            preack_id, payload = seed_source("precommitted", with_delivery=True)
+            before_dup = duplicate_metric()
+            publish_envelope(preack_id, payload)
+            wait("actual consumer deduplication metric", lambda: duplicate_metric() >= before_dup + 1)
+            wait("deduplicated delivery dispatch", lambda: mysql(
+                f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE event_key='broker-delivery:{preack_id}' AND published_at IS NOT NULL;") == "1")
+            if mysql(f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE event_key='broker-delivery:{preack_id}';") != "1":
+                raise AssertionError("duplicate delivery event created in SQL")
+            wait("queue drains after deduplication", lambda: queue_depth() == 0, seconds=15)
+
+            # Scenario 5: independent valid identities and poison envelopes are
+            # submitted concurrently. No repeated idempotent follow is counted
+            # as a new event. Final dispatch is checked separately from accept.
+            valid = [seed_source("mixed-" + str(i)) for i in range(10)]
+            poison = [(f"poison-{tag}-{i}", "{corrupt-json-poison-envelope") for i in range(3)]
+            publications = []
+            for i, message in enumerate(valid):
+                publications.append(message)
+                if i < len(poison):
+                    publications.append(poison[i])
+            with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
+                futures = [pool.submit(publish_envelope, *message) for message in publications]
+                for future in concurrent.futures.as_completed(futures):
+                    future.result()
+            for event_id, _ in valid:
+                wait("exact mixed delivery " + event_id, lambda event_id=event_id: mysql(
+                    f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE event_key='broker-delivery:{event_id}' AND published_at IS NOT NULL;") == "1")
+                if mysql(f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE event_key='broker-delivery:{event_id}';") != "1":
+                    raise AssertionError("mixed delivery not unique")
+            dead_qname = f"gostream.process.{tag}.dead"
+            wait("exact poison queue depth", lambda: queue_depth(dead_qname) == len(poison), seconds=20)
+            get_request = urllib.request.Request(
+                f"http://127.0.0.1:{http_port}/api/queues/%2f/{dead_qname}/get",
+                data=json.dumps({"count": len(poison), "ackmode": "ack_requeue_true", "encoding": "auto"}).encode(),
+                headers={"Content-Type": "application/json"}, method="POST")
+            # Management fetches the whole batch before requeueing it, retaining
+            # the same messages for the operator CLI replay below.
+            with opener.open(get_request, timeout=5) as response:
+                dead = json.load(response)
+            expected_poison = {event_id for event_id, _ in poison}
+            if len(dead) != len(poison) or {m["properties"].get("message_id") for m in dead} != expected_poison:
+                raise AssertionError("poison identities missing or duplicated")
+            for message in dead:
+                props = message["properties"]
+                if props.get("delivery_mode") != 2 or props.get("headers", {}).get("x-first-death-reason") != "rejected" or message.get("payload") != poison[0][1]:
+                    raise AssertionError("unexpected poison durability/reason/payload")
+            wait("main queue drains mixed traffic", lambda: queue_depth() == 0, seconds=20)
 
             api.send_signal(signal.SIGTERM)
             if api.wait(timeout=10) != 0:
@@ -210,28 +296,60 @@ def main():
         run([str(work / "gostream-events"), "-outbox-key", "operator-smoke"], env=env)
         if mysql(f"SELECT COUNT(*) FROM `{schema}`.outbox_events WHERE event_key='operator-smoke' AND attempts=0 AND dead_at IS NULL;") != "1":
             raise AssertionError("operator did not reset exactly the dead SQL row")
-        run([str(work / "gostream-events"), "-dead-letters", "1"], env=env)
+        replay = run([str(work / "gostream-events"), "-dead-letters", "3"], env=env, capture_output=True)
+        if "replayed=3" not in replay.stdout.splitlines():
+            raise AssertionError("operator did not replay exactly the three inspected poisons")
+        wait("operator source copies", lambda: queue_depth() == 3 and queue_depth(dead_qname) == 0, seconds=15)
         print(json.dumps({"rabbitmq": "4.3.7", "mysql": "8.4", "real_broker_matrix": True,
                           "api_worker_lifecycle": True, "operator_cli": True}), flush=True)
     finally:
+        cleanup_errors = []
         if paused:
-            subprocess.run(["docker", "unpause", container], capture_output=True)
-        if api is not None:
-            api.terminate()
             try:
-                api.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                api.kill()
-                api.wait()
-        if started:
-            run(["docker", "rm", "-f", "-v", container], capture_output=True)
-        if created_db:
-            mysql(f"DROP DATABASE `{schema}`;")
-        if created_user:
-            mysql(f"DROP USER '{user}'@'%';")
-        print("remaining_schema=" + mysql(f"SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='{schema}';"), flush=True)
-        print("remaining_user=" + mysql(f"SELECT COUNT(*) FROM mysql.user WHERE user='{user}';"), flush=True)
-        shutil.rmtree(work)
+                run(["docker", "unpause", container], capture_output=True)
+            except RuntimeError as exc:
+                cleanup_errors.append(str(exc))
+        if api is not None:
+            try:
+                if api.poll() is None:
+                    api.terminate()
+                    try:
+                        api.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        api.kill()
+                        api.wait(timeout=5)
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                cleanup_errors.append(str(exc))
+        for needed, cleanup in [
+            (started, lambda: run(["docker", "rm", "-f", "-v", container], capture_output=True)),
+            (created_db, lambda: mysql(f"DROP DATABASE `{schema}`;")),
+            (created_user, lambda: mysql(f"DROP USER '{user}'@'%';")),
+        ]:
+            if needed:
+                try:
+                    cleanup()
+                except RuntimeError as exc:
+                    cleanup_errors.append(str(exc))
+        for name, query in [
+            ("schema", f"SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='{schema}';"),
+            ("user", f"SELECT COUNT(*) FROM mysql.user WHERE user='{user}';"),
+        ]:
+            try:
+                remaining = mysql(query)
+                print("remaining_" + name + "=" + remaining, flush=True)
+                if remaining != "0":
+                    cleanup_errors.append("isolated " + name + " survived cleanup")
+            except RuntimeError as exc:
+                cleanup_errors.append(str(exc))
+        alive = api is not None and api.poll() is None
+        print("remaining_api=" + str(bool(alive)).lower(), flush=True)
+        if alive:
+            cleanup_errors.append("isolated API survived cleanup")
+        else:
+            shutil.rmtree(work)
+        if cleanup_errors:
+            raise RuntimeError("; ".join(cleanup_errors))
+
 
 
 if __name__ == "__main__":
