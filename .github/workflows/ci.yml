@@ -49,6 +49,9 @@ jobs:
       - name: Check web client syntax
         run: node --check web/app.js
 
+      - name: Test Feed A04 acceptance helpers
+        run: python3 -m unittest discover -s tests/integration -p 'test_feed_a04.py' -v
+
       - name: Validate Compose configuration
         env:
           JWT_SECRET: ci-compose-configuration-only-secret-123456789
