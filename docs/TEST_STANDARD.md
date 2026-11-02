@@ -181,3 +181,8 @@ IM 双进程故障验证运行 `python3 tests/integration/im_smoke.py --go-bin /
 - broker 新增的确定性 TCP 断连不等同于真实进程强杀。独立事件混合流量必须逐 ID 验证持久接收/派发，DLQ 必须核对完整 ID 集合及原因，不能只凭深度或 HTTP 200。
 
 原问题、修正、实际结果及发布缺口见 [三分支审核](BRANCH_REVIEW_2026-10-31.md)。
+
+## 2026-11-02 Feed 查询变更验证边界
+
+- Hybrid following 的三个候选分支使用互斥条件后改为 `UNION ALL`；公开 HTTP 回归覆盖未完成 fanout 的部分 inbox 和迟到关注与 inbox 重叠。Go 1.27.2 SQLite 500 视频 handler benchmark 中位耗时下降约 4.8%，不等于 MySQL 延迟或完整数据集收益。
+- A04 仍以隔离 MySQL/Redis 的完整数据集、20 并发、30 秒预热、60 秒正式运行、每种场景三轮和 SQL-only/Hybrid 同数据对照判定。当前变更不能关闭 20% P95、读写混合、持续积压或双实例进程故障门槛。

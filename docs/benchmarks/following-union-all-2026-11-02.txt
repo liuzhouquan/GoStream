@@ -1,0 +1,43 @@
+GoStream following Feed UNION ALL local experiment
+Date: 2026-11-02
+Go: go1.27.2
+Host: Linux/amd64, AMD Ryzen 7 5800H
+Fixture: existing in-process HTTP handler benchmark; SQLite memory database; 500 published videos, one author, 500 completed inbox rows; no MySQL, Redis, or network.
+
+Command:
+/usr/local/go/bin/go test ./internal/platform -run '^$' -bench '^BenchmarkFollowingFeed$' -benchtime=100x -count=3
+
+Before query change (UNION with distinct):
+goos: linux
+goarch: amd64
+pkg: github.com/liuzhouquan/GoStream/internal/platform
+cpu: AMD Ryzen 7 5800H with Radeon Graphics
+BenchmarkFollowingFeed/SQLOnly-16          100  400893 ns/op  118645 B/op  1176 allocs/op
+BenchmarkFollowingFeed/SQLOnly-16          100  378301 ns/op  119266 B/op  1177 allocs/op
+BenchmarkFollowingFeed/SQLOnly-16          100  382460 ns/op  118605 B/op  1176 allocs/op
+BenchmarkFollowingFeed/Hybrid-16           100  745400 ns/op  132293 B/op  1219 allocs/op
+BenchmarkFollowingFeed/Hybrid-16           100  742093 ns/op  132793 B/op  1219 allocs/op
+BenchmarkFollowingFeed/Hybrid-16           100  735130 ns/op  132342 B/op  1219 allocs/op
+PASS
+ok   github.com/liuzhouquan/GoStream/internal/platform 0.405s
+
+After query change (mutually exclusive branches with UNION ALL):
+goos: linux
+goarch: amd64
+pkg: github.com/liuzhouquan/GoStream/internal/platform
+cpu: AMD Ryzen 7 5800H with Radeon Graphics
+BenchmarkFollowingFeed/SQLOnly-16          100  387585 ns/op  118455 B/op  1176 allocs/op
+BenchmarkFollowingFeed/SQLOnly-16          100  382524 ns/op  119118 B/op  1177 allocs/op
+BenchmarkFollowingFeed/SQLOnly-16          100  375254 ns/op  119254 B/op  1177 allocs/op
+BenchmarkFollowingFeed/Hybrid-16           100  672004 ns/op  132665 B/op  1221 allocs/op
+BenchmarkFollowingFeed/Hybrid-16           100  707099 ns/op  132284 B/op  1220 allocs/op
+BenchmarkFollowingFeed/Hybrid-16           100  706417 ns/op  133805 B/op  1221 allocs/op
+PASS
+ok   github.com/liuzhouquan/GoStream/internal/platform 0.389s
+
+Median ns/op:
+SQL-only: 382460 before, 382524 after (no meaningful change)
+Hybrid:   742093 before, 706417 after (4.8% lower in this fixture)
+
+Interpretation:
+This is an in-process SQLite microbenchmark, not a MySQL latency or HTTP P95 result. The hybrid fixture has a single author and no read/write concurrency. It does not satisfy the 20% Feed acceptance target. No production throughput or capacity claim follows from this result.

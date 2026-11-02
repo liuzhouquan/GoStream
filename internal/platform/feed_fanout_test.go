@@ -243,3 +243,68 @@ func TestHybridFollowingZeroFollowsIgnoresStaleInbox(t *testing.T) {
 		t.Fatalf("unfollow leaked stale inbox: %v", ids)
 	}
 }
+
+func TestHybridFollowingMergesOverlappingSourcesOnce(t *testing.T) {
+	s, h, db := testServer(t)
+	s.UseFeedFanout(1000)
+	viewer, token := registerTestUser(t, h, "overlap_viewer")
+	actors := make([]uint, 3)
+	for i, username := range []string{"overlap_pull", "overlap_completed", "overlap_late"} {
+		actors[i], _ = registerTestUser(t, h, username)
+	}
+
+	base := time.Now().UTC().Truncate(time.Millisecond)
+	rows := []struct {
+		name       string
+		authorID   uint
+		createdAt  time.Time
+		followedAt time.Time
+		feedPull   bool
+		inbox      bool
+	}{
+		{name: "unfinished pull remains visible with a partial inbox", authorID: actors[0], createdAt: base.Add(-time.Hour), followedAt: base.Add(-2 * time.Hour), feedPull: true, inbox: true},
+		{name: "completed late-follow overlap appears once", authorID: actors[1], createdAt: base.Add(-2 * time.Hour), followedAt: base.Add(-time.Hour), inbox: true},
+		{name: "late follow without inbox remains visible", authorID: actors[2], createdAt: base.Add(-3 * time.Hour), followedAt: base.Add(-time.Hour)},
+	}
+	want := make([]uint, 0, len(rows))
+	for _, row := range rows {
+		follow := Follow{FollowerID: viewer, FolloweeID: row.authorID, CreatedAt: row.followedAt}
+		if err := db.Create(&follow).Error; err != nil {
+			t.Fatal(err)
+		}
+		video := Video{AuthorID: row.authorID, Title: row.name, MediaURL: "/media/" + row.name + ".mp4", Status: "published", CreatedAt: row.createdAt, FeedPull: row.feedPull}
+		if err := db.Create(&video).Error; err != nil {
+			t.Fatal(err)
+		}
+		if !row.feedPull {
+			if err := db.Model(&video).UpdateColumn("feed_pull", false).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+		if row.inbox {
+			if err := db.Create(&FeedInbox{UserID: viewer, VideoID: video.ID, CreatedAt: video.CreatedAt}).Error; err != nil {
+				t.Fatal(err)
+			}
+		}
+		want = append(want, video.ID)
+	}
+
+	res := request(t, h, http.MethodGet, "/api/feed?scene=following&limit=10", token, nil)
+	if res.Code != http.StatusOK {
+		t.Fatalf("following feed: %d %s", res.Code, res.Body.String())
+	}
+	var page struct {
+		Items   []Video `json:"items"`
+		HasMore bool    `json:"has_more"`
+	}
+	if err := json.Unmarshal(res.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	got := make([]uint, len(page.Items))
+	for i, video := range page.Items {
+		got[i] = video.ID
+	}
+	if page.HasMore || !reflect.DeepEqual(got, want) {
+		t.Fatalf("overlapping feed sources must return each current video once: got=%v want=%v has_more=%v", got, want, page.HasMore)
+	}
+}
