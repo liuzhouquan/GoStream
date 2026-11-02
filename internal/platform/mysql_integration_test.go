@@ -544,7 +544,8 @@ func TestMySQLConcurrentVideoActionsIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	handlers := []http.Handler{sA.Router(), sB.Router()}
-	const workers, iterations = 8, 80
+	// Match the Feed mixed-load concurrency while contending on the same idempotency keys.
+	const workers, iterations = 20, 80
 	failures := make(chan string, workers*iterations)
 	var wg sync.WaitGroup
 	for worker := 0; worker < workers; worker++ {

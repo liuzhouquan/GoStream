@@ -2,7 +2,9 @@
 
 Last updated: 2026-11-02
 
-The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs/DELIVERY_SCOPE.md); the test matrix and pass criteria are in [`docs/TEST_STANDARD.md`](docs/TEST_STANDARD.md). Checked items below record individual features or local verification; they do not mean the whole project has met those release gates.
+The release boundary and acceptance gates are in [`docs/DELIVERY_SCOPE.md`](docs/DELIVERY_SCOPE.md); the test matrix and pass criteria are in [`docs/TEST_STANDARD.md`](docs/TEST_STANDARD.md). Checked items below record individual features or local verification; they do not mean the whole project has met those release gates. Newer entries supersede earlier interim status statements.
+
+2026-11-02 MySQL action deadlock fix: CI exposed 1213 deadlocks in the real concurrent like/favorite test, with retries exhausted as HTTP 500. An InnoDB trace showed the conflict on `video_actions.ux_action`; the handler now retries the whole transaction up to ten times with equal jitter to avoid synchronized retry waves. The MySQL regression now runs 20 workers on the same idempotency keys. Go 1.27.2 passed 30 repeated runs against an isolated MySQL 8.4.11 container with no failed requests; full `go test ./... -count=1`, `go test -race ./... -count=1`, `go vet ./...` and all three command builds passed locally. This reduces user-visible failures; it does not claim the database never elects a deadlock victim. MySQL 8.4.13 CI remains the merge gate.
 
 2026-11-02 PR #24 merged as `90172075`; all eight PR checks passed. The post-merge main push run failed once in `TestChatAndGroupSecurityBoundaries` while `t.TempDir` removed the SQLite directory before its hijacked WebSocket handlers finished disconnect writes. This branch adds an explicit socket/server close and verifies `last_seen_at` before database teardown; 50 ordinary and 20 race repetitions plus the full local Go suite passed. A fresh PR CI run is still required before treating main as green.
 
