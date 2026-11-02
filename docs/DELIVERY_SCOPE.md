@@ -1,6 +1,6 @@
 # GoStream 交付边界与完成标准
 
-更新日期：2026-10-31。本文件定义求职展示版的验收范围；[`TEST_STANDARD.md`](TEST_STANDARD.md) 定义通过条件，实际完成情况以代码、自动化检查和 [`PROGRESS.md`](../PROGRESS.md) 的验证记录为准。下文的目标不等于当前已实现功能。
+更新日期：2026-11-02。本文件定义求职展示版的验收范围；[`TEST_STANDARD.md`](TEST_STANDARD.md) 定义通过条件，实际完成情况以代码、自动化检查和 [`PROGRESS.md`](../PROGRESS.md) 的验证记录为准。下文的目标不等于当前已实现功能。
 
 ## 目标形态
 
@@ -83,3 +83,5 @@ RabbitMQ 通知链路已接入确认发布、消费者持久化幂等、延迟�
 2026-10-31 A07 回执生命周期：新增每设备连续 ID 区间，在保留未确认缺口和新设备未读语义的前提下渐进压缩；v005 增量迁移不修改已有回执或消息。实现、升级限制与本轮证据见 [DEVICE_ACK_RANGES.md](DEVICE_ACK_RANGES.md)。规定负载和最终全组件验收仍未关闭。
 
 2026-10-31 三分支审核：broker 增量区分真实 TCP 断连组件验证、预提交去重夹具与尚未完成的精确进程强杀；混合流量核对独立事件及完整 DLQ 身份。Feed 只减少一次预查询，不宣称达到 20% P95 收益；SQLite 基准及真实 MySQL 门槛分别记录。媒体补头像权限与严格 TCP 恢复断言。最终交付分支新增 SQLite `/health`/`/ready` 解耦回归，既有 49 路由映射/代表性 Schema 和 SQLite 浏览器 CI 不等同于最终全组件验收。结论和运行证据见 [本轮审核](BRANCH_REVIEW_2026-10-31.md)。A01–A12 继续按原测试矩阵判断。
+
+2026-11-02 Feed 查询微调：三路 hybrid 来源通过 `feed_pull` 与 inbox 存在性条件互斥，改用 `UNION ALL`；SQLite 小型 handler 基准 Hybrid 中位数下降约 4.8%。这不是 MySQL、HTTP P95 或正式负载结果，A04 的 20% P95、完整数据集和读写/积压门槛仍未通过。详见 [`PERFORMANCE.md`](PERFORMANCE.md) 与 [`TEST_STANDARD.md`](TEST_STANDARD.md)。

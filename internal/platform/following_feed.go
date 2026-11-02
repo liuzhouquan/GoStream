@@ -10,6 +10,9 @@ import (
 // visible to followers who joined after publication.
 func (s *Server) followingVideos(ctx context.Context, viewerID uint, cursor feedCursor, limit int) ([]Video, error) {
 	cursorTime := cursor.createdTime()
+	// Keep the three candidate sources disjoint: unfinished fanout stays in
+	// pull, completed fanout uses inbox rows, and late follows only fill gaps.
+	// UNION ALL relies on these publication and inbox invariants.
 	var sql strings.Builder
 	sql.Grow(1024)
 	args := make([]any, 0, 16)
@@ -25,26 +28,30 @@ SELECT id, created_at FROM (
 	}
 	sql.WriteString(` ORDER BY videos.created_at DESC, videos.id DESC LIMIT ?
 ) AS pull_page
-UNION
+UNION ALL
 SELECT id, created_at FROM (
   SELECT videos.id, videos.created_at FROM follows
   JOIN videos ON videos.author_id = follows.followee_id
   WHERE follows.follower_id = ? AND videos.status = ? AND videos.feed_pull = ?
-    AND follows.created_at >= videos.created_at`)
-	args = append(args, limit+1, viewerID, "published", false)
+    AND follows.created_at >= videos.created_at
+    AND NOT EXISTS (
+      SELECT 1 FROM feed_inboxes
+      WHERE feed_inboxes.user_id = ? AND feed_inboxes.video_id = videos.id
+    )`)
+	args = append(args, limit+1, viewerID, "published", false, viewerID)
 	if cursor.ID > 0 {
 		sql.WriteString(` AND (videos.created_at < ? OR (videos.created_at = ? AND videos.id < ?))`)
 		args = append(args, cursorTime, cursorTime, cursor.ID)
 	}
 	sql.WriteString(` ORDER BY videos.created_at DESC, videos.id DESC LIMIT ?
 ) AS late_follow_page
-UNION
+UNION ALL
 SELECT id, created_at FROM (
   SELECT feed_inboxes.video_id AS id, feed_inboxes.created_at FROM feed_inboxes
   JOIN videos ON videos.id = feed_inboxes.video_id
   JOIN follows ON follows.followee_id = videos.author_id AND follows.follower_id = ?
-  WHERE feed_inboxes.user_id = ? AND videos.status = ?`)
-	args = append(args, limit+1, viewerID, viewerID, "published")
+  WHERE feed_inboxes.user_id = ? AND videos.status = ? AND videos.feed_pull = ?`)
+	args = append(args, limit+1, viewerID, viewerID, "published", false)
 	if cursor.ID > 0 {
 		sql.WriteString(` AND (feed_inboxes.created_at < ? OR (feed_inboxes.created_at = ? AND feed_inboxes.video_id < ?))`)
 		args = append(args, cursorTime, cursorTime, cursor.ID)

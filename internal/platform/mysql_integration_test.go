@@ -107,6 +107,11 @@ func TestMySQLHybridFollowingIntegration(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// A partially processed fanout may already have inserted this viewer's
+	// inbox row while the video remains pull-eligible.
+	if err := tx.Create(&FeedInbox{UserID: viewer, VideoID: low.ID, CreatedAt: low.CreatedAt}).Error; err != nil {
+		t.Fatal(err)
+	}
 	want := []uint{high.ID, low.ID}
 	if got := collectFollowingIDs(t, h, viewerToken); !reflect.DeepEqual(got, want) {
 		t.Fatalf("pending MySQL feed: got=%v want=%v", got, want)
@@ -135,6 +140,17 @@ func TestMySQLHybridFollowingIntegration(t *testing.T) {
 	}
 	if got := collectFollowingIDs(t, h, viewerToken); !reflect.DeepEqual(got, want) {
 		t.Fatalf("completed MySQL feed: got=%v want=%v", got, want)
+	}
+	lateViewer, lateToken := registerTestUser(t, h, prefix+"late")
+	lateFollow := Follow{FollowerID: lateViewer, FolloweeID: lowAuthor, CreatedAt: stamp.Add(time.Second)}
+	if err := tx.Create(&lateFollow).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Create(&FeedInbox{UserID: lateViewer, VideoID: low.ID, CreatedAt: low.CreatedAt}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if got := collectFollowingIDs(t, h, lateToken); !reflect.DeepEqual(got, []uint{low.ID}) {
+		t.Fatalf("MySQL late-follow inbox overlap: got=%v want=%v", got, []uint{low.ID})
 	}
 }
 
