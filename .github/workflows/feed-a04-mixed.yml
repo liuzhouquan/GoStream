@@ -1,0 +1,111 @@
+name: Feed A04 Mixed Read Write Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gostream-feed-a04-mixed
+  cancel-in-progress: false
+
+jobs:
+  full-size-mysql-mixed-load:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root-ci-only
+          MYSQL_DATABASE: gostream_ci
+          MYSQL_USER: gostream
+          MYSQL_PASSWORD: gostream-ci-only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -ugostream -pgostream-ci-only --silent"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install declared Go version
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Define isolated database namespace
+        env:
+          MYSQL_CONTAINER: ${{ job.services.mysql.id }}
+        run: |
+          set -euo pipefail
+          schema_prefix="gostream_feed_a04_mixed_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          if [[ ! $schema_prefix =~ ^gostream_feed_a04_mixed_[A-Za-z0-9_]+$ ]]; then
+            echo "unsafe A04 mixed schema prefix" >&2
+            exit 2
+          fi
+          printf 'GOSTREAM_FEED_A04_SCHEMA_PREFIX=%s\n' "$schema_prefix" >> "$GITHUB_ENV"
+          printf 'GOSTREAM_FEED_A04_DSN_PREFIX=%s\n' \
+            'gostream:gostream-ci-only@tcp(127.0.0.1:3306)/' >> "$GITHUB_ENV"
+          printf 'GOSTREAM_FEED_A04_MYSQL_CONTAINER=%s\n' "$MYSQL_CONTAINER" >> "$GITHUB_ENV"
+
+      - name: Run acceptance helper tests
+        run: python3 -m unittest discover -s tests/integration -p 'test_feed_a04*.py' -v
+
+      - name: Build API and mixed workload driver
+        run: |
+          set -euo pipefail
+          go build -o "$RUNNER_TEMP/gostream-feed-a04-mixed-api" ./cmd/gostream
+          go build -o "$RUNNER_TEMP/gostream-feed-a04-mixed-driver" ./tests/load/mixed
+          mkdir -p "$RUNNER_TEMP/gostream-feed-a04-mixed"
+
+      - name: Run six full-size mixed-load comparisons
+        run: |
+          python3 tests/integration/feed_a04_mixed.py \
+            --api-binary "$RUNNER_TEMP/gostream-feed-a04-mixed-api" \
+            --mixed-driver "$RUNNER_TEMP/gostream-feed-a04-mixed-driver" \
+            --report-dir "$RUNNER_TEMP/gostream-feed-a04-mixed" \
+            --mysql-container "$GOSTREAM_FEED_A04_MYSQL_CONTAINER" \
+            --schema-prefix "$GOSTREAM_FEED_A04_SCHEMA_PREFIX" \
+            --go-bin "$(command -v go)"
+
+      - name: Remove any remaining prefixed fixture schemas
+        if: always()
+        env:
+          MYSQL_CONTAINER: ${{ job.services.mysql.id }}
+        run: |
+          set -euo pipefail
+          SCHEMA_PREFIX="${GOSTREAM_FEED_A04_SCHEMA_PREFIX:-}"
+          if [[ -z "${SCHEMA_PREFIX:-}" || ! $SCHEMA_PREFIX =~ ^gostream_feed_a04_mixed_[A-Za-z0-9_]+$ ]]; then
+            exit 0
+          fi
+          mapfile -t schemas < <(
+            docker exec -i "$MYSQL_CONTAINER" sh -c \
+              'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --batch --skip-column-names' \
+              <<< "SHOW DATABASES LIKE '${SCHEMA_PREFIX}%';"
+          )
+          for schema in "${schemas[@]}"; do
+            [[ $schema =~ ^gostream_feed_a04_mixed_[A-Za-z0-9_]+$ ]] || {
+              echo "refusing to clean unexpected schema: $schema" >&2
+              exit 2
+            }
+            docker exec -i "$MYSQL_CONTAINER" sh -c \
+              'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot' <<SQL
+          REVOKE ALL PRIVILEGES ON \`$schema\`.* FROM 'gostream'@'%';
+          DROP DATABASE IF EXISTS \`$schema\`;
+          SQL
+          done
+
+      - name: Retain raw mixed-load reports
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: feed-a04-mixed-${{ github.run_id }}
+          path: ${{ runner.temp }}/gostream-feed-a04-mixed
+          if-no-files-found: warn
+          retention-days: 30

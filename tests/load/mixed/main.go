@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -20,6 +21,34 @@ import (
 type operation struct {
 	name, method, path, body string
 	want                     int
+}
+
+type actor struct {
+	token      string
+	videoID    uint
+	followeeID uint
+}
+
+type operationReport struct {
+	Successes           int         `json:"successes"`
+	Failures            int         `json:"failures"`
+	Statuses            map[int]int `json:"status_counts"`
+	SuccessfulLatencyNS []int64     `json:"successful_latency_ns"`
+	FailedLatencyNS     []int64     `json:"failed_latency_ns"`
+	P50NS               int64       `json:"p50_ns"`
+	P95NS               int64       `json:"p95_ns"`
+	P99NS               int64       `json:"p99_ns"`
+}
+
+type loadReport struct {
+	Concurrency         int                        `json:"concurrency"`
+	ActorCount          int                        `json:"actor_count"`
+	WarmupNS            int64                      `json:"warmup_ns"`
+	RequestedDurationNS int64                      `json:"requested_duration_ns"`
+	ElapsedNS           int64                      `json:"elapsed_ns"`
+	Successes           int                        `json:"successes"`
+	Failures            int                        `json:"failures"`
+	Operations          map[string]operationReport `json:"operations"`
 }
 
 func chooseOperation(sequence uint64, videoID, followeeID uint) operation {
@@ -54,9 +83,68 @@ func chooseOperation(sequence uint64, videoID, followeeID uint) operation {
 }
 
 type sample struct {
-	success  []time.Duration
-	failures int
-	statuses map[int]int
+	success       []time.Duration
+	failedLatency []time.Duration
+	failures      int
+	statuses      map[int]int
+}
+
+func buildActors(tokens []string, videoIDs, followeeIDs []uint) ([]actor, error) {
+	if len(tokens) == 0 || len(videoIDs) == 0 || len(followeeIDs) == 0 {
+		return nil, fmt.Errorf("at least one token, video ID, and followee ID are required")
+	}
+	for i, token := range tokens {
+		if strings.TrimSpace(token) == "" {
+			return nil, fmt.Errorf("token %d is empty", i)
+		}
+	}
+	for i, id := range videoIDs {
+		if id == 0 {
+			return nil, fmt.Errorf("video ID %d must be positive", i)
+		}
+	}
+	for i, id := range followeeIDs {
+		if id == 0 {
+			return nil, fmt.Errorf("followee ID %d must be positive", i)
+		}
+	}
+	actors := make([]actor, len(tokens))
+	for i, token := range tokens {
+		actors[i] = actor{token: strings.TrimSpace(token), videoID: videoIDs[i%len(videoIDs)], followeeID: followeeIDs[i%len(followeeIDs)]}
+	}
+	return actors, nil
+}
+
+func parseIDList(value string, fallback uint, label string) ([]uint, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		if fallback == 0 {
+			return nil, fmt.Errorf("at least one %s is required", label)
+		}
+		return []uint{fallback}, nil
+	}
+	parts := strings.Split(value, ",")
+	ids := make([]uint, 0, len(parts))
+	for i, part := range parts {
+		part = strings.TrimSpace(part)
+		parsed, err := strconv.ParseUint(part, 10, 32)
+		if err != nil || parsed == 0 {
+			return nil, fmt.Errorf("invalid %s at position %d: %q", label, i+1, part)
+		}
+		ids = append(ids, uint(parsed))
+	}
+	return ids, nil
+}
+
+func writeReport(path string, report loadReport) error {
+	data, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode load report: %w", err)
+	}
+	if err := os.WriteFile(path, append(data, '\n'), 0o600); err != nil {
+		return fmt.Errorf("write load report: %w", err)
+	}
+	return nil
 }
 
 func runRequest(client *http.Client, baseURL, token string, op operation) (time.Duration, int, error) {
@@ -89,7 +177,10 @@ func percentile(sorted []time.Duration, numerator int) time.Duration {
 	return sorted[(len(sorted)-1)*numerator/100]
 }
 
-func run(baseURL, token string, videoID, followeeID uint, concurrency int, warmup, duration time.Duration) error {
+func run(baseURL string, actors []actor, concurrency int, warmup, duration time.Duration, reportPath string) error {
+	if len(actors) == 0 {
+		return fmt.Errorf("at least one actor is required")
+	}
 	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
 		MaxIdleConns: concurrency, MaxIdleConnsPerHost: concurrency,
 	}}
@@ -99,8 +190,9 @@ func run(baseURL, token string, videoID, followeeID uint, concurrency int, warmu
 		var wg sync.WaitGroup
 		var warmFailures atomic.Int64
 		for worker := 0; worker < concurrency; worker++ {
+			workerActor := actors[worker%len(actors)]
 			wg.Add(1)
-			go func() {
+			go func(token string) {
 				defer wg.Done()
 				for time.Now().Before(deadline) {
 					_, status, err := runRequest(client, baseURL, token, operation{"feed_following", http.MethodGet, "/api/feed?scene=following&limit=20", "", http.StatusOK})
@@ -108,7 +200,7 @@ func run(baseURL, token string, videoID, followeeID uint, concurrency int, warmu
 						warmFailures.Add(1)
 					}
 				}
-			}()
+			}(workerActor.token)
 		}
 		wg.Wait()
 		if warmFailures.Load() != 0 {
@@ -121,27 +213,29 @@ func run(baseURL, token string, videoID, followeeID uint, concurrency int, warmu
 	results := make(chan map[string]*sample, concurrency)
 	var wg sync.WaitGroup
 	for worker := 0; worker < concurrency; worker++ {
+		workerActor := actors[worker%len(actors)]
 		wg.Add(1)
-		go func() {
+		go func(currentActor actor) {
 			defer wg.Done()
 			local := make(map[string]*sample)
 			for time.Now().Before(deadline) {
-				op := chooseOperation(sequence.Add(1)-1, videoID, followeeID)
+				op := chooseOperation(sequence.Add(1)-1, currentActor.videoID, currentActor.followeeID)
 				value := local[op.name]
 				if value == nil {
 					value = &sample{statuses: make(map[int]int)}
 					local[op.name] = value
 				}
-				latency, status, err := runRequest(client, baseURL, token, op)
+				latency, status, err := runRequest(client, baseURL, currentActor.token, op)
+				value.statuses[status]++
 				if err != nil || status != op.want {
 					value.failures++
-					value.statuses[status]++
+					value.failedLatency = append(value.failedLatency, latency)
 				} else {
 					value.success = append(value.success, latency)
 				}
 			}
 			results <- local
-		}()
+		}(workerActor)
 	}
 	wg.Wait()
 	elapsed := time.Since(start)
@@ -149,6 +243,8 @@ func run(baseURL, token string, videoID, followeeID uint, concurrency int, warmu
 	merged := make(map[string]*sample)
 	var all []time.Duration
 	var failed int
+	var successes int
+	operationReports := make(map[string]operationReport)
 	for local := range results {
 		for name, result := range local {
 			value := merged[name]
@@ -157,6 +253,7 @@ func run(baseURL, token string, videoID, followeeID uint, concurrency int, warmu
 				merged[name] = value
 			}
 			value.success = append(value.success, result.success...)
+			value.failedLatency = append(value.failedLatency, result.failedLatency...)
 			value.failures += result.failures
 			for status, count := range result.statuses {
 				value.statuses[status] += count
@@ -171,15 +268,31 @@ func run(baseURL, token string, videoID, followeeID uint, concurrency int, warmu
 	for _, name := range names {
 		value := merged[name]
 		sort.Slice(value.success, func(i, j int) bool { return value.success[i] < value.success[j] })
+		sort.Slice(value.failedLatency, func(i, j int) bool { return value.failedLatency[i] < value.failedLatency[j] })
 		all = append(all, value.success...)
 		failed += value.failures
+		successes += len(value.success)
 		fmt.Printf("operation=%s success=%d failures=%d p50=%s p95=%s p99=%s statuses=%v\n", name, len(value.success), value.failures,
 			percentile(value.success, 50).Round(time.Microsecond), percentile(value.success, 95).Round(time.Microsecond), percentile(value.success, 99).Round(time.Microsecond), value.statuses)
+		operationReports[name] = operationReport{
+			Successes: len(value.success), Failures: value.failures, Statuses: value.statuses,
+			SuccessfulLatencyNS: durationValues(value.success), FailedLatencyNS: durationValues(value.failedLatency),
+			P50NS: int64(percentile(value.success, 50)), P95NS: int64(percentile(value.success, 95)), P99NS: int64(percentile(value.success, 99)),
+		}
 	}
 	sort.Slice(all, func(i, j int) bool { return all[i] < all[j] })
 	fmt.Printf("total success=%d failures=%d concurrency=%d elapsed=%s qps=%.1f p50=%s p95=%s p99=%s\n", len(all), failed, concurrency,
 		elapsed.Round(time.Millisecond), float64(len(all))/elapsed.Seconds(), percentile(all, 50).Round(time.Microsecond),
 		percentile(all, 95).Round(time.Microsecond), percentile(all, 99).Round(time.Microsecond))
+	if reportPath != "" {
+		report := loadReport{
+			Concurrency: concurrency, ActorCount: len(actors), WarmupNS: int64(warmup), RequestedDurationNS: int64(duration),
+			ElapsedNS: int64(elapsed), Successes: successes, Failures: failed, Operations: operationReports,
+		}
+		if err := writeReport(reportPath, report); err != nil {
+			return err
+		}
+	}
 	if failed > 0 {
 		return fmt.Errorf("%d measured requests failed", failed)
 	}
@@ -192,13 +305,16 @@ func main() {
 	tokenFile := flag.String("token-file", "", "path to a JWT access token file")
 	videoID := flag.Uint("video-id", 0, "published video ID for writes")
 	followeeID := flag.Uint("followee-id", 0, "other user ID for follow/unfollow")
+	videoIDsValue := flag.String("video-ids", "", "comma-separated published video IDs; distributed across token lines")
+	followeeIDsValue := flag.String("followee-ids", "", "comma-separated followee user IDs; distributed across token lines")
 	concurrency := flag.Int("concurrency", 20, "concurrent workers")
 	warmup := flag.Duration("warmup", 30*time.Second, "read-only Feed warmup")
 	duration := flag.Duration("duration", time.Minute, "measured mixed workload")
+	reportPath := flag.String("report-file", "", "optional path for raw per-request JSON report (created with mode 0600)")
 	flag.Parse()
-	if !*isolated || *tokenFile == "" || *videoID == 0 || *followeeID == 0 || *concurrency < 1 || *concurrency > 1000 || *warmup < 0 || *duration <= 0 ||
+	if !*isolated || *tokenFile == "" || *concurrency < 1 || *concurrency > 1000 || *warmup < 0 || *duration <= 0 ||
 		!strings.HasPrefix(*baseURL, "http://") && !strings.HasPrefix(*baseURL, "https://") {
-		fmt.Fprintln(os.Stderr, "-isolated, token-file, video-id, followee-id, positive duration and concurrency (<=1000), and HTTP(S) base-url are required")
+		fmt.Fprintln(os.Stderr, "-isolated, token-file, positive duration and concurrency (<=1000), and HTTP(S) base-url are required")
 		os.Exit(2)
 	}
 	data, err := os.ReadFile(*tokenFile)
@@ -206,13 +322,32 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	token := strings.TrimSpace(string(data))
-	if token == "" {
-		fmt.Fprintln(os.Stderr, "token file is empty")
+	tokens := strings.Fields(string(data))
+	videoIDs, err := parseIDList(*videoIDsValue, *videoID, "video ID")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	if err := run(strings.TrimRight(*baseURL, "/"), token, *videoID, *followeeID, *concurrency, *warmup, *duration); err != nil {
+	followeeIDs, err := parseIDList(*followeeIDsValue, *followeeID, "followee ID")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	actors, err := buildActors(tokens, videoIDs, followeeIDs)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if err := run(strings.TrimRight(*baseURL, "/"), actors, *concurrency, *warmup, *duration, *reportPath); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+func durationValues(values []time.Duration) []int64 {
+	result := make([]int64, len(values))
+	for i, value := range values {
+		result[i] = int64(value)
+	}
+	return result
 }
