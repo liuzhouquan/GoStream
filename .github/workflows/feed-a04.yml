@@ -1,0 +1,109 @@
+name: Feed A04 Acceptance
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gostream-feed-a04
+  cancel-in-progress: false
+
+jobs:
+  full-size-mysql-feed:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root-ci-only
+          MYSQL_DATABASE: gostream_ci
+          MYSQL_USER: gostream
+          MYSQL_PASSWORD: gostream-ci-only
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -ugostream -pgostream-ci-only --silent"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install the declared Go version
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Create a disposable MySQL schema
+        env:
+          MYSQL_CONTAINER: ${{ job.services.mysql.id }}
+        run: |
+          set -euo pipefail
+          schema="gostream_feed_a04_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          if [[ ! $schema =~ ^gostream_feed_a04_[A-Za-z0-9_]+$ ]]; then
+            echo "unsafe A04 schema name" >&2
+            exit 2
+          fi
+          docker exec -i "$MYSQL_CONTAINER" sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot' <<SQL
+          CREATE DATABASE \`$schema\`;
+          GRANT ALL PRIVILEGES ON \`$schema\`.* TO 'gostream'@'%';
+          SQL
+          dsn="gostream:gostream-ci-only@tcp(127.0.0.1:3306)/$schema?charset=utf8mb4&parseTime=True&loc=UTC"
+          printf 'DB_DSN=%s\nGOSTREAM_FEED_A04_DB=%s\nGOSTREAM_FEED_A04_MYSQL_CONTAINER=%s\n' \
+            "$dsn" "$schema" "$MYSQL_CONTAINER" >> "$GITHUB_ENV"
+
+      - name: Run Python acceptance-helper tests
+        run: python3 -m unittest discover -s tests/integration -p 'test_feed_a04.py' -v
+
+      - name: Seed the complete hybrid Feed fixture
+        run: |
+          go run ./tests/load/seed -driver mysql -dsn "$DB_DSN" -scenario hybrid \
+            -users 2000 -authors 100 -videos 20000 -follows-per-user 5 \
+            -celebrity-followers 1500 -fanout-max-followers 1000 -likes 50000
+
+      - name: Build the production API and HTTP load driver
+        run: |
+          go build -o "$RUNNER_TEMP/gostream-feed-a04-api" ./cmd/gostream
+          go build -o "$RUNNER_TEMP/gostream-feed-a04-http" ./tests/load/http
+          mkdir -p "$RUNNER_TEMP/gostream-feed-a04"
+
+      - name: Compare SQL-only and hybrid Feed at the A04 load gate
+        run: |
+          python3 tests/integration/feed_a04.py \
+            --api-binary "$RUNNER_TEMP/gostream-feed-a04-api" \
+            --http-driver "$RUNNER_TEMP/gostream-feed-a04-http" \
+            --report-dir "$RUNNER_TEMP/gostream-feed-a04" \
+            --mysql-container "$GOSTREAM_FEED_A04_MYSQL_CONTAINER" \
+            --database "$GOSTREAM_FEED_A04_DB" \
+            --go-bin "$(command -v go)"
+
+      - name: Drop the disposable MySQL schema
+        if: always()
+        env:
+          MYSQL_CONTAINER: ${{ job.services.mysql.id }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${GOSTREAM_FEED_A04_DB:-}" ]]; then exit 0; fi
+          schema="$GOSTREAM_FEED_A04_DB"
+          if [[ ! $schema =~ ^gostream_feed_a04_[A-Za-z0-9_]+$ ]]; then
+            echo "refusing to clean an unexpected schema name" >&2
+            exit 2
+          fi
+          docker exec -i "$MYSQL_CONTAINER" sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot' <<SQL
+          REVOKE ALL PRIVILEGES ON \`$schema\`.* FROM 'gostream'@'%';
+          DROP DATABASE \`$schema\`;
+          SQL
+
+      - name: Retain machine-readable raw A04 results
+        if: always()
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: feed-a04-${{ github.run_id }}
+          path: ${{ runner.temp }}/gostream-feed-a04
+          if-no-files-found: warn
+          retention-days: 30
