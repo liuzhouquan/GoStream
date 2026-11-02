@@ -337,12 +337,12 @@ func TestVideoAndResourceOwnershipIsolation(t *testing.T) {
 // TestChatAndGroupSecurityBoundaries validates that chat and group resources
 // enforce strict member and owner checks.
 func TestChatAndGroupSecurityBoundaries(t *testing.T) {
-	_, h, db := testServer(t)
+	s, h, db := testServer(t)
 
 	ownerID, ownerToken := registerTestUser(t, h, "grp_owner")
 	memberID, memberToken := registerTestUser(t, h, "grp_member")
 	otherID, _ := registerTestUser(t, h, "grp_other")
-	_, strangerToken := registerTestUser(t, h, "grp_stranger")
+	strangerID, strangerToken := registerTestUser(t, h, "grp_stranger")
 
 	// Owner creates a group
 	res := request(t, h, http.MethodPost, "/api/groups", ownerToken, map[string]string{"name": "Private Group"})
@@ -425,7 +425,23 @@ func TestChatAndGroupSecurityBoundaries(t *testing.T) {
 		t.Fatalf("member self-leave: expected 200, got %d", res.Code)
 	}
 
-	_ = db
+	// Wait for hijacked WebSocket handlers to finish their disconnect writes
+	// before testServer closes SQLite and TempDir removes the database files.
+	_ = outsider.Close()
+	_ = member.Close()
+	web.Close()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		var disconnected int64
+		if err := db.Model(&User{}).Where("id IN ? AND last_seen_at IS NOT NULL", []uint{strangerID, memberID}).Count(&disconnected).Error; err != nil {
+			t.Fatal(err)
+		}
+		if s.Hub.count() == 0 && disconnected == 2 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("WebSocket cleanup did not finish before SQLite teardown: active=%d", s.Hub.count())
 }
 
 // TestSensitiveDataSanitizationAndInformationLeakage asserts that passwords,
