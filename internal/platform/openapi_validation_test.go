@@ -130,15 +130,41 @@ func TestOpenAPISchemasValidateActualSocketFrames(t *testing.T) {
 			t.Fatalf("%s: %v; actual=%v", name, err, frame)
 		}
 	}
-	read := func(conn *websocket.Conn, name string) map[string]any {
+	readFrame := func(conn *websocket.Conn) map[string]any {
 		t.Helper()
 		_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))
 		var frame map[string]any
 		if err := conn.ReadJSON(&frame); err != nil {
 			t.Fatal(err)
 		}
+		return frame
+	}
+	read := func(conn *websocket.Conn, name string) map[string]any {
+		t.Helper()
+		frame := readFrame(conn)
 		validate(name, frame)
 		return frame
+	}
+	readGroupAfterDirectReplay := func(conn *websocket.Conn, directMessageID uint) {
+		t.Helper()
+		for frames := 0; frames < 10; frames++ {
+			frame := readFrame(conn)
+			switch frame["type"] {
+			case "message":
+				validate("WSServerDirectMessage", frame)
+				message, ok := frame["message"].(map[string]any)
+				messageID, hasID := message["id"].(float64)
+				if !ok || !hasID || uint(messageID) != directMessageID {
+					t.Fatalf("unexpected direct replay before group delivery: %+v", frame)
+				}
+			case "group_message":
+				validate("WSServerGroupMessage", frame)
+				return
+			default:
+				t.Fatalf("unexpected frame before group delivery: %+v", frame)
+			}
+		}
+		t.Fatalf("group message did not arrive after duplicate direct frames")
 	}
 	connect := func(token string) *websocket.Conn {
 		t.Helper()
@@ -163,7 +189,18 @@ func TestOpenAPISchemasValidateActualSocketFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 	read(a, "WSServerDirectAck")
-	read(b, "WSServerDirectMessage")
+	directFrame := read(b, "WSServerDirectMessage")
+	directMessage, ok := directFrame["message"].(map[string]any)
+	if !ok {
+		t.Fatalf("direct frame has no message object: %+v", directFrame)
+	}
+	directMessageIDValue, ok := directMessage["id"].(float64)
+	if !ok || directMessageIDValue <= 0 {
+		t.Fatalf("direct frame has no persisted message ID: %+v", directFrame)
+	}
+	directMessageID := uint(directMessageIDValue)
+	// Real-time hints and reconnect replay can deliver the same stored row twice.
+	s.deliverRealtime(realtimeEvent{Kind: "direct", UserID: recipient, MessageID: directMessageID})
 	r := request(t, h, http.MethodPost, "/api/groups", senderToken, map[string]string{"name": "Frames"})
 	var group ChatGroup
 	if r.Code != 201 || json.Unmarshal(r.Body.Bytes(), &group) != nil {
@@ -179,7 +216,7 @@ func TestOpenAPISchemasValidateActualSocketFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 	read(a, "WSServerGroupAck")
-	read(b, "WSServerGroupMessage")
+	readGroupAfterDirectReplay(b, directMessageID)
 	if err := a.WriteJSON(map[string]string{"type": "unsupported"}); err != nil {
 		t.Fatal(err)
 	}

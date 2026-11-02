@@ -8,6 +8,22 @@ The [three-branch review](BRANCH_REVIEW_2026-10-31.md) found that the proposed 5
 
 The hybrid query now excludes partial fanout rows from the inbox branch and excludes already-inboxed videos from the late-follow branch, allowing `UNION ALL` instead of distinct deduplication. `TestHybridFollowingMergesOverlappingSourcesOnce` covers both overlap cases through the HTTP handler. On the same local 500-video SQLite fixture, the before/after hybrid medians were 742093 and 706417 ns/op across three 100-iteration runs (4.8% lower); SQL-only medians were 382460 and 382524 ns/op. [Raw output](benchmarks/following-union-all-2026-11-02.txt). This is a local in-process microbenchmark with a single author and no network, MySQL, Redis, mixed writes, or P95 measurement. It does not establish an A04 performance gain. The full-size MySQL figures remain below target, and the required 20-concurrency/60-second runs and fanout-under-load checks are still open.
 
+## Sustained Feed HTTP driver, 2026-11-02
+
+`tests/load/http` retains fixed-request mode and now also accepts `-warmup 30s -duration 60s -concurrency 20`. Each worker sends requests continuously until the measured window ends; already-started requests finish and their extra drain time is reported separately. The JSON `-report-file` contains successful request latency samples in microseconds, status counts, failures, bytes, window, drain, throughput and P50/P95/P99. Only successful response latencies contribute to percentiles; any non-200, transport, read, or close error makes the process exit non-zero. Token contents are never written to the report.
+
+Example for an already-started isolated API and token file:
+
+```sh
+/tmp/gostream-feed-driver \
+  -url 'http://127.0.0.1:18086/api/feed?scene=following&limit=20' \
+  -token-file /tmp/gostream-feed-token \
+  -concurrency 20 -warmup 30s -duration 60s \
+  -report-file /tmp/feed-sql-only-1.json
+```
+
+Repeat three times for each read configuration on the same fixture, restart the API between `FEED_FANOUT_MAX_FOLLOWERS=0` and `1000`, and use a distinct report path per run. For the cache-free A04 comparison leave `REDIS_ADDR` empty in both variants. Record `uname`, `lscpu`, `free`, MySQL settings/`EXPLAIN ANALYZE`, database and fanout/outbox state alongside the JSON; this driver does not collect process CPU/RSS or prove cursor completeness by itself. It is now capable of the prescribed time window, but no new full-size MySQL performance result has been collected by this change.
+
 ## Twenty-client direct IM load, 2026-10-31
 
 [The IM load report](IM_LOAD.md) runs two real API processes with 20 WebSocket accounts and 1,000 cross-instance direct messages per round, three rounds. Normal-build sender ACK P95 was 40.037 / 37.890 / 41.809 ms; recipient delivery P95 was 495.732 / 496.730 / 425.608 ms. Each round checked every intended identity and payload. Retries, 125 offline messages, complete history/unread paging and independent device ACKs ended with exactly 3,125 persisted messages. A separate race build completed the same workload. [Machine-readable summary](benchmarks/im-load-summary-2026-10-31.json) links lossless compressed raw samples, environment and resource data.

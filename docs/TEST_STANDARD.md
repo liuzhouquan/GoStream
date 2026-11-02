@@ -186,3 +186,4 @@ IM 双进程故障验证运行 `python3 tests/integration/im_smoke.py --go-bin /
 
 - Hybrid following 的三个候选分支使用互斥条件后改为 `UNION ALL`；公开 HTTP 回归覆盖未完成 fanout 的部分 inbox 和迟到关注与 inbox 重叠。Go 1.27.2 SQLite 500 视频 handler benchmark 中位耗时下降约 4.8%，不等于 MySQL 延迟或完整数据集收益。
 - A04 仍以隔离 MySQL/Redis 的完整数据集、20 并发、30 秒预热、60 秒正式运行、每种场景三轮和 SQL-only/Hybrid 同数据对照判定。当前变更不能关闭 20% P95、读写混合、持续积压或双实例进程故障门槛。
+- `tests/load/http` 新增 `-warmup`/`-duration` 持续模式和 `-report-file`。报告保留成功响应延迟样本及失败状态；失败请求不进入成功延迟分位数，且任意失败令进程返回非零。该驱动不采集 CPU/RSS、SQL 计划，也不单独验证 Feed 页 ID 完整性；这些证据必须由运行脚本/环境记录另外提供。

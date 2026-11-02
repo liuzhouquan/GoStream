@@ -85,3 +85,5 @@ RabbitMQ 通知链路已接入确认发布、消费者持久化幂等、延迟�
 2026-10-31 三分支审核：broker 增量区分真实 TCP 断连组件验证、预提交去重夹具与尚未完成的精确进程强杀；混合流量核对独立事件及完整 DLQ 身份。Feed 只减少一次预查询，不宣称达到 20% P95 收益；SQLite 基准及真实 MySQL 门槛分别记录。媒体补头像权限与严格 TCP 恢复断言。最终交付分支新增 SQLite `/health`/`/ready` 解耦回归，既有 49 路由映射/代表性 Schema 和 SQLite 浏览器 CI 不等同于最终全组件验收。结论和运行证据见 [本轮审核](BRANCH_REVIEW_2026-10-31.md)。A01–A12 继续按原测试矩阵判断。
 
 2026-11-02 Feed 查询微调：三路 hybrid 来源通过 `feed_pull` 与 inbox 存在性条件互斥，改用 `UNION ALL`；SQLite 小型 handler 基准 Hybrid 中位数下降约 4.8%。这不是 MySQL、HTTP P95 或正式负载结果，A04 的 20% P95、完整数据集和读写/积压门槛仍未通过。详见 [`PERFORMANCE.md`](PERFORMANCE.md) 与 [`TEST_STANDARD.md`](TEST_STANDARD.md)。
+
+2026-11-02 A04 负载驱动：HTTP driver 已可按并发和时长预热/测量并写出原始成功延迟样本，适用于规定的 30s/60s 窗口；仅验证了 driver 自身，正式 MySQL/Redis 负载尚待执行。不能据此更新 A04 的通过状态。
