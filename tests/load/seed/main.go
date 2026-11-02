@@ -119,6 +119,16 @@ func seedHybrid(db *gorm.DB, opts hybridOptions) error {
 	if err := db.CreateInBatches(&accounts, 200).Error; err != nil {
 		return fmt.Errorf("insert users: %w", err)
 	}
+	assets := make([]platform.MediaAsset, opts.authors)
+	for i, author := range accounts[:opts.authors] {
+		assets[i] = platform.MediaAsset{
+			OwnerID: author.ID, URL: fmt.Sprintf("/media/load-fixture-%06d.mp4", i),
+			Kind: "video", Size: 1024, CreatedAt: now,
+		}
+	}
+	if err := db.CreateInBatches(&assets, 200).Error; err != nil {
+		return fmt.Errorf("insert synthetic media assets: %w", err)
+	}
 	celebrityID := accounts[opts.authors-1].ID
 	followers := make(map[uint][]uint, opts.authors)
 	follows := make([]platform.Follow, 0, opts.users*opts.followsPerUser+opts.celebrityFollowers)
@@ -220,7 +230,7 @@ func seedHybrid(db *gorm.DB, opts hybridOptions) error {
 			return fmt.Errorf("insert likes at offset %d: %w", offset, err)
 		}
 	}
-	fmt.Printf("hybrid fixture users=%d authors=%d follows=%d videos=%d likes=%d completed_jobs=%d inbox_rows=%d high_author_followers=%d threshold=%d\n", opts.users, opts.authors, len(follows), opts.videos, opts.likes, jobRows, inboxRows, len(followers[celebrityID]), opts.fanoutMaxFollowers)
+	fmt.Printf("hybrid fixture users=%d authors=%d follows=%d videos=%d media_assets=%d likes=%d completed_jobs=%d inbox_rows=%d high_author_followers=%d threshold=%d\n", opts.users, opts.authors, len(follows), opts.videos, len(assets), opts.likes, jobRows, inboxRows, len(followers[celebrityID]), opts.fanoutMaxFollowers)
 	fmt.Printf("viewer username=%s password=load-fixture-password; use only in this isolated database\n", accounts[opts.authors].Username)
 	return nil
 }

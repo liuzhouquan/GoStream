@@ -247,6 +247,14 @@ On 2026-10-22, the rebuilt Go 1.27.2 API used Compose MySQL 8.4 and Redis 8.2.9 
 
 Median observed throughput was 3,424.0 versus 882.4 requests/s, about 3.9× for this warm first page. The rebuilt API's cumulative cache counter showed 9,058 hits and 9 misses after the runs and functional smoke requests. This measures repeated reads for one viewer and one author. It does not establish performance for cache misses, cursor pages, many active viewers, concurrent follow/video writes, or multiple hosts. The temporary viewer, author, 1,000 videos, token file, Redis version key, and uncached container were removed; `/ready` still passed.
 
+## A04 mixed read/write acceptance preflight (2026-11-02)
+
+The new manual workflow runs three fresh full-size fixtures for each mode (SQL-only and Hybrid), with 20 workers, 30 seconds of read warmup, then 60 seconds of a 70/20/10 Feed/interaction/social workload. After the measured window it uses the real API to publish 20 videos and checks action/comment counters, follower Feed visibility, outbox state, and fanout completion. A passing six-run result requires zero failed requests or consistency mismatches, all 20 hybrid fanout jobs to complete within 60 seconds, and at least 20% lower median following-Feed P95 for Hybrid. The workflow is implemented but the six-run CI acceptance has not yet been executed.
+
+One local preflight run per mode verified the full workload and publish/fanout path on Go 1.27.2 and MySQL 8.4.11. The host was WSL2 on a Ryzen 7 5800H (16 logical CPUs); MySQL used a 128 MiB InnoDB buffer pool. Each run seeded 2,000 users, 20,000 videos, 10,999 follows, 50,000 actions, 1,900,000 inbox rows, and 100 media assets. SQL-only completed 16,905 measured requests with zero failures; following Feed P95 was 48.795 ms, 20 videos published, and no fanout job was expected. Hybrid completed 14,659 measured requests with zero failures; following Feed P95 was 76.664 ms, all 20 publishes succeeded, all 20 fanout jobs drained in 0.134 seconds, and each published video was visible to its follower. Both runs ended with zero action/comment counter mismatches, zero outbox backlog/dead events, and zero follower Feed visibility failures.
+
+These were single-run local smoke checks performed sequentially, Hybrid before SQL-only. They validate harness branches and correctness assertions; their P95 values are not a controlled comparison and must not be used to claim a performance gain or regression. The disposable MySQL container and schemas were removed. The six-run GitHub Actions result is the required performance evidence.
+
 ## Remaining measurements
 
 k6 and multi-host load tests have not been run. MySQL/Redis results above cover anonymous recommendation and authenticated following first pages on one host; authenticated recommendation and cross-node performance remain unmeasured. FFmpeg processing throughput, queue wait time, and CPU use have not been benchmarked.
