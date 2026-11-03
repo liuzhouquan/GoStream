@@ -79,6 +79,63 @@ func TestHistogramDeltaReportRejectsReset(t *testing.T) {
 	}
 }
 
+func TestFeedStageHistogramDeltasAreReportedByBoundedKey(t *testing.T) {
+	beforeText := `# TYPE gostream_feed_stage_duration_seconds histogram
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="candidate_query",le="0.01"} 2
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="candidate_query",le="0.05"} 4
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="candidate_query",le="+Inf"} 4
+gostream_feed_stage_duration_seconds_sum{outcome="success",scene="following",stage="candidate_query"} 0.12
+gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="candidate_query"} 4
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="interaction_state",le="0.01"} 1
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="interaction_state",le="0.05"} 1
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="interaction_state",le="+Inf"} 1
+gostream_feed_stage_duration_seconds_sum{outcome="success",scene="following",stage="interaction_state"} 0.02
+gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="interaction_state"} 1
+`
+	afterText := `# TYPE gostream_feed_stage_duration_seconds histogram
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="candidate_query",le="0.01"} 4
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="candidate_query",le="0.05"} 10
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="candidate_query",le="+Inf"} 10
+gostream_feed_stage_duration_seconds_sum{outcome="success",scene="following",stage="candidate_query"} 0.47
+gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="candidate_query"} 10
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="interaction_state",le="0.01"} 2
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="interaction_state",le="0.05"} 5
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="interaction_state",le="+Inf"} 5
+gostream_feed_stage_duration_seconds_sum{outcome="success",scene="following",stage="interaction_state"} 0.14
+gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="interaction_state"} 5
+`
+	before, err := parseFeedStageHistograms(beforeText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := parseFeedStageHistograms(afterText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := feedStageHistogramDeltaReports(before, after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Stage != "candidate_query" || got[0].Latency.SampleCount != 6 ||
+		got[0].Latency.P95BucketLowerBoundSeconds != 0.01 || got[0].Latency.P95BucketUpperBoundSeconds == nil || *got[0].Latency.P95BucketUpperBoundSeconds != 0.05 {
+		t.Fatalf("candidate-query stage delta = %+v", got)
+	}
+	if got[1].Stage != "interaction_state" || got[1].Latency.SampleCount != 4 || got[1].Outcome != "success" {
+		t.Fatalf("interaction-state stage delta = %+v", got[1])
+	}
+}
+
+func TestFeedStageHistogramRejectsUnknownLabels(t *testing.T) {
+	text := `# TYPE gostream_feed_stage_duration_seconds histogram
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="viewer-123",le="+Inf"} 1
+gostream_feed_stage_duration_seconds_sum{outcome="success",scene="following",stage="viewer-123"} 0.01
+gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="viewer-123"} 1
+`
+	if _, err := parseFeedStageHistograms(text); err == nil {
+		t.Fatal("expected an unknown stage label to be rejected")
+	}
+}
+
 func TestChooseOperationWeightsAndMethods(t *testing.T) {
 	counts := make(map[string]int)
 	for i := uint64(0); i < 40; i++ {
@@ -229,6 +286,13 @@ func TestRunUsesActorPoolAndWritesRequestReport(t *testing.T) {
 			fmt.Fprintf(w, "gostream_feed_request_duration_seconds_bucket{scene=\"following\",outcome=\"success\",le=\"+Inf\"} %d\n", count)
 			fmt.Fprintf(w, "gostream_feed_request_duration_seconds_sum{scene=\"following\",outcome=\"success\"} %.3f\n", float64(count)*0.01)
 			fmt.Fprintf(w, "gostream_feed_request_duration_seconds_count{scene=\"following\",outcome=\"success\"} %d\n", count)
+			fmt.Fprintln(w, "# TYPE gostream_feed_stage_duration_seconds histogram")
+			for _, stage := range []string{"candidate_query", "interaction_state"} {
+				fmt.Fprintf(w, "gostream_feed_stage_duration_seconds_bucket{scene=\"following\",stage=\"%s\",outcome=\"success\",le=\"0.05\"} %d\n", stage, count)
+				fmt.Fprintf(w, "gostream_feed_stage_duration_seconds_bucket{scene=\"following\",stage=\"%s\",outcome=\"success\",le=\"+Inf\"} %d\n", stage, count)
+				fmt.Fprintf(w, "gostream_feed_stage_duration_seconds_sum{scene=\"following\",stage=\"%s\",outcome=\"success\"} %.3f\n", stage, float64(count)*0.01)
+				fmt.Fprintf(w, "gostream_feed_stage_duration_seconds_count{scene=\"following\",stage=\"%s\",outcome=\"success\"} %d\n", stage, count)
+			}
 			return
 		}
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -271,6 +335,10 @@ func TestRunUsesActorPoolAndWritesRequestReport(t *testing.T) {
 	}
 	if report.ServerFollowing == nil || report.ServerFollowing.SampleCount == 0 || report.ServerFollowing.P95BucketUpperBoundSeconds == nil {
 		t.Fatalf("following server histogram missing from report: %+v", report.ServerFollowing)
+	}
+	if len(report.ServerFeedStages) != 2 || !hasFeedStageSamples(report.ServerFeedStages, "following", "candidate_query", "success") ||
+		!hasFeedStageSamples(report.ServerFeedStages, "following", "interaction_state", "success") {
+		t.Fatalf("following Feed stage histograms missing from report: %+v", report.ServerFeedStages)
 	}
 	for name, operation := range report.Operations {
 		if operation.Successes == 0 || len(operation.SuccessfulLatencyNS) != operation.Successes {

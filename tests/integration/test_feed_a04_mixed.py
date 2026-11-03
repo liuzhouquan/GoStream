@@ -23,6 +23,20 @@ def run(variant, round_number, following_p95_ns, publish_p95_ns=3_000_000, fanou
                 "p95_bucket_lower_bound_seconds": 0.04,
                 "p95_bucket_upper_bound_seconds": 0.05,
             },
+            "server_feed_stages": [
+                {
+                    "scene": "following",
+                    "stage": stage,
+                    "outcome": "success",
+                    "latency": {
+                        "sample_count": 400,
+                        "mean_seconds": 0.015,
+                        "p95_bucket_lower_bound_seconds": 0.01,
+                        "p95_bucket_upper_bound_seconds": 0.025,
+                    },
+                }
+                for stage in ("candidate_query", "interaction_state")
+            ],
             "operations": {
                 "feed_following": {"successes": 400, "failures": 0, "p95_ns": following_p95_ns},
                 "like": {"successes": 100, "failures": 0},
@@ -156,6 +170,21 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
         self.assertEqual(summary["server_following_latency"]["hybrid"][0]["sample_count"], 400)
         self.assertIn("API-side successful following P95 bucket", feed_a04_mixed.format_summary(summary))
         self.assertTrue(summary["target_met"])
+
+    def test_summary_retains_following_api_stage_buckets_per_round(self):
+        reports = []
+        for variant in ("sql-only", "hybrid"):
+            for round_number in range(1, 4):
+                reports.append(run(variant, round_number, 1_000))
+        summary = feed_a04_mixed.summarize(reports, 0.20)
+        self.assertEqual(len(summary["server_feed_stages"]["sql_only"]), 3)
+        self.assertEqual(
+            summary["server_feed_stages"]["hybrid"][0][0]["stage"],
+            "candidate_query",
+        )
+        rendered = feed_a04_mixed.format_summary(summary)
+        self.assertIn("following candidate_query P95 bucket", rendered)
+        self.assertIn("following interaction_state P95 bucket", rendered)
 
     def test_summary_fails_below_threshold_or_on_inconsistent_state(self):
         reports = []

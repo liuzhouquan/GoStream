@@ -10,20 +10,21 @@ import (
 )
 
 type serverMetrics struct {
-	registry        *prometheus.Registry
-	requests        *prometheus.CounterVec
-	duration        *prometheus.HistogramVec
-	feedDuration    *prometheus.HistogramVec
-	outbox          *prometheus.CounterVec
-	brokerMessages  *prometheus.CounterVec
-	brokerConnected *prometheus.GaugeVec
-	feedCache       *prometheus.CounterVec
-	rateLimit       *prometheus.CounterVec
-	feedFanout      *prometheus.CounterVec
-	feedFanoutAge   prometheus.Histogram
-	feedFanoutJobs  prometheus.Gauge
-	mediaReconcile  *prometheus.CounterVec
-	wsConnections   prometheus.Gauge
+	registry          *prometheus.Registry
+	requests          *prometheus.CounterVec
+	duration          *prometheus.HistogramVec
+	feedDuration      *prometheus.HistogramVec
+	feedStageDuration *prometheus.HistogramVec
+	outbox            *prometheus.CounterVec
+	brokerMessages    *prometheus.CounterVec
+	brokerConnected   *prometheus.GaugeVec
+	feedCache         *prometheus.CounterVec
+	rateLimit         *prometheus.CounterVec
+	feedFanout        *prometheus.CounterVec
+	feedFanoutAge     prometheus.Histogram
+	feedFanoutJobs    prometheus.Gauge
+	mediaReconcile    *prometheus.CounterVec
+	wsConnections     prometheus.Gauge
 }
 
 func newServerMetrics() *serverMetrics {
@@ -42,6 +43,10 @@ func newServerMetrics() *serverMetrics {
 			Name: "gostream_feed_request_duration_seconds", Help: "Feed request duration in seconds by bounded feed scene and response outcome.",
 			Buckets: []float64{0.005, 0.01, 0.025, 0.04, 0.05, 0.06, 0.07, 0.08, 0.1, 0.15, 0.25, 0.5, 1, 2.5},
 		}, []string{"scene", "outcome"}),
+		feedStageDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: "gostream_feed_stage_duration_seconds", Help: "Elapsed API time in Feed data-loading stages by bounded scene, stage and result.",
+			Buckets: []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.04, 0.05, 0.06, 0.07, 0.08, 0.1, 0.15, 0.25, 0.5, 1, 2.5},
+		}, []string{"scene", "stage", "outcome"}),
 		outbox: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "gostream_outbox_events_total", Help: "Outbox event dispatch attempts by result.",
 		}, []string{"result"}),
@@ -68,10 +73,18 @@ func newServerMetrics() *serverMetrics {
 			Name: "gostream_websocket_connections", Help: "Current local WebSocket connections.",
 		}),
 	}
-	m.registry.MustRegister(m.requests, m.duration, m.feedDuration, m.outbox, m.feedCache, m.rateLimit, m.feedFanout, m.feedFanoutAge, m.feedFanoutJobs, m.mediaReconcile, m.wsConnections)
+	m.registry.MustRegister(m.requests, m.duration, m.feedDuration, m.feedStageDuration, m.outbox, m.feedCache, m.rateLimit, m.feedFanout, m.feedFanoutAge, m.feedFanoutJobs, m.mediaReconcile, m.wsConnections)
 	m.registry.MustRegister(m.brokerMessages, m.brokerConnected)
 	m.registry.MustRegister(prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	return m
+}
+
+func (m *serverMetrics) observeFeedStage(scene, stage string, start time.Time, err error) {
+	outcome := "success"
+	if err != nil {
+		outcome = "error"
+	}
+	m.feedStageDuration.WithLabelValues(scene, stage, outcome).Observe(time.Since(start).Seconds())
 }
 
 func (m *serverMetrics) middleware() gin.HandlerFunc {

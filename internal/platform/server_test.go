@@ -1055,6 +1055,66 @@ func TestReadinessAndPrometheusMetrics(t *testing.T) {
 	}
 }
 
+func TestFeedStageMetricsExposeBoundedStagesAndErrors(t *testing.T) {
+	_, h, db := testServer(t)
+	_, viewerToken := registerTestUser(t, h, "feed_stage_viewer")
+	authorID, _ := registerTestUser(t, h, "feed_stage_author")
+	if r := request(t, h, http.MethodPut, fmt.Sprintf("/api/users/me/following/%d", authorID), viewerToken, nil); r.Code != http.StatusOK {
+		t.Fatalf("follow author: %d %s", r.Code, r.Body.String())
+	}
+	for i := 0; i < 11; i++ {
+		video := Video{AuthorID: authorID, Title: fmt.Sprintf("stage timing %d", i), MediaURL: "/media/stage.mp4", Status: "published"}
+		if err := db.Create(&video).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if r := request(t, h, http.MethodGet, "/api/feed?scene=following", viewerToken, nil); r.Code != http.StatusOK {
+		t.Fatalf("following feed: %d %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodGet, "/api/feed?scene=recommend", viewerToken, nil); r.Code != http.StatusOK {
+		t.Fatalf("recommendation feed: %d %s", r.Code, r.Body.String())
+	}
+
+	metrics := request(t, h, http.MethodGet, "/metrics", "", nil)
+	if metrics.Code != http.StatusOK {
+		t.Fatalf("metrics: %d %s", metrics.Code, metrics.Body.String())
+	}
+	for _, marker := range []string{
+		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="candidate_query"} 1`,
+		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="interaction_state"} 1`,
+		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="recommend",stage="recommendation_context"} 1`,
+		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="recommend",stage="candidate_query"} 1`,
+		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="recommend",stage="recommendation_cursor"} 1`,
+	} {
+		if !strings.Contains(metrics.Body.String(), marker) {
+			t.Fatalf("metrics missing %q: %s", marker, metrics.Body.String())
+		}
+	}
+	for _, forbidden := range []string{"user_id=", "viewer_id=", "video_id=", "author_id="} {
+		if strings.Contains(metrics.Body.String(), forbidden) {
+			t.Fatalf("Feed stage metrics must not contain identifier label %q", forbidden)
+		}
+	}
+	if strings.Contains(metrics.Body.String(), `gostream_feed_stage_duration_seconds_count{outcome="success",scene="invalid"`) {
+		t.Fatal("invalid scenes must not create Feed stage metric labels")
+	}
+
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sqlDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if r := request(t, h, http.MethodGet, "/api/feed?scene=following", viewerToken, nil); r.Code != http.StatusInternalServerError {
+		t.Fatalf("following feed with unavailable database: %d %s", r.Code, r.Body.String())
+	}
+	metrics = request(t, h, http.MethodGet, "/metrics", "", nil)
+	if !strings.Contains(metrics.Body.String(), `gostream_feed_stage_duration_seconds_count{outcome="error",scene="following",stage="candidate_query"} 1`) {
+		t.Fatalf("Feed query error stage was not recorded: %s", metrics.Body.String())
+	}
+}
+
 func TestLivenessSurvivesClosedSQLPool(t *testing.T) {
 	_, h, db := testServer(t)
 	if r := request(t, h, http.MethodGet, "/health", "", nil); r.Code != http.StatusOK {

@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/common/expfmt"
 	"github.com/prometheus/common/model"
 )
@@ -50,12 +51,30 @@ type feedHistogramSnapshot struct {
 	SumSeconds float64
 }
 
+type feedStageHistogramKey struct {
+	Scene   string
+	Stage   string
+	Outcome string
+}
+
+type apiHistogramSnapshot struct {
+	Following feedHistogramSnapshot
+	Stages    map[feedStageHistogramKey]feedHistogramSnapshot
+}
+
 type serverLatencyReport struct {
 	SampleCount                uint64   `json:"sample_count"`
 	SumSeconds                 float64  `json:"sum_seconds"`
 	MeanSeconds                float64  `json:"mean_seconds"`
 	P95BucketLowerBoundSeconds float64  `json:"p95_bucket_lower_bound_seconds"`
 	P95BucketUpperBoundSeconds *float64 `json:"p95_bucket_upper_bound_seconds,omitempty"`
+}
+
+type serverFeedStageReport struct {
+	Scene   string              `json:"scene"`
+	Stage   string              `json:"stage"`
+	Outcome string              `json:"outcome"`
+	Latency serverLatencyReport `json:"latency"`
 }
 
 type loadReport struct {
@@ -68,31 +87,49 @@ type loadReport struct {
 	Failures            int                        `json:"failures"`
 	Operations          map[string]operationReport `json:"operations"`
 	ServerFollowing     *serverLatencyReport       `json:"server_following_latency,omitempty"`
+	ServerFeedStages    []serverFeedStageReport    `json:"server_feed_stages,omitempty"`
 }
 
 const maxMetricsResponseBytes = 8 << 20
 
-func scrapeFollowingHistogram(client *http.Client, baseURL string) (feedHistogramSnapshot, error) {
+func scrapeAPIHistograms(client *http.Client, baseURL string) (apiHistogramSnapshot, error) {
 	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(baseURL, "/")+"/metrics", nil)
 	if err != nil {
-		return feedHistogramSnapshot{}, fmt.Errorf("build metrics scrape request: %w", err)
+		return apiHistogramSnapshot{}, fmt.Errorf("build metrics scrape request: %w", err)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return feedHistogramSnapshot{}, fmt.Errorf("scrape API metrics: %w", err)
+		return apiHistogramSnapshot{}, fmt.Errorf("scrape API metrics: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return feedHistogramSnapshot{}, fmt.Errorf("scrape API metrics: HTTP %d", resp.StatusCode)
+		return apiHistogramSnapshot{}, fmt.Errorf("scrape API metrics: HTTP %d", resp.StatusCode)
 	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxMetricsResponseBytes+1))
 	if err != nil {
-		return feedHistogramSnapshot{}, fmt.Errorf("read API metrics: %w", err)
+		return apiHistogramSnapshot{}, fmt.Errorf("read API metrics: %w", err)
 	}
 	if len(data) > maxMetricsResponseBytes {
-		return feedHistogramSnapshot{}, fmt.Errorf("API metrics response exceeds %d bytes", maxMetricsResponseBytes)
+		return apiHistogramSnapshot{}, fmt.Errorf("API metrics response exceeds %d bytes", maxMetricsResponseBytes)
 	}
-	return parseFollowingHistogram(string(data))
+	exposition := string(data)
+	following, err := parseFollowingHistogram(exposition)
+	if err != nil {
+		return apiHistogramSnapshot{}, err
+	}
+	stages, err := parseFeedStageHistograms(exposition)
+	if err != nil {
+		return apiHistogramSnapshot{}, err
+	}
+	return apiHistogramSnapshot{Following: following, Stages: stages}, nil
+}
+
+func scrapeFollowingHistogram(client *http.Client, baseURL string) (feedHistogramSnapshot, error) {
+	snapshot, err := scrapeAPIHistograms(client, baseURL)
+	if err != nil {
+		return feedHistogramSnapshot{}, err
+	}
+	return snapshot.Following, nil
 }
 
 func parseFollowingHistogram(exposition string) (feedHistogramSnapshot, error) {
@@ -119,38 +156,44 @@ func parseFollowingHistogram(exposition string) (feedHistogramSnapshot, error) {
 			return feedHistogramSnapshot{}, fmt.Errorf("duplicate following success histogram series")
 		}
 		found = true
-		histogram := metric.GetHistogram()
-		if histogram == nil || histogram.SampleCount == nil || histogram.SampleSum == nil {
-			return feedHistogramSnapshot{}, fmt.Errorf("incomplete following success histogram")
+		parsed, err := parseMetricHistogram(metric, "following success")
+		if err != nil {
+			return feedHistogramSnapshot{}, err
 		}
-		if histogram.GetSampleCountFloat() > 0 {
-			return feedHistogramSnapshot{}, fmt.Errorf("floating-point histogram counts are unsupported")
-		}
-		snapshot.Count = histogram.GetSampleCount()
-		snapshot.SumSeconds = histogram.GetSampleSum()
-		for _, bucket := range histogram.GetBucket() {
-			bound := bucket.GetUpperBound()
-			if math.IsNaN(bound) || math.IsInf(bound, -1) {
-				return feedHistogramSnapshot{}, fmt.Errorf("invalid following histogram boundary %v", bound)
-			}
-			if _, duplicate := snapshot.Buckets[bound]; duplicate {
-				return feedHistogramSnapshot{}, fmt.Errorf("duplicate following histogram boundary %v", bound)
-			}
-			snapshot.Buckets[bound] = bucket.GetCumulativeCount()
-		}
-		if _, ok := snapshot.Buckets[math.Inf(1)]; !ok {
-			snapshot.Buckets[math.Inf(1)] = snapshot.Count
-		}
+		snapshot = parsed
 	}
-	if !found {
-		return snapshot, nil
+	return snapshot, nil
+}
+
+func parseMetricHistogram(metric *dto.Metric, description string) (feedHistogramSnapshot, error) {
+	snapshot := feedHistogramSnapshot{Buckets: make(map[float64]uint64)}
+	histogram := metric.GetHistogram()
+	if histogram == nil || histogram.SampleCount == nil || histogram.SampleSum == nil {
+		return feedHistogramSnapshot{}, fmt.Errorf("incomplete %s histogram", description)
+	}
+	if histogram.GetSampleCountFloat() > 0 {
+		return feedHistogramSnapshot{}, fmt.Errorf("floating-point %s histogram counts are unsupported", description)
+	}
+	snapshot.Count = histogram.GetSampleCount()
+	snapshot.SumSeconds = histogram.GetSampleSum()
+	for _, bucket := range histogram.GetBucket() {
+		bound := bucket.GetUpperBound()
+		if math.IsNaN(bound) || math.IsInf(bound, -1) {
+			return feedHistogramSnapshot{}, fmt.Errorf("invalid %s histogram boundary %v", description, bound)
+		}
+		if _, duplicate := snapshot.Buckets[bound]; duplicate {
+			return feedHistogramSnapshot{}, fmt.Errorf("duplicate %s histogram boundary %v", description, bound)
+		}
+		snapshot.Buckets[bound] = bucket.GetCumulativeCount()
+	}
+	if _, ok := snapshot.Buckets[math.Inf(1)]; !ok {
+		snapshot.Buckets[math.Inf(1)] = snapshot.Count
 	}
 	if snapshot.SumSeconds < 0 {
-		return feedHistogramSnapshot{}, fmt.Errorf("negative following histogram sum")
+		return feedHistogramSnapshot{}, fmt.Errorf("negative %s histogram sum", description)
 	}
-	infCount := snapshot.Buckets[math.Inf(1)]
-	if infCount != snapshot.Count {
-		return feedHistogramSnapshot{}, fmt.Errorf("following histogram +Inf bucket does not match count")
+	if snapshot.Buckets[math.Inf(1)] != snapshot.Count {
+		return feedHistogramSnapshot{}, fmt.Errorf("%s histogram +Inf bucket does not match count", description)
 	}
 	boundaries := make([]float64, 0, len(snapshot.Buckets))
 	for boundary := range snapshot.Buckets {
@@ -161,11 +204,85 @@ func parseFollowingHistogram(exposition string) (feedHistogramSnapshot, error) {
 	for _, boundary := range boundaries {
 		count := snapshot.Buckets[boundary]
 		if count < previous || count > snapshot.Count {
-			return feedHistogramSnapshot{}, fmt.Errorf("following histogram buckets are not cumulative")
+			return feedHistogramSnapshot{}, fmt.Errorf("%s histogram buckets are not cumulative", description)
 		}
 		previous = count
 	}
 	return snapshot, nil
+}
+
+func parseFeedStageHistograms(exposition string) (map[feedStageHistogramKey]feedHistogramSnapshot, error) {
+	parser := expfmt.NewTextParser(model.UTF8Validation)
+	families, err := parser.TextToMetricFamilies(strings.NewReader(exposition))
+	if err != nil {
+		return nil, fmt.Errorf("parse Prometheus exposition: %w", err)
+	}
+	stages := make(map[feedStageHistogramKey]feedHistogramSnapshot)
+	family := families["gostream_feed_stage_duration_seconds"]
+	if family == nil {
+		return stages, nil
+	}
+	validScenes := map[string]bool{"timeline": true, "following": true, "recommend": true, "hot": true}
+	validStages := map[string]bool{"candidate_query": true, "interaction_state": true, "recommendation_context": true, "recommendation_cursor": true}
+	validOutcomes := map[string]bool{"success": true, "error": true}
+	for _, metric := range family.GetMetric() {
+		labels := make(map[string]string, len(metric.GetLabel()))
+		for _, label := range metric.GetLabel() {
+			labels[label.GetName()] = label.GetValue()
+		}
+		key := feedStageHistogramKey{Scene: labels["scene"], Stage: labels["stage"], Outcome: labels["outcome"]}
+		if len(labels) != 3 || !validScenes[key.Scene] || !validStages[key.Stage] || !validOutcomes[key.Outcome] {
+			return nil, fmt.Errorf("unexpected Feed stage histogram labels %v", labels)
+		}
+		if _, duplicate := stages[key]; duplicate {
+			return nil, fmt.Errorf("duplicate Feed stage histogram series %+v", key)
+		}
+		snapshot, err := parseMetricHistogram(metric, fmt.Sprintf("Feed stage %+v", key))
+		if err != nil {
+			return nil, err
+		}
+		stages[key] = snapshot
+	}
+	return stages, nil
+}
+
+func feedStageHistogramDeltaReports(before, after map[feedStageHistogramKey]feedHistogramSnapshot) ([]serverFeedStageReport, error) {
+	keys := make([]feedStageHistogramKey, 0, len(after))
+	for key := range after {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].Scene != keys[j].Scene {
+			return keys[i].Scene < keys[j].Scene
+		}
+		if keys[i].Stage != keys[j].Stage {
+			return keys[i].Stage < keys[j].Stage
+		}
+		return keys[i].Outcome < keys[j].Outcome
+	})
+	for key := range before {
+		if _, ok := after[key]; !ok {
+			return nil, fmt.Errorf("Feed stage histogram series disappeared during measurement: %+v", key)
+		}
+	}
+	reports := make([]serverFeedStageReport, 0, len(keys))
+	for _, key := range keys {
+		latency, err := histogramDeltaReport(before[key], after[key])
+		if err != nil {
+			return nil, fmt.Errorf("Feed stage histogram %+v: %w", key, err)
+		}
+		reports = append(reports, serverFeedStageReport{Scene: key.Scene, Stage: key.Stage, Outcome: key.Outcome, Latency: *latency})
+	}
+	return reports, nil
+}
+
+func hasFeedStageSamples(reports []serverFeedStageReport, scene, stage, outcome string) bool {
+	for _, report := range reports {
+		if report.Scene == scene && report.Stage == stage && report.Outcome == outcome && report.Latency.SampleCount > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func histogramDeltaReport(before, after feedHistogramSnapshot) (*serverLatencyReport, error) {
@@ -370,7 +487,7 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 			return fmt.Errorf("warmup had %d failed requests", warmFailures.Load())
 		}
 	}
-	serverHistogramBefore, err := scrapeFollowingHistogram(client, baseURL)
+	serverHistogramBefore, err := scrapeAPIHistograms(client, baseURL)
 	if err != nil {
 		return err
 	}
@@ -406,16 +523,24 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 	}
 	wg.Wait()
 	elapsed := time.Since(start)
-	serverHistogramAfter, err := scrapeFollowingHistogram(client, baseURL)
+	serverHistogramAfter, err := scrapeAPIHistograms(client, baseURL)
 	if err != nil {
 		return err
 	}
-	serverFollowing, err := histogramDeltaReport(serverHistogramBefore, serverHistogramAfter)
+	serverFollowing, err := histogramDeltaReport(serverHistogramBefore.Following, serverHistogramAfter.Following)
 	if err != nil {
 		return err
 	}
 	if serverFollowing.SampleCount == 0 {
 		return fmt.Errorf("measurement contained no successful following Feed samples")
+	}
+	serverFeedStages, err := feedStageHistogramDeltaReports(serverHistogramBefore.Stages, serverHistogramAfter.Stages)
+	if err != nil {
+		return err
+	}
+	if !hasFeedStageSamples(serverFeedStages, "following", "candidate_query", "success") ||
+		!hasFeedStageSamples(serverFeedStages, "following", "interaction_state", "success") {
+		return fmt.Errorf("measurement did not contain successful following Feed candidate and interaction stages")
 	}
 	fmt.Printf("server_following count=%d mean=%s p95_bucket=(%s,", serverFollowing.SampleCount,
 		time.Duration(serverFollowing.MeanSeconds*float64(time.Second)).Round(time.Microsecond),
@@ -424,6 +549,16 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 		fmt.Println("+Inf]")
 	} else {
 		fmt.Printf("%s]\n", time.Duration(*serverFollowing.P95BucketUpperBoundSeconds*float64(time.Second)).Round(time.Microsecond))
+	}
+	for _, stage := range serverFeedStages {
+		fmt.Printf("server_feed_stage scene=%s stage=%s outcome=%s count=%d mean=%s p95_bucket=(%s,", stage.Scene, stage.Stage, stage.Outcome,
+			stage.Latency.SampleCount, time.Duration(stage.Latency.MeanSeconds*float64(time.Second)).Round(time.Microsecond),
+			time.Duration(stage.Latency.P95BucketLowerBoundSeconds*float64(time.Second)).Round(time.Microsecond))
+		if stage.Latency.P95BucketUpperBoundSeconds == nil {
+			fmt.Println("+Inf]")
+		} else {
+			fmt.Printf("%s]\n", time.Duration(*stage.Latency.P95BucketUpperBoundSeconds*float64(time.Second)).Round(time.Microsecond))
+		}
 	}
 	close(results)
 	merged := make(map[string]*sample)
@@ -474,7 +609,7 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 		report := loadReport{
 			Concurrency: concurrency, ActorCount: len(actors), WarmupNS: int64(warmup), RequestedDurationNS: int64(duration),
 			ElapsedNS: int64(elapsed), Successes: successes, Failures: failed, Operations: operationReports,
-			ServerFollowing: serverFollowing,
+			ServerFollowing: serverFollowing, ServerFeedStages: serverFeedStages,
 		}
 		if err := writeReport(reportPath, report); err != nil {
 			return err
