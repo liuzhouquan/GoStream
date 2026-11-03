@@ -1,0 +1,305 @@
+{
+  "workflow_run": "https://github.com/liuzhouquan/GoStream/actions/runs/41478569849",
+  "captured_at_utc": "2026-11-02T16:10:13Z",
+  "environment": {
+    "runner": "GitHub Actions ubuntu-24.04",
+    "cpu_count": 4,
+    "memory_gib": 15,
+    "go_version": "1.27.2",
+    "mysql_version": "8.4.13",
+    "innodb_buffer_pool_bytes": 134217728,
+    "transaction_isolation": "REPEATABLE-READ",
+    "redis_enabled": false,
+    "ffmpeg_enabled": false
+  },
+  "fixture_per_run": {
+    "users": 2000,
+    "authors": 100,
+    "follows": 10999,
+    "videos": 20000,
+    "completed_fanout_jobs": 19800,
+    "feed_inboxes": 1900000,
+    "video_actions": 50000,
+    "media_assets": 100
+  },
+  "acceptance": {
+    "runs_per_variant": 3,
+    "concurrency": 20,
+    "warmup_seconds": 30,
+    "duration_seconds": 60,
+    "required_p95_improvement_percent": 20.0,
+    "sql_only_median_following_p95_ns": 41232767,
+    "hybrid_median_following_p95_ns": 56413710,
+    "hybrid_p95_improvement_percent": -36.82,
+    "all_runs_consistent": true,
+    "target_met": false
+  },
+  "schedule": [
+    {
+      "mode": "sql-only",
+      "round": 1
+    },
+    {
+      "mode": "hybrid",
+      "round": 1
+    },
+    {
+      "mode": "hybrid",
+      "round": 2
+    },
+    {
+      "mode": "sql-only",
+      "round": 2
+    },
+    {
+      "mode": "sql-only",
+      "round": 3
+    },
+    {
+      "mode": "hybrid",
+      "round": 3
+    }
+  ],
+  "runs": [
+    {
+      "variant": "sql-only",
+      "round": 1,
+      "following_feed": {
+        "successes": 4284,
+        "failures": 0,
+        "p50_ns": 23996496,
+        "p95_ns": 41248245,
+        "p99_ns": 49046019
+      },
+      "workload": {
+        "requests": 10704,
+        "successes": 10704,
+        "failures": 0,
+        "elapsed_ns": 60171257151,
+        "api_cpu_average_percent": 33.1,
+        "api_peak_rss_kib": 34992
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "p95_ns": 13772229
+      },
+      "fanout": {
+        "expected_jobs": 0,
+        "jobs_completed": 0,
+        "drain_seconds": 0.05873936700001536,
+        "within_deadline": true
+      },
+      "verification": {
+        "counter_mismatches": 0,
+        "action_mismatches": 0,
+        "comment_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0
+      },
+      "outbox_drain_seconds": 0.05746316699998033
+    },
+    {
+      "variant": "hybrid",
+      "round": 1,
+      "following_feed": {
+        "successes": 4283,
+        "failures": 0,
+        "p50_ns": 17807671,
+        "p95_ns": 56413710,
+        "p99_ns": 73098320
+      },
+      "workload": {
+        "requests": 10703,
+        "successes": 10703,
+        "failures": 0,
+        "elapsed_ns": 60178503526,
+        "api_cpu_average_percent": 51.16,
+        "api_peak_rss_kib": 36224
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "p95_ns": 124997252
+      },
+      "fanout": {
+        "expected_jobs": 20,
+        "jobs_completed": 20,
+        "drain_seconds": 0.05874907300000132,
+        "within_deadline": true
+      },
+      "verification": {
+        "counter_mismatches": 0,
+        "action_mismatches": 0,
+        "comment_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0
+      },
+      "outbox_drain_seconds": 0.06038092700003972
+    },
+    {
+      "variant": "hybrid",
+      "round": 2,
+      "following_feed": {
+        "successes": 4256,
+        "failures": 0,
+        "p50_ns": 19665215,
+        "p95_ns": 58873285,
+        "p99_ns": 74327045
+      },
+      "workload": {
+        "requests": 10631,
+        "successes": 10631,
+        "failures": 0,
+        "elapsed_ns": 60197764735,
+        "api_cpu_average_percent": 51.36,
+        "api_peak_rss_kib": 36724
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "p95_ns": 19182414
+      },
+      "fanout": {
+        "expected_jobs": 20,
+        "jobs_completed": 20,
+        "drain_seconds": 0.05940895699995963,
+        "within_deadline": true
+      },
+      "verification": {
+        "counter_mismatches": 0,
+        "action_mismatches": 0,
+        "comment_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0
+      },
+      "outbox_drain_seconds": 0.058944639000060306
+    },
+    {
+      "variant": "sql-only",
+      "round": 2,
+      "following_feed": {
+        "successes": 4231,
+        "failures": 0,
+        "p50_ns": 23215147,
+        "p95_ns": 41232767,
+        "p99_ns": 53347552
+      },
+      "workload": {
+        "requests": 10567,
+        "successes": 10567,
+        "failures": 0,
+        "elapsed_ns": 60125482788,
+        "api_cpu_average_percent": 33.02,
+        "api_peak_rss_kib": 34944
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "p95_ns": 13170678
+      },
+      "fanout": {
+        "expected_jobs": 0,
+        "jobs_completed": 0,
+        "drain_seconds": 0.05851030799999535,
+        "within_deadline": true
+      },
+      "verification": {
+        "counter_mismatches": 0,
+        "action_mismatches": 0,
+        "comment_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0
+      },
+      "outbox_drain_seconds": 0.05871835599998576
+    },
+    {
+      "variant": "sql-only",
+      "round": 3,
+      "following_feed": {
+        "successes": 4264,
+        "failures": 0,
+        "p50_ns": 23156281,
+        "p95_ns": 40967463,
+        "p99_ns": 51838950
+      },
+      "workload": {
+        "requests": 10653,
+        "successes": 10653,
+        "failures": 0,
+        "elapsed_ns": 60180131384,
+        "api_cpu_average_percent": 33.18,
+        "api_peak_rss_kib": 35728
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "p95_ns": 13668481
+      },
+      "fanout": {
+        "expected_jobs": 0,
+        "jobs_completed": 0,
+        "drain_seconds": 0.05877520100000311,
+        "within_deadline": true
+      },
+      "verification": {
+        "counter_mismatches": 0,
+        "action_mismatches": 0,
+        "comment_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0
+      },
+      "outbox_drain_seconds": 0.0584317729999384
+    },
+    {
+      "variant": "hybrid",
+      "round": 3,
+      "following_feed": {
+        "successes": 4275,
+        "failures": 0,
+        "p50_ns": 17553265,
+        "p95_ns": 55688513,
+        "p99_ns": 73770085
+      },
+      "workload": {
+        "requests": 10683,
+        "successes": 10683,
+        "failures": 0,
+        "elapsed_ns": 60150804140,
+        "api_cpu_average_percent": 51.04,
+        "api_peak_rss_kib": 37308
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "p95_ns": 86275650
+      },
+      "fanout": {
+        "expected_jobs": 20,
+        "jobs_completed": 20,
+        "drain_seconds": 0.06138148600007298,
+        "within_deadline": true
+      },
+      "verification": {
+        "counter_mismatches": 0,
+        "action_mismatches": 0,
+        "comment_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0
+      },
+      "outbox_drain_seconds": 0.05938054799992187
+    }
+  ]
+}
