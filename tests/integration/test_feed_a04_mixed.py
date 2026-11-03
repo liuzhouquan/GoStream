@@ -210,13 +210,31 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
             server.server_close()
 
     def test_a04_pprof_capture_runs_separately_from_acceptance_rounds(self):
-        self.assertEqual(len(feed_a04_mixed.SCHEDULE), 6)
+        schedule = feed_a04_mixed.acceptance_schedule(feed_a04_mixed.DEFAULT_SCHEDULE_SEED)
+        self.assertEqual(len(schedule), 6)
         self.assertEqual(feed_a04_mixed.PROFILE_SCHEDULE, (("sql-only", 4), ("hybrid", 4)))
-        self.assertFalse(set(feed_a04_mixed.SCHEDULE) & set(feed_a04_mixed.PROFILE_SCHEDULE))
+        self.assertFalse(set(schedule) & set(feed_a04_mixed.PROFILE_SCHEDULE))
         self.assertTrue(feed_a04_mixed.should_capture_pprof("sql-only", True))
         self.assertTrue(feed_a04_mixed.should_capture_pprof("hybrid", True))
         self.assertFalse(feed_a04_mixed.should_capture_pprof("sql-only", False))
         self.assertFalse(feed_a04_mixed.should_capture_pprof("unknown", True))
+
+    def test_acceptance_schedule_is_seeded_paired_and_balanced(self):
+        schedule = feed_a04_mixed.acceptance_schedule(12345)
+        self.assertEqual(schedule, feed_a04_mixed.acceptance_schedule(12345))
+        self.assertEqual(len(schedule), 6)
+        for round_number in (1, 2, 3):
+            pair = schedule[(round_number - 1) * 2:round_number * 2]
+            self.assertEqual({mode for mode, number in pair if number == round_number}, {"sql-only", "hybrid"})
+            self.assertTrue(all(number == round_number for _, number in pair))
+        sql_first = sum(1 for index in (0, 2, 4) if schedule[index][0] == "sql-only")
+        self.assertIn(sql_first, (1, 2))
+        majority_modes = set()
+        for seed in range(32):
+            candidate = feed_a04_mixed.acceptance_schedule(seed)
+            first_counts = {mode: sum(candidate[index][0] == mode for index in (0, 2, 4)) for mode in ("sql-only", "hybrid")}
+            majority_modes.add(max(first_counts, key=first_counts.get))
+        self.assertEqual(majority_modes, {"sql-only", "hybrid"})
 
     def test_stop_api_accepts_intentional_sigterm_but_rejects_crash(self):
         with tempfile.TemporaryFile(mode="w+") as log:
@@ -267,7 +285,15 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
         self.assertEqual(summary["fanout_drain_seconds"], [0.5] * 6)
         self.assertEqual(len(summary["server_following_latency"]["sql_only"]), 3)
         self.assertEqual(summary["server_following_latency"]["hybrid"][0]["sample_count"], 400)
-        self.assertIn("API-side successful following P95 bucket", feed_a04_mixed.format_summary(summary))
+        summary["schedule_seed"] = 42
+        summary["schedule"] = [
+            {"mode": "hybrid", "round": 1},
+            {"mode": "sql-only", "round": 1},
+        ]
+        rendered = feed_a04_mixed.format_summary(summary)
+        self.assertIn("Schedule seed: 42", rendered)
+        self.assertIn("Acceptance run order: hybrid r1, sql-only r1", rendered)
+        self.assertIn("API-side successful following P95 bucket", rendered)
         self.assertTrue(summary["target_met"])
 
     def test_summary_retains_following_api_stage_buckets_per_round(self):

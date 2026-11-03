@@ -82,6 +82,7 @@ jobs:
             --report-dir "$RUNNER_TEMP/gostream-feed-a04-mixed" \
             --mysql-container "$GOSTREAM_FEED_A04_MYSQL_CONTAINER" \
             --schema-prefix "$GOSTREAM_FEED_A04_SCHEMA_PREFIX" \
+            --schedule-seed "$GITHUB_RUN_ID" \
             --go-bin "$(command -v go)" \
             "${interpolate_args[@]}"
 

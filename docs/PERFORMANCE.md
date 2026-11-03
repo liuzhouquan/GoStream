@@ -439,7 +439,26 @@ Performance Schema digest snapshots were available in five of six rounds. In Hyb
 
 Even the available following digest histograms have counts 2–7 higher than their statement counts, so their per-digest percentile buckets remain null. The concurrent recommendation ranking statements averaged about 405–426 ms and hot ranking about 205–213 ms, examining roughly 32–34 million rows per digest window. These summaries include warmup plus all mixed routes and do not show how much those operations affect following latency. The separate 60-second CPU profiles parsed with Go 1.27.2: Linux syscall was the largest flat symbol at 18.26% for SQL-only and 16.26% for Hybrid; runtime synchronization, GC scanning and allocation followed. The profiles do not identify a single dominant Go computation or distinguish server execution from socket transfer and result scanning.
 
-The compact [rerun report](benchmarks/feed-a04-interpolate-rerun-2026-11-03.json) contains per-round acceptance, stage, pool and digest evidence without raw request samples or SQL text. Neither this run nor the code-only NULL digest filter establishes the Hybrid latency root cause. Next, merge the diagnostics fix and repeat A04, then use a controlled following-only and mixed workload to collect a valid query plan and per-digest histogram before proposing a production query change.
+The compact [rerun report](benchmarks/feed-a04-interpolate-rerun-2026-11-03.json) contains per-round acceptance, stage, pool and digest evidence without raw request samples or SQL text. Neither this run nor the code-only NULL digest filter establishes the Hybrid latency root cause. The filter has since been merged; its full-size verification is recorded below.
+
+### Post-merge NULL digest verification, 2026-11-03
+
+[Workflow #41619221597](https://github.com/liuzhouquan/GoStream/actions/runs/41619221597) ran on merge commit dc39594 with interpolation enabled. It completed 49,186 mixed requests with zero failures, 120 API publishes, and all counter, visibility, outbox, fanout and consistency checks passing. Pool wait and MaxIdleClosed remained zero in all six rounds; maximum Hybrid fanout drain was 0.069 seconds. All six Performance Schema digest snapshots parsed successfully, and the duplicate-bucket error from the preceding run did not recur. The workflow exited nonzero only because the required +20% following P95 gate failed: SQL-only median P95 was **44.804 ms**, Hybrid was **63.722 ms**, so Hybrid was **42.22% slower**.
+
+| Mode / round | Client following P95 | Candidate-query mean | Candidate-query P95 bucket | Interaction-state mean | Interaction-state P95 bucket |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| SQL-only 1 | 46.308 ms | 25.127 ms | (40, 50] ms | 2.820 ms | (5, 10] ms |
+| SQL-only 2 | 44.804 ms | 24.270 ms | (40, 50] ms | 2.965 ms | (5, 10] ms |
+| SQL-only 3 | 43.966 ms | 24.177 ms | (25, 40] ms | 2.990 ms | (5, 10] ms |
+| Hybrid 1 | 65.257 ms | 21.765 ms | (60, 70] ms | 2.573 ms | (5, 10] ms |
+| Hybrid 2 | 63.722 ms | 21.308 ms | (50, 60] ms | 2.570 ms | (5, 10] ms |
+| Hybrid 3 | 61.159 ms | 19.821 ms | (50, 60] ms | 2.625 ms | (5, 10] ms |
+
+This run supports that excluding NULL digest rows avoids the previously observed parser failure, but it is one full-size rerun and cannot prove the failure impossible. Following histogram and statement counts still differ slightly in five rounds: SQL-only by +1, 0, +1 and Hybrid by +2, +3, +2. Therefore only SQL-only round 2 has a per-digest P95 bucket (34.674, 36.308] ms; the other following digest P95 values remain null by design. The API candidate-stage P95 buckets were (40, 50], (40, 50], (25, 40] ms for SQL-only and (60, 70], (50, 60], (50, 60] ms for Hybrid; interaction-state buckets matched. This stage evidence still includes database execution, result transfer and Go scanning/preload work.
+
+The per-SQL digest means for the following candidate were 21.86–23.54 ms for SQL-only and 5.46–5.87 ms for Hybrid, with roughly 24.6–26.4 million versus 3.58–3.69 million rows examined. Those Performance Schema totals span the 30-second warmup and 60-second mixed window, while client P95 is a request-tail measurement; the aggregates are not directly comparable and do not explain why the Hybrid client tail is higher. The separate 60-second CPU profiles parsed with Go 1.27.2: Linux syscall was the largest flat symbol at 15.08% for SQL-only and 13.90% for Hybrid; futex, GC scanning, synchronization and JSON/allocation work followed. No single Go computation accounts for the observed latency gap, and the profiles cannot separate MySQL execution, socket transfer and response scanning.
+
+The compact [post-merge report](benchmarks/feed-a04-null-digest-fix-verification-2026-11-03.json) records every round, digest count, execution order and profile summary without raw request samples or SQL text. The diagnostics fix is verified for this run; the Hybrid performance target remains open. The A04 runner now randomizes which mode starts each adjacent same-round pair and stores the seed and realized order. Each mode still uses an isolated, freshly seeded fixture because the mixed workload writes state; this reduces time-order bias but is not same-database pairing. Use that schedule in the next full run, then collect a controlled following-only plan alongside mixed load before any production query change.
 
 ### Follow-up diagnosis (exploratory, not a root-cause finding)
 
