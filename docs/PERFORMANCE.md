@@ -508,6 +508,25 @@ On a separate disposable MySQL 8.4.11 fixture, refreshing one followed author's 
 
 A separate short localhost handler replay showed both SQL-only and Hybrid slowing in its later sequential phase; it was too short and order-sensitive to attribute the difference. No query change is claimed from these experiments. The next performance change needs a repeatable profile or interleaved full mixed-load experiment that shows a measurable improvement while retaining late-follow and inbox de-duplication correctness.
 
+### Observed histogram P95 follow-up, 2026-11-03
+
+[Workflow #41646149894](https://github.com/liuzhouquan/GoStream/actions/runs/41646149894) ran commit `7f1d6e9` with `interpolateParams=true`, Go 1.27.2, MySQL 8.4.13, and an Ubuntu 24.04 runner with four vCPUs and 15 GiB RAM. The fixture had 2,000 users, 20,000 videos, 10,999 follows, 50,000 video actions, and 1.9 million inbox rows. It completed **90,679 mixed requests with zero failures**, **120/120 publishes**, all consistency checks, and no pool waits or idle-cap closures. Maximum Hybrid fanout drain was 0.055 seconds.
+
+The +20% median following P95 gate remains open: SQL-only was **27.199 ms** and Hybrid **38.182 ms** (**40.38% slower**). The realized order was Hybrid r1, SQL-only r1, Hybrid r2, SQL-only r2, SQL-only r3, Hybrid r3.
+
+| Mode / round | Client following P95 | API candidate mean / P95 bucket | MySQL candidate digest mean / observed histogram P95 bucket | Histogram count difference | Rows examined |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| SQL-only 1 | 27.435 ms | 13.162 ms / (10, 25] ms | 9.640 ms / (18.197, 19.055] ms | +4 | 46,599,945 |
+| SQL-only 2 | 26.874 ms | 12.579 ms / (10, 25] ms | 9.246 ms / (18.197, 19.055] ms | +4 | 47,586,690 |
+| SQL-only 3 | 27.199 ms | 12.913 ms / (10, 25] ms | 9.293 ms / (18.197, 19.055] ms | +6 | 47,558,034 |
+| Hybrid 1 | 40.947 ms | 12.828 ms / (25, 40] ms | 2.827 ms / (6.918, 7.244] ms | +37 | 6,084,372 |
+| Hybrid 2 | 38.182 ms | 12.018 ms / (25, 40] ms | 2.829 ms / (6.918, 7.244] ms | +37 | 6,011,628 |
+| Hybrid 3 | 38.073 ms | 12.033 ms / (25, 40] ms | 2.742 ms / (6.607, 6.918] ms | +35 | 6,188,196 |
+
+The Hybrid candidate-query digest had a lower observed MySQL histogram P95 bucket and lower mean server timer wait in all three rounds; its rows-examined totals were also lower. The API candidate-stage P95 bucket was higher for Hybrid in all three rounds, while interaction-state buckets matched at (5, 10] ms. This localizes the tail outside the MySQL server timer for this digest in this run. It does not identify the cause: the Performance Schema window spans warmup plus measurement, while API and client histograms cover measured successful following requests; the API `candidate_query` stage also covers GORM result handling and the Author preload. The observed histogram percentile is explicitly diagnostic because sample and statement counts differ; strict per-statement P95 remains null, and the client P95 gate is unchanged. Protocol transfer, row scanning, preload work, timing-window differences, and query-population differences remain hypotheses, not findings.
+
+The next change should split the API candidate stage into the main candidate query and Author preload, retaining the total-stage metric, then repeat the full workload. No Feed SQL change is justified by this run alone. The sanitized [observed histogram report](benchmarks/feed-a04-observed-histogram-p95-2026-11-03.json) contains all six rounds and the counter deltas without raw SQL or request samples.
+
 ## Remaining measurements
 
 k6 and multi-host load tests have not been run. MySQL/Redis results above cover anonymous recommendation and authenticated following first pages on one host; authenticated recommendation and cross-node performance remain unmeasured. FFmpeg processing throughput, queue wait time, and CPU use have not been benchmarked.
