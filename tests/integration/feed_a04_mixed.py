@@ -704,9 +704,13 @@ def performance_schema_statement_snapshot(container: str, database: str, account
                 digest_stage = "digest_histogram_query"
                 histogram_rows = mysql_query(
                     container,
-                    "SELECT DISTINCT SCHEMA_NAME, DIGEST, BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH, COUNT_BUCKET "
+                    # Bucket counters update while workers are active. Aggregate by the documented
+                    # bucket identity and retain the largest observed monotonic counter value.
+                    "SELECT SCHEMA_NAME, DIGEST, BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH, MAX(COUNT_BUCKET) "
                     "FROM performance_schema.events_statements_histogram_by_digest "
-                    f"WHERE SCHEMA_NAME='{database}' AND DIGEST IS NOT NULL ORDER BY DIGEST, BUCKET_NUMBER;",
+                    f"WHERE SCHEMA_NAME='{database}' AND DIGEST IS NOT NULL "
+                    "GROUP BY SCHEMA_NAME, DIGEST, BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH "
+                    "ORDER BY DIGEST, BUCKET_NUMBER;",
                 )
                 digest_stage = "digest_snapshot_parse"
                 digest_diagnostics = {

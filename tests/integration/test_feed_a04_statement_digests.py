@@ -209,7 +209,15 @@ class FeedA04StatementDigestTests(unittest.TestCase):
         self.assertIn("WHERE SCHEMA_NAME='gostream_feed_a04_mixed_123_1'", mysql_query.call_args_list[2].args[1])
         self.assertIn("WHERE SCHEMA_NAME='gostream_feed_a04_mixed_123_1'", mysql_query.call_args_list[3].args[1])
         self.assertIn("SELECT SCHEMA_NAME, DIGEST,", mysql_query.call_args_list[2].args[1])
-        self.assertIn("SELECT DISTINCT SCHEMA_NAME, DIGEST,", mysql_query.call_args_list[3].args[1])
+        histogram_query = mysql_query.call_args_list[3].args[1]
+        self.assertIn(
+            "SELECT SCHEMA_NAME, DIGEST, BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH, MAX(COUNT_BUCKET)",
+            histogram_query,
+        )
+        self.assertIn(
+            "GROUP BY SCHEMA_NAME, DIGEST, BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH",
+            histogram_query,
+        )
         self.assertIn("DIGEST IS NOT NULL", mysql_query.call_args_list[2].args[1])
         self.assertIn("DIGEST IS NOT NULL", mysql_query.call_args_list[3].args[1])
 
