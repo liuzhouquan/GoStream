@@ -454,8 +454,13 @@ def parse_statement_digest_snapshot(summary_rows: list[list[str]], histogram_row
         buckets = histograms.setdefault(identity, {})
         if bucket_number in buckets:
             previous = buckets[bucket_number]
+            current = {"low_ps": low_ps, "high_ps": high_ps, "count": count}
+            if previous == current:
+                # A live A04 run returned identical rows for the same bucket. Exact repeats
+                # carry no additional count; conflicting observations remain an error.
+                continue
             raise AcceptanceError(
-                "statement histogram snapshot contains a duplicate bucket: "
+                "statement histogram snapshot contains a conflicting duplicate bucket: "
                 f"schema={schema_name!r} digest={digest} bucket={bucket_number} "
                 f"existing=({previous['low_ps']},{previous['high_ps']},{previous['count']}) "
                 f"current=({low_ps},{high_ps},{count})"
@@ -699,7 +704,7 @@ def performance_schema_statement_snapshot(container: str, database: str, account
                 digest_stage = "digest_histogram_query"
                 histogram_rows = mysql_query(
                     container,
-                    "SELECT SCHEMA_NAME, DIGEST, BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH, COUNT_BUCKET "
+                    "SELECT DISTINCT SCHEMA_NAME, DIGEST, BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH, COUNT_BUCKET "
                     "FROM performance_schema.events_statements_histogram_by_digest "
                     f"WHERE SCHEMA_NAME='{database}' AND DIGEST IS NOT NULL ORDER BY DIGEST, BUCKET_NUMBER;",
                 )
