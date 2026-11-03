@@ -310,9 +310,37 @@ The SQL-only median client P95 was **54.607 ms** and the Hybrid median was **70.
 
 The API histogram sampled about 3,000 successful following requests in each 60-second window. Its P95 bucket was (50, 60] ms for all SQL-only rounds, (60, 70] and (70, 80] ms in the first two Hybrid rounds, and (25, 40] ms in Hybrid round three. This coarse server-side distribution broadly moves with the high/low client-tail rounds, but the third Hybrid round is much faster and the P95 buckets are intervals rather than exact values. It does not isolate SQL time from the rest of Feed handling and does not establish a query-level cause. MySQL also logged repeated redo-log checkpointer-lag warnings during the run, which is an additional shared-runner measurement limitation to retain when interpreting the spread.
 
-The API now also exposes `gostream_feed_stage_duration_seconds{scene,stage,outcome}` for `candidate_query`, `interaction_state`, `recommendation_context` and `recommendation_cursor`. These are elapsed times around API data-loading operations: candidate queries include GORM result scanning and author preload; interaction state includes its SQL read and in-memory state mapping; recommendation context/cursor include their corresponding SQL reads and local processing. Cache hits and requests rejected before loading are not represented. The histogram does not measure MySQL server execution time separately from connection-pool wait, network, or API-side work, and stage durations should not be summed as a substitute for route latency. The `Successful Feed stage P95 (API elapsed)` Grafana panel is diagnostic only. The A04 mixed driver now snapshots route and stage histogram deltas at the warmup/measurement boundary and retains bounded per-scene/stage/outcome P95 bucket intervals in JSON and its Markdown summary. This instrumentation has not yet been sampled in a new full-size A04 run, so it provides no additional cause or performance conclusion for the result above.
+The API now also exposes `gostream_feed_stage_duration_seconds{scene,stage,outcome}` for `candidate_query`, `interaction_state`, `recommendation_context` and `recommendation_cursor`. These are elapsed times around API data-loading operations: candidate queries include GORM result scanning and author preload; interaction state includes its SQL read and in-memory state mapping; recommendation context/cursor include their corresponding SQL reads and local processing. Cache hits and requests rejected before loading are not represented. The histogram does not measure MySQL server execution time separately from connection-pool wait, network, or API-side work, and stage durations should not be summed as a substitute for route latency. The `Successful Feed stage P95 (API elapsed)` Grafana panel is diagnostic only. The A04 mixed driver snapshots route and stage histogram deltas at the warmup/measurement boundary and retains bounded per-scene/stage/outcome P95 bucket intervals in JSON and its Markdown summary. Full-size stage data was captured in run #41579403460; it is diagnostic and provides no query-level root-cause conclusion.
 
 The [compact JSON report](benchmarks/feed-a04-route-histograms-2026-11-03.json) records the environment and six per-run client/server metrics. [Artifact 13202642309](https://github.com/liuzhouquan/GoStream/actions/runs/41573060866/artifacts/13202642309) retains the raw request latencies, API logs, MySQL status and fixture evidence. The workflow exited nonzero because the documented P95 gate was not met; report retention and disposable-schema cleanup both completed.
+
+## A04 full-size Feed stage histograms, 2026-11-03
+
+[Workflow run #41579403460](https://github.com/liuzhouquan/GoStream/actions/runs/41579403460) exercised the new stage instrumentation in the same six-run, 20-reader mixed-load acceptance. The workflow used Go 1.27.2, MySQL 8.4.13 with a 128 MiB InnoDB buffer pool and `REPEATABLE-READ`, four virtual AMD EPYC 7763 vCPUs, and disabled Redis/FFmpeg. Every fresh schema contained 2,000 users, 10,999 follows, 20,000 videos, 19,800 completed fanout jobs, 1.9 million inbox rows, 50,000 actions and 100 media assets. Each round used 30 seconds of warmup and 60 seconds of a 70/20/10 Feed/interaction/social workload. The run order was SQL-only 1, Hybrid 1, Hybrid 2, SQL-only 2, SQL-only 3, Hybrid 3.
+
+| Mode / round | Client P50 | Client P95 | Client P99 | API route mean | API route P95 bucket |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| SQL-only 1 | 32.030 ms | 54.445 ms | 63.603 ms | 32.438 ms | (50, 60] ms |
+| Hybrid 1 | 23.166 ms | 74.257 ms | 94.021 ms | 29.871 ms | (70, 80] ms |
+| Hybrid 2 | 22.998 ms | 75.158 ms | 96.276 ms | 29.412 ms | (70, 80] ms |
+| SQL-only 2 | 31.486 ms | 54.546 ms | 64.336 ms | 32.112 ms | (50, 60] ms |
+| SQL-only 3 | 31.934 ms | 54.377 ms | 65.426 ms | 32.487 ms | (50, 60] ms |
+| Hybrid 3 | 22.367 ms | 71.287 ms | 91.723 ms | 27.873 ms | (70, 80] ms |
+
+The median client following P95 was **54.445 ms** for SQL-only and **74.257 ms** for Hybrid, a **36.39% regression** against the required 20% improvement. Hybrid's P50 was lower in each round, while its P95/P99 were higher. All 45,324 mixed HTTP requests and 120 API video publications succeeded. Counter, Feed visibility, outbox and fanout checks passed; all 60 Hybrid fanout jobs completed within 0.075205 seconds. The acceptance workflow failed only because the P95 target was not met, and the SQL-only default remains in place.
+
+| Mode / round | Candidate query mean | Candidate query P95 bucket | Interaction state mean | Interaction state P95 bucket |
+| --- | ---: | ---: | ---: | ---: |
+| SQL-only 1 | 28.334 ms | (40, 50] ms | 3.853 ms | (5, 10] ms |
+| Hybrid 1 | 25.893 ms | (60, 70] ms | 3.735 ms | (5, 10] ms |
+| Hybrid 2 | 25.478 ms | (70, 80] ms | 3.690 ms | (5, 10] ms |
+| SQL-only 2 | 28.012 ms | (40, 50] ms | 3.850 ms | (5, 10] ms |
+| SQL-only 3 | 28.317 ms | (40, 50] ms | 3.926 ms | (5, 10] ms |
+| Hybrid 3 | 23.924 ms | (60, 70] ms | 3.710 ms | (5, 10] ms |
+
+Candidate-query mean elapsed time was lower in the Hybrid rounds, but its coarse P95 bucket was higher; interaction-state P95 buckets were the same for both modes. This points to a different tail distribution within the candidate-loading stage, but is not proof that the SQL plan or MySQL execution caused the client tail. Stage timers include API-side GORM scanning/preload work, and histogram buckets are approximate. Across the 30-second read-only warmup plus 60-second mixed-load phase, global MySQL `Questions` deltas were 84,225–85,947 for SQL-only and 130,193–131,254 for Hybrid; sampled API CPU averaged 33.58–34.81% and 51.48–51.56%, respectively. The external MySQL status snapshots bracketed both the read-only warmup and measured workload; API CPU/RSS sampling also spans that driver lifetime. These are mode-correlated counters, not per-query attribution. InnoDB row-lock wait deltas did not show the same clear separation. The run did not capture Performance Schema statement/wait deltas, pprof, or query plans, so the cause remains unconfirmed.
+
+The [compact stage report](benchmarks/feed-a04-stage-histograms-2026-11-03.json) preserves per-round client percentiles, API route and stage histograms, basic consistency outcomes, API CPU/RSS and warmup-plus-measurement MySQL status deltas. [Artifact 13205477186](https://github.com/liuzhouquan/GoStream/actions/runs/41579403460/artifacts/13205477186) retains raw client samples and logs. The next diagnostic should capture per-schema statement digest and wait deltas around the load window before changing the Hybrid query.
 
 ### Follow-up diagnosis (exploratory, not a root-cause finding)
 
