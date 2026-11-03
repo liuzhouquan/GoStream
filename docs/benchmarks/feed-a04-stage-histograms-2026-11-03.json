@@ -65,6 +65,11 @@
     ],
     "publishes_per_run": 20
   },
+  "observation_windows": {
+    "route_and_feed_stage_histograms": "60-second measured mixed-load interval; the driver snapshots after warmup and after measured workers finish",
+    "mysql_global_status_deltas": "30-second read-only warmup plus 60-second measured mixed-load interval; the Python runner snapshots immediately before and after the driver process",
+    "api_cpu_and_rss": "30-second read-only warmup plus 60-second measured mixed-load interval; the Python sampler runs for the driver process lifetime"
+  },
   "summary": {
     "sql_only_median_client_following_p95_ms": 54.444606,
     "hybrid_median_client_following_p95_ms": 74.25689,
@@ -133,11 +138,12 @@
         "outbox_dead": 0,
         "fanout_pending": 0
       },
-      "mysql_global_status_delta_during_mixed_window": {
+      "mysql_global_status_delta_warmup_plus_measurement": {
         "Questions": 84225,
         "Innodb_row_lock_waits": 66,
         "Innodb_row_lock_time": 224
-      }
+      },
+      "nominal_api_process_sample_window_seconds": 90
     },
     {
       "variant": "hybrid",
@@ -194,11 +200,12 @@
         "outbox_dead": 0,
         "fanout_pending": 0
       },
-      "mysql_global_status_delta_during_mixed_window": {
+      "mysql_global_status_delta_warmup_plus_measurement": {
         "Questions": 131134,
         "Innodb_row_lock_waits": 58,
         "Innodb_row_lock_time": 251
-      }
+      },
+      "nominal_api_process_sample_window_seconds": 90
     },
     {
       "variant": "hybrid",
@@ -255,11 +262,12 @@
         "outbox_dead": 0,
         "fanout_pending": 0
       },
-      "mysql_global_status_delta_during_mixed_window": {
+      "mysql_global_status_delta_warmup_plus_measurement": {
         "Questions": 131254,
         "Innodb_row_lock_waits": 86,
         "Innodb_row_lock_time": 390
-      }
+      },
+      "nominal_api_process_sample_window_seconds": 90
     },
     {
       "variant": "sql-only",
@@ -316,11 +324,12 @@
         "outbox_dead": 0,
         "fanout_pending": 0
       },
-      "mysql_global_status_delta_during_mixed_window": {
+      "mysql_global_status_delta_warmup_plus_measurement": {
         "Questions": 85947,
         "Innodb_row_lock_waits": 80,
         "Innodb_row_lock_time": 326
-      }
+      },
+      "nominal_api_process_sample_window_seconds": 90
     },
     {
       "variant": "sql-only",
@@ -377,11 +386,12 @@
         "outbox_dead": 0,
         "fanout_pending": 0
       },
-      "mysql_global_status_delta_during_mixed_window": {
+      "mysql_global_status_delta_warmup_plus_measurement": {
         "Questions": 85151,
         "Innodb_row_lock_waits": 84,
         "Innodb_row_lock_time": 384
-      }
+      },
+      "nominal_api_process_sample_window_seconds": 90
     },
     {
       "variant": "hybrid",
@@ -438,18 +448,19 @@
         "outbox_dead": 0,
         "fanout_pending": 0
       },
-      "mysql_global_status_delta_during_mixed_window": {
+      "mysql_global_status_delta_warmup_plus_measurement": {
         "Questions": 130193,
         "Innodb_row_lock_waits": 87,
         "Innodb_row_lock_time": 351
-      }
+      },
+      "nominal_api_process_sample_window_seconds": 90
     }
   ],
   "limitations": [
     "The workflow failed only the documented Hybrid following client P95 improvement gate; fixture cleanup and raw artifact retention completed.",
     "API stage and route histograms measure elapsed handler-side operations, including GORM scanning/preload and local processing; they do not isolate MySQL execution, connection-pool wait, or network time. P95 values are coarse bucket intervals.",
     "Cache hits and requests rejected before data loading are absent from the stage histograms. Stage durations must not be summed as a replacement for route latency.",
-    "Questions and InnoDB lock values are global MySQL status deltas over the mixed window, not per-statement-digest measurements. They are diagnostic correlation only.",
-    "The run does not capture Performance Schema statement/wait deltas, pprof, or execution plans during the measured window; it does not establish a query-level root cause."
+    "Questions and InnoDB lock values are global MySQL status deltas over the warmup plus measured mixed-load phase, not per-statement-digest measurements. They are diagnostic correlation only.",
+    "The run does not capture Performance Schema statement/wait deltas, pprof, or execution plans; it does not establish a query-level root cause."
   ]
 }
