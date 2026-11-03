@@ -1,0 +1,306 @@
+{
+  "run_id": 41614057041,
+  "workflow_url": "https://github.com/liuzhouquan/GoStream/actions/runs/41614057041",
+  "tested_commit": "d52bad3d6491e4b9132cd2222e2f9fcd40912f0c",
+  "mysql_interpolate_params": true,
+  "workload": {
+    "fixture": {
+      "users": 2000,
+      "authors": 100,
+      "videos": 20000,
+      "follows": 10999,
+      "likes": 50000,
+      "feed_inboxes": 1900000
+    },
+    "concurrency": 20,
+    "warmup_seconds": 30,
+    "measured_seconds_per_round": 60,
+    "rounds_per_variant": 3,
+    "successful_mixed_requests": 64134,
+    "failed_mixed_requests": 0,
+    "publishes": 120,
+    "consistency_passed": true,
+    "pool_wait_count_all_rounds_zero": true,
+    "max_idle_closed_all_rounds_zero": true,
+    "max_hybrid_fanout_drain_seconds": 0.063394
+  },
+  "acceptance": {
+    "sql_only_median_following_p95_ms": 37.587,
+    "hybrid_median_following_p95_ms": 59.134,
+    "hybrid_p95_improvement_percent": -57.33,
+    "required_improvement_percent": 20.0,
+    "target_met": false
+  },
+  "rounds": [
+    {
+      "mode": "sql-only",
+      "round": 1,
+      "mixed_requests": {
+        "successes": 10665,
+        "failures": 0
+      },
+      "following": {
+        "successes": 4269,
+        "failures": 0,
+        "client_p95_ms": 38.046,
+        "server_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "candidate_query_mean_ms": 19.159,
+        "candidate_query_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "interaction_state_mean_ms": 2.695,
+        "interaction_state_p95_bucket_ms": [
+          5.0,
+          10.0
+        ]
+      },
+      "pool_wait_count": 0,
+      "max_idle_closed": 0,
+      "performance_schema": {
+        "available": true,
+        "following_digest": {
+          "count": 26389,
+          "mean_timer_wait_ms": 16.907,
+          "rows_examined": 31969104,
+          "histogram_count": 26391,
+          "p95_bucket_ms": null
+        }
+      }
+    },
+    {
+      "mode": "sql-only",
+      "round": 2,
+      "mixed_requests": {
+        "successes": 10675,
+        "failures": 0
+      },
+      "following": {
+        "successes": 4272,
+        "failures": 0,
+        "client_p95_ms": 37.587,
+        "server_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "candidate_query_mean_ms": 19.514,
+        "candidate_query_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "interaction_state_mean_ms": 2.806,
+        "interaction_state_p95_bucket_ms": [
+          5.0,
+          10.0
+        ]
+      },
+      "pool_wait_count": 0,
+      "max_idle_closed": 0,
+      "performance_schema": {
+        "available": true,
+        "following_digest": {
+          "count": 27126,
+          "mean_timer_wait_ms": 16.483,
+          "rows_examined": 32869383,
+          "histogram_count": 27129,
+          "p95_bucket_ms": null
+        }
+      }
+    },
+    {
+      "mode": "sql-only",
+      "round": 3,
+      "mixed_requests": {
+        "successes": 10813,
+        "failures": 0
+      },
+      "following": {
+        "successes": 4328,
+        "failures": 0,
+        "client_p95_ms": 37.329,
+        "server_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "candidate_query_mean_ms": 19.375,
+        "candidate_query_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "interaction_state_mean_ms": 2.647,
+        "interaction_state_p95_bucket_ms": [
+          5.0,
+          10.0
+        ]
+      },
+      "pool_wait_count": 0,
+      "max_idle_closed": 0,
+      "performance_schema": {
+        "available": true,
+        "following_digest": {
+          "count": 27057,
+          "mean_timer_wait_ms": 16.557,
+          "rows_examined": 32764419,
+          "histogram_count": 27059,
+          "p95_bucket_ms": null
+        }
+      }
+    },
+    {
+      "mode": "hybrid",
+      "round": 1,
+      "mixed_requests": {
+        "successes": 10591,
+        "failures": 0
+      },
+      "following": {
+        "successes": 4240,
+        "failures": 0,
+        "client_p95_ms": 59.702,
+        "server_p95_bucket_ms": [
+          50.0,
+          60.0
+        ],
+        "candidate_query_mean_ms": 19.119,
+        "candidate_query_p95_bucket_ms": [
+          50.0,
+          60.0
+        ],
+        "interaction_state_mean_ms": 2.854,
+        "interaction_state_p95_bucket_ms": [
+          5.0,
+          10.0
+        ]
+      },
+      "pool_wait_count": 0,
+      "max_idle_closed": 0,
+      "performance_schema": {
+        "available": true,
+        "following_digest": {
+          "count": 50142,
+          "mean_timer_wait_ms": 4.756,
+          "rows_examined": 4211676,
+          "histogram_count": 50149,
+          "p95_bucket_ms": null
+        }
+      }
+    },
+    {
+      "mode": "hybrid",
+      "round": 2,
+      "mixed_requests": {
+        "successes": 10655,
+        "failures": 0
+      },
+      "following": {
+        "successes": 4264,
+        "failures": 0,
+        "client_p95_ms": 58.119,
+        "server_p95_bucket_ms": [
+          50.0,
+          60.0
+        ],
+        "candidate_query_mean_ms": 17.397,
+        "candidate_query_p95_bucket_ms": [
+          50.0,
+          60.0
+        ],
+        "interaction_state_mean_ms": 3.162,
+        "interaction_state_p95_bucket_ms": [
+          5.0,
+          10.0
+        ]
+      },
+      "pool_wait_count": 0,
+      "max_idle_closed": 0,
+      "performance_schema": {
+        "available": true,
+        "following_digest": {
+          "count": 49890,
+          "mean_timer_wait_ms": 4.623,
+          "rows_examined": 4190676,
+          "histogram_count": 49897,
+          "p95_bucket_ms": null
+        }
+      }
+    },
+    {
+      "mode": "hybrid",
+      "round": 3,
+      "mixed_requests": {
+        "successes": 10735,
+        "failures": 0
+      },
+      "following": {
+        "successes": 4296,
+        "failures": 0,
+        "client_p95_ms": 59.134,
+        "server_p95_bucket_ms": [
+          50.0,
+          60.0
+        ],
+        "candidate_query_mean_ms": 19.122,
+        "candidate_query_p95_bucket_ms": [
+          50.0,
+          60.0
+        ],
+        "interaction_state_mean_ms": 2.895,
+        "interaction_state_p95_bucket_ms": [
+          5.0,
+          10.0
+        ]
+      },
+      "pool_wait_count": 0,
+      "max_idle_closed": 0,
+      "performance_schema": {
+        "available": false,
+        "failure_stage": "digest_snapshot_parse",
+        "error": "AcceptanceError: statement histogram snapshot contains a duplicate bucket"
+      }
+    }
+  ],
+  "performance_schema": {
+    "available_rounds": {
+      "sql-only": [
+        1,
+        2,
+        3
+      ],
+      "hybrid": [
+        1,
+        2
+      ]
+    },
+    "unavailable_round": {
+      "variant": "hybrid",
+      "round": 3,
+      "failure_stage": "digest_snapshot_parse",
+      "error": "AcceptanceError: statement histogram snapshot contains a duplicate bucket"
+    },
+    "following_histogram_note": "Available following digest histogram counts exceed statement counts by 2-7, so per-digest percentile buckets remain null.",
+    "interpretation": "Digest summaries include warmup and mixed workload queries; ranking digests and API candidate stages do not isolate following query execution."
+  },
+  "diagnostic_profiles": {
+    "separate_from_acceptance_rounds": true,
+    "duration_seconds": 60,
+    "sql-only": {
+      "cpu_samples_seconds": 9.75,
+      "top_flat_symbol": "internal/runtime/syscall/linux.Syscall6",
+      "top_flat_seconds": 1.78,
+      "top_flat_percent": 18.26,
+      "goroutine_dump_captured": true
+    },
+    "hybrid": {
+      "cpu_samples_seconds": 10.27,
+      "top_flat_symbol": "internal/runtime/syscall/linux.Syscall6",
+      "top_flat_seconds": 1.67,
+      "top_flat_percent": 16.26,
+      "goroutine_dump_captured": true
+    },
+    "interpretation": "Profiles show runtime/syscall activity but no single dominant Go computation. These snapshots do not distinguish MySQL execution, socket transfer, and result scanning."
+  },
+  "diagnostic_code_change_status": "This run predates the null-DIGEST query filter now under review; rerun after merge to verify digest availability."
+}
