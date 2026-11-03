@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
 	"sort"
@@ -16,6 +17,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
 )
 
 type operation struct {
@@ -40,6 +44,20 @@ type operationReport struct {
 	P99NS               int64       `json:"p99_ns"`
 }
 
+type feedHistogramSnapshot struct {
+	Buckets    map[float64]uint64
+	Count      uint64
+	SumSeconds float64
+}
+
+type serverLatencyReport struct {
+	SampleCount                uint64   `json:"sample_count"`
+	SumSeconds                 float64  `json:"sum_seconds"`
+	MeanSeconds                float64  `json:"mean_seconds"`
+	P95BucketLowerBoundSeconds float64  `json:"p95_bucket_lower_bound_seconds"`
+	P95BucketUpperBoundSeconds *float64 `json:"p95_bucket_upper_bound_seconds,omitempty"`
+}
+
 type loadReport struct {
 	Concurrency         int                        `json:"concurrency"`
 	ActorCount          int                        `json:"actor_count"`
@@ -49,6 +67,151 @@ type loadReport struct {
 	Successes           int                        `json:"successes"`
 	Failures            int                        `json:"failures"`
 	Operations          map[string]operationReport `json:"operations"`
+	ServerFollowing     *serverLatencyReport       `json:"server_following_latency,omitempty"`
+}
+
+const maxMetricsResponseBytes = 8 << 20
+
+func scrapeFollowingHistogram(client *http.Client, baseURL string) (feedHistogramSnapshot, error) {
+	req, err := http.NewRequest(http.MethodGet, strings.TrimRight(baseURL, "/")+"/metrics", nil)
+	if err != nil {
+		return feedHistogramSnapshot{}, fmt.Errorf("build metrics scrape request: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return feedHistogramSnapshot{}, fmt.Errorf("scrape API metrics: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return feedHistogramSnapshot{}, fmt.Errorf("scrape API metrics: HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxMetricsResponseBytes+1))
+	if err != nil {
+		return feedHistogramSnapshot{}, fmt.Errorf("read API metrics: %w", err)
+	}
+	if len(data) > maxMetricsResponseBytes {
+		return feedHistogramSnapshot{}, fmt.Errorf("API metrics response exceeds %d bytes", maxMetricsResponseBytes)
+	}
+	return parseFollowingHistogram(string(data))
+}
+
+func parseFollowingHistogram(exposition string) (feedHistogramSnapshot, error) {
+	snapshot := feedHistogramSnapshot{Buckets: make(map[float64]uint64)}
+	parser := expfmt.NewTextParser(model.UTF8Validation)
+	families, err := parser.TextToMetricFamilies(strings.NewReader(exposition))
+	if err != nil {
+		return feedHistogramSnapshot{}, fmt.Errorf("parse Prometheus exposition: %w", err)
+	}
+	family := families["gostream_feed_request_duration_seconds"]
+	if family == nil {
+		return snapshot, nil
+	}
+	found := false
+	for _, metric := range family.GetMetric() {
+		labels := make(map[string]string, len(metric.GetLabel()))
+		for _, label := range metric.GetLabel() {
+			labels[label.GetName()] = label.GetValue()
+		}
+		if labels["scene"] != "following" || labels["outcome"] != "success" {
+			continue
+		}
+		if found {
+			return feedHistogramSnapshot{}, fmt.Errorf("duplicate following success histogram series")
+		}
+		found = true
+		histogram := metric.GetHistogram()
+		if histogram == nil || histogram.SampleCount == nil || histogram.SampleSum == nil {
+			return feedHistogramSnapshot{}, fmt.Errorf("incomplete following success histogram")
+		}
+		if histogram.GetSampleCountFloat() > 0 {
+			return feedHistogramSnapshot{}, fmt.Errorf("floating-point histogram counts are unsupported")
+		}
+		snapshot.Count = histogram.GetSampleCount()
+		snapshot.SumSeconds = histogram.GetSampleSum()
+		for _, bucket := range histogram.GetBucket() {
+			bound := bucket.GetUpperBound()
+			if math.IsNaN(bound) || math.IsInf(bound, -1) {
+				return feedHistogramSnapshot{}, fmt.Errorf("invalid following histogram boundary %v", bound)
+			}
+			if _, duplicate := snapshot.Buckets[bound]; duplicate {
+				return feedHistogramSnapshot{}, fmt.Errorf("duplicate following histogram boundary %v", bound)
+			}
+			snapshot.Buckets[bound] = bucket.GetCumulativeCount()
+		}
+		if _, ok := snapshot.Buckets[math.Inf(1)]; !ok {
+			snapshot.Buckets[math.Inf(1)] = snapshot.Count
+		}
+	}
+	if !found {
+		return snapshot, nil
+	}
+	if snapshot.SumSeconds < 0 {
+		return feedHistogramSnapshot{}, fmt.Errorf("negative following histogram sum")
+	}
+	infCount := snapshot.Buckets[math.Inf(1)]
+	if infCount != snapshot.Count {
+		return feedHistogramSnapshot{}, fmt.Errorf("following histogram +Inf bucket does not match count")
+	}
+	boundaries := make([]float64, 0, len(snapshot.Buckets))
+	for boundary := range snapshot.Buckets {
+		boundaries = append(boundaries, boundary)
+	}
+	sort.Float64s(boundaries)
+	var previous uint64
+	for _, boundary := range boundaries {
+		count := snapshot.Buckets[boundary]
+		if count < previous || count > snapshot.Count {
+			return feedHistogramSnapshot{}, fmt.Errorf("following histogram buckets are not cumulative")
+		}
+		previous = count
+	}
+	return snapshot, nil
+}
+
+func histogramDeltaReport(before, after feedHistogramSnapshot) (*serverLatencyReport, error) {
+	if after.Count < before.Count || after.SumSeconds+1e-12 < before.SumSeconds {
+		return nil, fmt.Errorf("Feed histogram reset during measurement")
+	}
+	bounds := make([]float64, 0, len(after.Buckets))
+	deltaBuckets := make(map[float64]uint64, len(after.Buckets))
+	for boundary, count := range after.Buckets {
+		prior := before.Buckets[boundary]
+		if count < prior {
+			return nil, fmt.Errorf("Feed histogram bucket reset during measurement")
+		}
+		bounds = append(bounds, boundary)
+		deltaBuckets[boundary] = count - prior
+	}
+	sort.Float64s(bounds)
+	deltaCount := after.Count - before.Count
+	if deltaBuckets[math.Inf(1)] != deltaCount {
+		return nil, fmt.Errorf("Feed histogram bucket delta does not match count delta")
+	}
+	deltaSum := after.SumSeconds - before.SumSeconds
+	if deltaSum < 0 {
+		deltaSum = 0
+	}
+	report := &serverLatencyReport{SampleCount: deltaCount, SumSeconds: deltaSum}
+	if deltaCount == 0 {
+		return report, nil
+	}
+	report.MeanSeconds = deltaSum / float64(deltaCount)
+	rank := deltaCount - deltaCount/20
+	var lower float64
+	for _, boundary := range bounds {
+		if deltaBuckets[boundary] >= rank {
+			report.P95BucketLowerBoundSeconds = lower
+			if !math.IsInf(boundary, 1) {
+				upper := boundary
+				report.P95BucketUpperBoundSeconds = &upper
+			}
+			return report, nil
+		}
+		if !math.IsInf(boundary, 1) {
+			lower = boundary
+		}
+	}
+	return nil, fmt.Errorf("Feed histogram does not contain a bucket for p95")
 }
 
 func chooseOperation(sequence uint64, videoID, followeeID uint) operation {
@@ -207,6 +370,10 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 			return fmt.Errorf("warmup had %d failed requests", warmFailures.Load())
 		}
 	}
+	serverHistogramBefore, err := scrapeFollowingHistogram(client, baseURL)
+	if err != nil {
+		return err
+	}
 	deadline := time.Now().Add(duration)
 	start := time.Now()
 	var sequence atomic.Uint64
@@ -239,6 +406,25 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 	}
 	wg.Wait()
 	elapsed := time.Since(start)
+	serverHistogramAfter, err := scrapeFollowingHistogram(client, baseURL)
+	if err != nil {
+		return err
+	}
+	serverFollowing, err := histogramDeltaReport(serverHistogramBefore, serverHistogramAfter)
+	if err != nil {
+		return err
+	}
+	if serverFollowing.SampleCount == 0 {
+		return fmt.Errorf("measurement contained no successful following Feed samples")
+	}
+	fmt.Printf("server_following count=%d mean=%s p95_bucket=(%s,", serverFollowing.SampleCount,
+		time.Duration(serverFollowing.MeanSeconds*float64(time.Second)).Round(time.Microsecond),
+		time.Duration(serverFollowing.P95BucketLowerBoundSeconds*float64(time.Second)).Round(time.Microsecond))
+	if serverFollowing.P95BucketUpperBoundSeconds == nil {
+		fmt.Println("+Inf]")
+	} else {
+		fmt.Printf("%s]\n", time.Duration(*serverFollowing.P95BucketUpperBoundSeconds*float64(time.Second)).Round(time.Microsecond))
+	}
 	close(results)
 	merged := make(map[string]*sample)
 	var all []time.Duration
@@ -288,6 +474,7 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 		report := loadReport{
 			Concurrency: concurrency, ActorCount: len(actors), WarmupNS: int64(warmup), RequestedDurationNS: int64(duration),
 			ElapsedNS: int64(elapsed), Successes: successes, Failures: failed, Operations: operationReports,
+			ServerFollowing: serverFollowing,
 		}
 		if err := writeReport(reportPath, report); err != nil {
 			return err
