@@ -363,7 +363,24 @@ A disposable local MySQL 8.4 reproduction used the repository's GORM/MySQL drive
 
 All six measured windows again had zero database/sql pool waits. Hybrid produced about 1.53 times as many prepared execute events and about 3.18 times as many `statement/sql/set_option` events. That event class is a connection-setup clue in this workload, but its aggregate does not prove how many connections were created or which statement caused the latency. The API did not yet export `MaxIdleClosed`, so idle-pool churn was not directly measured. The account-level execute timer is also an aggregate across statements: its lower mean in Hybrid must not be read as lower latency for the candidate query. The [compact report](benchmarks/feed-a04-prepared-and-pool-diagnostics-2026-11-03.json) retains the per-round values and workload metadata; the [workflow artifact](https://github.com/liuzhouquan/GoStream/actions/runs/41590181656) contains raw latency samples and logs.
 
-The API now applies explicit, configurable MySQL pool caps (50 open / 25 idle by default) and exports `gostream_database_pool_max_idle_closed_total`. This closes a measurement gap and avoids inheriting Go's very small default idle cap; it is a testable connection-reuse hypothesis, not a confirmed root cause or claimed optimization. The next equivalent full-size run must compare idle-closure deltas and latency before deciding whether this change improves A04. No Hybrid SQL change is justified by the available evidence.
+The API now applies explicit, configurable MySQL pool caps (50 open / 25 idle by default) and exports `gostream_database_pool_max_idle_closed_total`. The first comparison after that change is recorded below; it tests connection reuse but makes no advance claim about the P95 gate.
+
+### Full-size A04 after explicit MySQL pool caps, 2026-11-03
+
+[Workflow #41595760362](https://github.com/liuzhouquan/GoStream/actions/runs/41595760362) ran the same six-round workload on commit `444ca7b`, using the API's MySQL pool defaults of 50 open / 25 idle connections. It completed 45,110 mixed requests and 120 publishes with zero request/publish errors and all counter, Feed visibility, outbox and fanout checks passing. SQL-only median following P95 was **53.502 ms** and Hybrid was **77.990 ms** (Hybrid **45.77% slower**); the +20% gate still fails and SQL-only remains the default.
+
+| Mode / round | Client following P95 | Candidate query mean | Candidate query P95 bucket | Pool waits | MaxIdleClosed | MySQL Threads_connected before → after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| SQL-only 1 | 52.868 ms | 28.343 ms | (40, 50] ms | 0 | 0 | 6 → 23 |
+| SQL-only 2 | 53.946 ms | 28.024 ms | (40, 50] ms | 0 | 0 | 6 → 23 |
+| SQL-only 3 | 53.502 ms | 28.417 ms | (40, 50] ms | 0 | 0 | 6 → 23 |
+| Hybrid 1 | 77.990 ms | 26.224 ms | (70, 80] ms | 0 | 0 | 6 → 23 |
+| Hybrid 2 | 80.659 ms | 27.640 ms | (70, 80] ms | 0 | 0 | 6 → 23 |
+| Hybrid 3 | 75.034 ms | 24.507 ms | (60, 70] ms | 0 | 0 | 6 → 23 |
+
+There were no pool waits or connections closed for exceeding the configured idle cap. At the end of the warmup-plus-measurement interval, MySQL had 23 connected sessions in every case versus three in every case in the immediately preceding run without explicit caps. The account event-class counter `statement/sql/set_option` fell from 3,661–3,773 to 17 for SQL-only and from 11,760–11,852 to 17 for Hybrid. The fixture DSN specifies `charset=utf8mb4`, and go-sql-driver/mysql v1.7.0 issues `SET NAMES` when opening a connection with a charset parameter (`connection.go`, `handleParams`). This is strong evidence of far fewer connection-setup statements with the larger idle pool; it is still an event aggregate, not a direct connection count.
+
+The pool change therefore addresses real connection churn, but it did **not** improve the Hybrid client P95 in this A04 run. Hybrid's candidate-query mean remains below SQL-only, while its approximate candidate-query P95 bucket is 20–30 ms higher and interaction-state buckets remain similar. The stage timer includes GORM result scanning and author preload as well as SQL execution; it does not identify which part is slow. The compact [pool comparison report](benchmarks/feed-a04-pool-reuse-2026-11-03.json) and [run artifact](https://github.com/liuzhouquan/GoStream/actions/runs/41595760362) retain the per-round evidence. The A04 harness now adds two separate full-size diagnostic fixtures, one per mode, to capture a 60-second CPU profile and a mid-window goroutine dump; these extra profiled fixtures are explicitly excluded from the six unprofiled-run P95 gate. Profile artifacts have not yet been collected. Inspect them before changing the Feed query.
 
 ### Follow-up diagnosis (exploratory, not a root-cause finding)
 
