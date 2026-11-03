@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"database/sql"
 	"strconv"
 	"time"
 
@@ -27,7 +28,32 @@ type serverMetrics struct {
 	wsConnections     prometheus.Gauge
 }
 
-func newServerMetrics() *serverMetrics {
+type databasePoolWaitCollector struct {
+	db           *sql.DB
+	waitCount    *prometheus.Desc
+	waitDuration *prometheus.Desc
+}
+
+func newDatabasePoolWaitCollector(db *sql.DB) *databasePoolWaitCollector {
+	return &databasePoolWaitCollector{
+		db:           db,
+		waitCount:    prometheus.NewDesc("gostream_database_pool_wait_count_total", "Total database/sql connection-pool waits.", nil, nil),
+		waitDuration: prometheus.NewDesc("gostream_database_pool_wait_duration_seconds_total", "Total time spent waiting for a database/sql connection.", nil, nil),
+	}
+}
+
+func (c *databasePoolWaitCollector) Describe(ch chan<- *prometheus.Desc) {
+	ch <- c.waitCount
+	ch <- c.waitDuration
+}
+
+func (c *databasePoolWaitCollector) Collect(ch chan<- prometheus.Metric) {
+	stats := c.db.Stats()
+	ch <- prometheus.MustNewConstMetric(c.waitCount, prometheus.CounterValue, float64(stats.WaitCount))
+	ch <- prometheus.MustNewConstMetric(c.waitDuration, prometheus.CounterValue, stats.WaitDuration.Seconds())
+}
+
+func newServerMetrics(db *sql.DB) *serverMetrics {
 	m := &serverMetrics{
 		registry:        prometheus.NewRegistry(),
 		brokerMessages:  prometheus.NewCounterVec(prometheus.CounterOpts{Name: "gostream_rabbitmq_messages_total", Help: "RabbitMQ notification transport outcomes."}, []string{"result"}),
@@ -75,6 +101,9 @@ func newServerMetrics() *serverMetrics {
 	}
 	m.registry.MustRegister(m.requests, m.duration, m.feedDuration, m.feedStageDuration, m.outbox, m.feedCache, m.rateLimit, m.feedFanout, m.feedFanoutAge, m.feedFanoutJobs, m.mediaReconcile, m.wsConnections)
 	m.registry.MustRegister(m.brokerMessages, m.brokerConnected)
+	if db != nil {
+		m.registry.MustRegister(newDatabasePoolWaitCollector(db))
+	}
 	m.registry.MustRegister(prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	return m
 }

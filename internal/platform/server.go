@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
@@ -36,7 +37,11 @@ type Server struct {
 }
 
 func NewServer(db *gorm.DB, secret, mediaDir string) *Server {
-	return &Server{DB: db, Secret: []byte(secret), MediaDir: mediaDir, Hub: NewHub(), metrics: newServerMetrics(), rateLimiter: newRateLimiter(nil), fanoutMaxFollowers: 1000, upgrader: websocket.Upgrader{
+	var sqlDB *sql.DB
+	if db != nil {
+		sqlDB, _ = db.DB()
+	}
+	return &Server{DB: db, Secret: []byte(secret), MediaDir: mediaDir, Hub: NewHub(), metrics: newServerMetrics(sqlDB), rateLimiter: newRateLimiter(nil), fanoutMaxFollowers: 1000, upgrader: websocket.Upgrader{
 		ReadBufferSize: 4096, WriteBufferSize: 4096,
 		Subprotocols: []string{"gostream"},
 		CheckOrigin: func(r *http.Request) bool {

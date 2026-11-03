@@ -42,6 +42,26 @@ def run(variant, round_number, following_p95_ns, publish_p95_ns=3_000_000, fanou
                 "like": {"successes": 100, "failures": 0},
                 "comment": {"successes": 50, "failures": 0},
             },
+            "database_pool_wait": {
+                "wait_count": round_number,
+                "wait_duration_seconds": round_number / 1000,
+            },
+        },
+        "database_statement_diagnostics": {
+            "available": True,
+            "reason": "",
+            "window": "mixed driver lifetime: 30s read-only warmup plus 60s measured workload",
+            "digest_count": 1,
+            "statement_count": 10 + round_number,
+            "sum_timer_wait_ms": 12.5 + round_number,
+            "top_statements": [
+                {
+                    "statement": "SELECT * FROM videos WHERE id = ?",
+                    "count": 10 + round_number,
+                    "mean_timer_wait_ms": 1.25,
+                    "p95_bucket_ms": [0.5, 2.0],
+                }
+            ],
         },
         "publish": {"successes": 20, "failures": 0, "p95_ns": publish_p95_ns},
         "fanout": {
@@ -185,6 +205,31 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
         rendered = feed_a04_mixed.format_summary(summary)
         self.assertIn("following candidate_query P95 bucket", rendered)
         self.assertIn("following interaction_state P95 bucket", rendered)
+
+    def test_summary_retains_database_diagnostics_without_changing_acceptance_gate(self):
+        reports = []
+        for variant, values in (("sql-only", (1000, 1100, 900)), ("hybrid", (750, 800, 700))):
+            for round_number, value in enumerate(values, 1):
+                reports.append(run(variant, round_number, value))
+        reports[0]["database_statement_diagnostics"] = {
+            "available": False,
+            "reason": "statement_digest_consumer_disabled",
+            "window": "mixed driver lifetime: 30s read-only warmup plus 60s measured workload",
+        }
+
+        summary = feed_a04_mixed.summarize(reports, 0.20)
+
+        self.assertEqual(summary["database_pool_wait"]["sql_only"][0]["wait_count"], 1)
+        self.assertEqual(
+            summary["database_statement_diagnostics"]["sql_only"][0]["reason"],
+            "statement_digest_consumer_disabled",
+        )
+        self.assertTrue(summary["target_met"], "diagnostic availability must not alter the P95 acceptance gate")
+        rendered = feed_a04_mixed.format_summary(summary)
+        self.assertIn("DB pool wait delta during 60s measured window", rendered)
+        self.assertIn("Performance Schema statement digests", rendered)
+        self.assertIn("statement_digest_consumer_disabled", rendered)
+        self.assertIn("SELECT * FROM videos WHERE id = ?", rendered)
 
     def test_summary_fails_below_threshold_or_on_inconsistent_state(self):
         reports = []

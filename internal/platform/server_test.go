@@ -1047,6 +1047,9 @@ func TestReadinessAndPrometheusMetrics(t *testing.T) {
 		`gostream_feed_request_duration_seconds_count{outcome="success",scene="following"} 1`,
 		`gostream_feed_request_duration_seconds_count{outcome="error",scene="invalid"} 2`,
 		`gostream_feed_request_duration_seconds_bucket{outcome="error",scene="following",le="0.005"} 1`,
+		`# TYPE gostream_database_pool_wait_count_total counter`,
+		`gostream_database_pool_wait_count_total`,
+		`gostream_database_pool_wait_duration_seconds_total`,
 		`gostream_websocket_connections`,
 	} {
 		if !strings.Contains(metrics.Body.String(), marker) {

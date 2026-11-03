@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import json
+import math
 import os
 import pathlib
 import re
@@ -90,6 +91,14 @@ def summarize(reports: list[dict], required_improvement: float) -> dict:
         "sql_only": [report["mixed_load"].get("server_feed_stages", []) for report in sql],
         "hybrid": [report["mixed_load"].get("server_feed_stages", []) for report in hybrid],
     }
+    database_pool_wait = {
+        "sql_only": [report["mixed_load"].get("database_pool_wait") for report in sql],
+        "hybrid": [report["mixed_load"].get("database_pool_wait") for report in hybrid],
+    }
+    database_statement_diagnostics = {
+        "sql_only": [report.get("database_statement_diagnostics") for report in sql],
+        "hybrid": [report.get("database_statement_diagnostics") for report in hybrid],
+    }
     improvement = (sql_p95 - hybrid_p95) / sql_p95 if sql_p95 > 0 else 0.0
     all_consistent = all(
         report["verification"]["counter_mismatches"] == 0
@@ -112,6 +121,8 @@ def summarize(reports: list[dict], required_improvement: float) -> dict:
         "hybrid_median_following_p95_ns": hybrid_p95,
         "server_following_latency": server_following_latency,
         "server_feed_stages": server_feed_stages,
+        "database_pool_wait": database_pool_wait,
+        "database_statement_diagnostics": database_statement_diagnostics,
         "following_p95_improvement_percent": round(improvement * 100, 2),
         "required_improvement_percent": required_improvement * 100,
         "publishes_per_run": PUBLISHERS,
@@ -166,6 +177,51 @@ def format_summary(summary: dict) -> str:
             values.append(f"r{round_number} ({lower:.1f}, {upper}] ms (n={latency['sample_count']})")
         return ", ".join(values) if values else "unavailable"
 
+    def format_database_pool_wait(variant: str) -> str:
+        runs = summary.get("database_pool_wait", {}).get(variant, [])
+        values = []
+        for round_number, report in enumerate(runs, 1):
+            if report is None:
+                values.append(f"r{round_number} unavailable")
+                continue
+            values.append(
+                f"r{round_number} {report['wait_count']} / {report['wait_duration_seconds']:.3f}s"
+            )
+        return ", ".join(values) if values else "unavailable"
+
+    def format_statement_diagnostics(variant: str) -> str:
+        runs = summary.get("database_statement_diagnostics", {}).get(variant, [])
+        values = []
+        for round_number, report in enumerate(runs, 1):
+            if not report or not report.get("available"):
+                reason = report.get("reason", "snapshot_unavailable") if report else "snapshot_unavailable"
+                values.append(f"r{round_number} unavailable ({reason})")
+                continue
+            top = report.get("top_statements", [])[:3]
+            if not top:
+                values.append(f"r{round_number} no statements captured")
+                continue
+            statements = []
+            for statement in top:
+                normalized = " ".join(statement.get("statement", "").split()).replace("|", "\\|")
+                if len(normalized) > 100:
+                    normalized = normalized[:97] + "..."
+                statements.append(
+                    f"{normalized} (n={statement['count']}, mean={statement['mean_timer_wait_ms']:.3f}ms)"
+                )
+            values.append(f"r{round_number} " + "; ".join(statements))
+        return ", ".join(values) if values else "unavailable"
+
+    statement_window = next(
+        (
+            report.get("window")
+            for variant in ("sql_only", "hybrid")
+            for report in summary.get("database_statement_diagnostics", {}).get(variant, [])
+            if report and report.get("window")
+        ),
+        "driver lifetime; diagnostic only",
+    )
+
     lines = [
         "# A04 mixed Feed acceptance",
         "",
@@ -179,6 +235,8 @@ def format_summary(summary: dict) -> str:
         f"- API-side successful following P95 bucket (approximate): SQL-only {format_server_buckets('sql_only')}; Hybrid {format_server_buckets('hybrid')}",
         f"- API-side following candidate_query P95 bucket (approximate): SQL-only {format_stage_buckets('sql_only', 'candidate_query')}; Hybrid {format_stage_buckets('hybrid', 'candidate_query')}",
         f"- API-side following interaction_state P95 bucket (approximate): SQL-only {format_stage_buckets('sql_only', 'interaction_state')}; Hybrid {format_stage_buckets('hybrid', 'interaction_state')}",
+        f"- DB pool wait delta during 60s measured window (waits / seconds): SQL-only {format_database_pool_wait('sql_only')}; Hybrid {format_database_pool_wait('hybrid')}",
+        f"- Performance Schema statement digests ({statement_window}; diagnostic only): SQL-only {format_statement_diagnostics('sql_only')}; Hybrid {format_statement_diagnostics('hybrid')}",
         f"- Target met: {summary['target_met']}",
         "- Client-side P95 remains the acceptance gate. Server histogram buckets are diagnostic intervals; raw request latencies, samples, queue state, MySQL status, and API CPU/RSS are in adjacent JSON reports.",
         "",
@@ -249,6 +307,166 @@ def status_snapshot(container: str) -> dict[str, int]:
         "('Threads_connected','Threads_running','Questions','Innodb_row_lock_time','Innodb_row_lock_waits');",
     )
     return {row[0]: int(row[1]) for row in rows}
+
+
+STATEMENT_DIGEST_COUNTERS = (
+    "count_star",
+    "sum_timer_wait_ps",
+    "sum_lock_time_ps",
+    "sum_rows_sent",
+    "sum_rows_examined",
+    "sum_no_index_used",
+    "sum_no_good_index_used",
+)
+
+
+def parse_statement_digest_snapshot(summary_rows: list[list[str]], histogram_rows: list[list[str]]) -> dict:
+    statements = {}
+    for row in summary_rows:
+        if len(row) != 9:
+            raise AcceptanceError(f"unexpected statement digest row with {len(row)} columns")
+        digest = row[0]
+        if not digest or digest in statements:
+            raise AcceptanceError("statement digest snapshot contains a blank or duplicate digest")
+        try:
+            statement = bytes.fromhex(row[1]).decode("utf-8") if row[1] else ""
+            counters = [int(value) for value in row[2:]]
+        except (UnicodeDecodeError, ValueError) as error:
+            raise AcceptanceError(f"invalid statement digest counters or text: {error}") from error
+        if any(value < 0 for value in counters):
+            raise AcceptanceError("statement digest counters must be non-negative")
+        statements[digest] = {"statement": statement, **dict(zip(STATEMENT_DIGEST_COUNTERS, counters))}
+
+    histograms: dict[str, dict[int, dict[str, int]]] = {}
+    for row in histogram_rows:
+        if len(row) != 5:
+            raise AcceptanceError(f"unexpected statement histogram row with {len(row)} columns")
+        try:
+            bucket_number, low_ps, high_ps, count = map(int, row[1:])
+        except ValueError as error:
+            raise AcceptanceError(f"invalid statement histogram counter: {error}") from error
+        if not row[0] or bucket_number < 0 or low_ps < 0 or high_ps <= low_ps or count < 0:
+            raise AcceptanceError("statement histogram bucket values are invalid")
+        buckets = histograms.setdefault(row[0], {})
+        if bucket_number in buckets:
+            raise AcceptanceError("statement histogram snapshot contains a duplicate bucket")
+        buckets[bucket_number] = {"low_ps": low_ps, "high_ps": high_ps, "count": count}
+    return {"statements": statements, "histograms": histograms}
+
+
+def _statement_percentile_bucket(buckets: dict[int, dict[str, int]], count: int, quantile: float):
+    if count <= 0 or sum(bucket["count"] for bucket in buckets.values()) != count:
+        return None
+    target = math.ceil(count * quantile)
+    cumulative = 0
+    for bucket_number in sorted(buckets):
+        bucket = buckets[bucket_number]
+        cumulative += bucket["count"]
+        if cumulative >= target:
+            return [round(bucket["low_ps"] / 1_000_000_000, 6), round(bucket["high_ps"] / 1_000_000_000, 6)]
+    return None
+
+
+def statement_digest_delta(before: dict, after: dict) -> dict:
+    before_statements = before.get("statements", {})
+    after_statements = after.get("statements", {})
+    before_histograms = before.get("histograms", {})
+    after_histograms = after.get("histograms", {})
+    deltas = []
+
+    for digest, old in before_statements.items():
+        if digest not in after_statements and any(old[field] for field in STATEMENT_DIGEST_COUNTERS):
+            raise AcceptanceError("Performance Schema statement digest counter reset")
+
+    for digest, current in after_statements.items():
+        old = before_statements.get(digest, {field: 0 for field in STATEMENT_DIGEST_COUNTERS})
+        difference = {}
+        for field in STATEMENT_DIGEST_COUNTERS:
+            if current[field] < old[field]:
+                raise AcceptanceError("Performance Schema statement digest counter reset")
+            difference[field] = current[field] - old[field]
+
+        old_buckets = before_histograms.get(digest, {})
+        current_buckets = after_histograms.get(digest, {})
+        if any(bucket["count"] and number not in current_buckets for number, bucket in old_buckets.items()):
+            raise AcceptanceError("Performance Schema statement histogram counter reset")
+        histogram_delta = {}
+        for number, bucket in current_buckets.items():
+            old_bucket = old_buckets.get(number, {"count": 0, "low_ps": bucket["low_ps"], "high_ps": bucket["high_ps"]})
+            if bucket["count"] < old_bucket["count"] or (bucket["low_ps"], bucket["high_ps"]) != (old_bucket["low_ps"], old_bucket["high_ps"]):
+                raise AcceptanceError("Performance Schema statement histogram counter reset")
+            histogram_delta[number] = {
+                "low_ps": bucket["low_ps"],
+                "high_ps": bucket["high_ps"],
+                "count": bucket["count"] - old_bucket["count"],
+            }
+
+        if difference["count_star"] == 0:
+            continue
+        deltas.append({
+            "digest": digest,
+            "statement": current["statement"] or "<statement text unavailable>",
+            "count": difference["count_star"],
+            "sum_timer_wait_ms": difference["sum_timer_wait_ps"] / 1_000_000_000,
+            "mean_timer_wait_ms": difference["sum_timer_wait_ps"] / difference["count_star"] / 1_000_000_000,
+            "sum_lock_time_ms": difference["sum_lock_time_ps"] / 1_000_000_000,
+            "sum_rows_sent": difference["sum_rows_sent"],
+            "sum_rows_examined": difference["sum_rows_examined"],
+            "sum_no_index_used": difference["sum_no_index_used"],
+            "sum_no_good_index_used": difference["sum_no_good_index_used"],
+            "histogram_count": sum(bucket["count"] for bucket in histogram_delta.values()),
+            "p50_bucket_ms": _statement_percentile_bucket(histogram_delta, difference["count_star"], 0.50),
+            "p95_bucket_ms": _statement_percentile_bucket(histogram_delta, difference["count_star"], 0.95),
+            "p99_bucket_ms": _statement_percentile_bucket(histogram_delta, difference["count_star"], 0.99),
+        })
+
+    deltas.sort(key=lambda item: (-item["sum_timer_wait_ms"], -item["count"], item["digest"]))
+    return {
+        "digest_count": len(deltas),
+        "statement_count": sum(item["count"] for item in deltas),
+        "sum_timer_wait_ms": sum(item["sum_timer_wait_ms"] for item in deltas),
+        "sum_lock_time_ms": sum(item["sum_lock_time_ms"] for item in deltas),
+        "top_statements": deltas[:30],
+    }
+
+
+def performance_schema_statement_snapshot(container: str, database: str) -> dict:
+    if not re.fullmatch(r"gostream_feed_a04_mixed_[A-Za-z0-9_]+", database):
+        raise AcceptanceError("refusing Performance Schema query outside the isolated A04 mixed prefix")
+    try:
+        if scalar(container, "SELECT @@performance_schema;") != 1:
+            return {"available": False, "reason": "performance_schema_disabled"}
+        consumers = mysql_query(
+            container,
+            "SELECT ENABLED FROM performance_schema.setup_consumers WHERE NAME='statements_digest';",
+        )
+        if consumers != [["YES"]]:
+            return {"available": False, "reason": "statement_digest_consumer_disabled"}
+        summary_rows = mysql_query(
+            container,
+            "SELECT COALESCE(DIGEST,'__OTHER__'), HEX(COALESCE(DIGEST_TEXT,'')), COUNT_STAR, SUM_TIMER_WAIT, "
+            "SUM_LOCK_TIME, SUM_ROWS_SENT, SUM_ROWS_EXAMINED, SUM_NO_INDEX_USED, SUM_NO_GOOD_INDEX_USED "
+            "FROM performance_schema.events_statements_summary_by_digest "
+            f"WHERE SCHEMA_NAME='{database}' ORDER BY DIGEST;",
+        )
+        histogram_rows = mysql_query(
+            container,
+            "SELECT COALESCE(DIGEST,'__OTHER__'), BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH, COUNT_BUCKET "
+            "FROM performance_schema.events_statements_histogram_by_digest "
+            f"WHERE SCHEMA_NAME='{database}' ORDER BY DIGEST, BUCKET_NUMBER;",
+        )
+        return {"available": True, "snapshot": parse_statement_digest_snapshot(summary_rows, histogram_rows)}
+    except AcceptanceError:
+        return {"available": False, "reason": "performance_schema_query_failed"}
+
+
+def performance_schema_statement_delta(before: dict, after: dict) -> dict:
+    if not before.get("available") or not after.get("available"):
+        return {"available": False, "reason": before.get("reason") or after.get("reason") or "snapshot_unavailable"}
+    try:
+        return {"available": True, **statement_digest_delta(before["snapshot"], after["snapshot"])}
+    except (AcceptanceError, KeyError):
+        return {"available": False, "reason": "performance_schema_counter_reset_or_invalid_snapshot"}
 
 
 def schema_sql(container: str, sql: str) -> None:
@@ -659,6 +877,7 @@ def run_case(args, mode: str, round_number: int) -> dict:
             token_file.write("\n".join(reader_tokens) + "\n")
         report_path = pathlib.Path(args.report_dir) / f"mixed-{mode}-round-{round_number}.json"
         driver_log = pathlib.Path(args.report_dir) / f"mixed-{mode}-round-{round_number}.log"
+        mysql_digest_before = performance_schema_statement_snapshot(args.mysql_container, database)
         db_before = status_snapshot(args.mysql_container)
         mixed_report, _ = run_mixed_driver(
             args.mixed_driver,
@@ -672,6 +891,8 @@ def run_case(args, mode: str, round_number: int) -> dict:
         )
         report_path.write_text(json.dumps(mixed_report, indent=2) + "\n")
         db_after_mix = status_snapshot(args.mysql_container)
+        mysql_digest_after = performance_schema_statement_snapshot(args.mysql_container, database)
+        mysql_statement_diagnostics = performance_schema_statement_delta(mysql_digest_before, mysql_digest_after)
         ratios = workload_ratios(mixed_report)
         if not (0.68 <= ratios["feed"] <= 0.72 and 0.18 <= ratios["interaction"] <= 0.22 and 0.08 <= ratios["social"] <= 0.12):
             raise AcceptanceError(f"mixed driver operation ratio outside 70/20/10 tolerances: {ratios}")
@@ -759,6 +980,11 @@ def run_case(args, mode: str, round_number: int) -> dict:
             "workload_ratios": ratios,
             "database_status_before": db_before,
             "database_status_after_mixed": db_after_mix,
+            "database_statement_diagnostics": {
+                "source": "performance_schema.events_statements_summary_by_digest",
+                "window": "mixed driver lifetime: 30s read-only warmup plus 60s measured workload",
+                **mysql_statement_diagnostics,
+            },
             "database_status_before_publish": db_before_publish,
             "database_status_after": db_after,
             "outbox_drain_seconds": outbox_drain_seconds,

@@ -79,6 +79,53 @@ func TestHistogramDeltaReportRejectsReset(t *testing.T) {
 	}
 }
 
+func TestDatabasePoolWaitMetricsReportMeasurementDelta(t *testing.T) {
+	beforeText := `# TYPE gostream_database_pool_wait_count_total counter
+gostream_database_pool_wait_count_total 5
+# TYPE gostream_database_pool_wait_duration_seconds_total counter
+gostream_database_pool_wait_duration_seconds_total 0.25
+`
+	afterText := `# TYPE gostream_database_pool_wait_count_total counter
+gostream_database_pool_wait_count_total 12
+# TYPE gostream_database_pool_wait_duration_seconds_total counter
+gostream_database_pool_wait_duration_seconds_total 0.75
+`
+	before, err := parseDatabasePoolWaitMetrics(beforeText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := parseDatabasePoolWaitMetrics(afterText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := databasePoolWaitDeltaReport(before, after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WaitCount != 7 || math.Abs(got.WaitDurationSeconds-0.5) > 1e-9 {
+		t.Fatalf("database pool wait delta = %+v, want 7 waits and 0.5 seconds", got)
+	}
+}
+
+func TestDatabasePoolWaitMetricsRejectReset(t *testing.T) {
+	before := databasePoolWaitSnapshot{WaitCount: 10, WaitDurationSeconds: 1.5}
+	after := databasePoolWaitSnapshot{WaitCount: 2, WaitDurationSeconds: 0.5}
+	if _, err := databasePoolWaitDeltaReport(before, after); err == nil {
+		t.Fatal("expected database pool counter reset to be reported")
+	}
+}
+
+func TestDatabasePoolWaitMetricsRejectCounterOutsideUint64Range(t *testing.T) {
+	text := `# TYPE gostream_database_pool_wait_count_total counter
+gostream_database_pool_wait_count_total 18446744073709551616
+# TYPE gostream_database_pool_wait_duration_seconds_total counter
+gostream_database_pool_wait_duration_seconds_total 0
+`
+	if _, err := parseDatabasePoolWaitMetrics(text); err == nil {
+		t.Fatal("expected a wait count outside uint64 range to be rejected")
+	}
+}
+
 func TestFeedStageHistogramDeltasAreReportedByBoundedKey(t *testing.T) {
 	beforeText := `# TYPE gostream_feed_stage_duration_seconds histogram
 gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="candidate_query",le="0.01"} 2
@@ -286,6 +333,10 @@ func TestRunUsesActorPoolAndWritesRequestReport(t *testing.T) {
 			fmt.Fprintf(w, "gostream_feed_request_duration_seconds_bucket{scene=\"following\",outcome=\"success\",le=\"+Inf\"} %d\n", count)
 			fmt.Fprintf(w, "gostream_feed_request_duration_seconds_sum{scene=\"following\",outcome=\"success\"} %.3f\n", float64(count)*0.01)
 			fmt.Fprintf(w, "gostream_feed_request_duration_seconds_count{scene=\"following\",outcome=\"success\"} %d\n", count)
+			fmt.Fprintln(w, "# TYPE gostream_database_pool_wait_count_total counter")
+			fmt.Fprintf(w, "gostream_database_pool_wait_count_total %d\n", count)
+			fmt.Fprintln(w, "# TYPE gostream_database_pool_wait_duration_seconds_total counter")
+			fmt.Fprintf(w, "gostream_database_pool_wait_duration_seconds_total %.3f\n", float64(count)*0.002)
 			fmt.Fprintln(w, "# TYPE gostream_feed_stage_duration_seconds histogram")
 			for _, stage := range []string{"candidate_query", "interaction_state"} {
 				fmt.Fprintf(w, "gostream_feed_stage_duration_seconds_bucket{scene=\"following\",stage=\"%s\",outcome=\"success\",le=\"0.05\"} %d\n", stage, count)
@@ -339,6 +390,9 @@ func TestRunUsesActorPoolAndWritesRequestReport(t *testing.T) {
 	if len(report.ServerFeedStages) != 2 || !hasFeedStageSamples(report.ServerFeedStages, "following", "candidate_query", "success") ||
 		!hasFeedStageSamples(report.ServerFeedStages, "following", "interaction_state", "success") {
 		t.Fatalf("following Feed stage histograms missing from report: %+v", report.ServerFeedStages)
+	}
+	if report.DatabasePoolWait == nil || report.DatabasePoolWait.WaitCount == 0 || report.DatabasePoolWait.WaitDurationSeconds <= 0 {
+		t.Fatalf("database/sql pool wait delta missing from report: %+v", report.DatabasePoolWait)
 	}
 	for name, operation := range report.Operations {
 		if operation.Successes == 0 || len(operation.SuccessfulLatencyNS) != operation.Successes {
