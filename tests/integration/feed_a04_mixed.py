@@ -308,6 +308,8 @@ def format_summary(summary: dict) -> str:
         f"- Counter, follower Feed visibility, outbox and fanout consistency: {summary['all_runs_consistent']}",
         f"- API-side successful following P95 bucket (approximate): SQL-only {format_server_buckets('sql_only')}; Hybrid {format_server_buckets('hybrid')}",
         f"- API-side following candidate_query P95 bucket (approximate): SQL-only {format_stage_buckets('sql_only', 'candidate_query')}; Hybrid {format_stage_buckets('hybrid', 'candidate_query')}",
+        f"- API-side following candidate_sql P95 bucket (approximate): SQL-only {format_stage_buckets('sql_only', 'candidate_sql')}; Hybrid {format_stage_buckets('hybrid', 'candidate_sql')}",
+        f"- API-side following author_preload P95 bucket (approximate): SQL-only {format_stage_buckets('sql_only', 'author_preload')}; Hybrid {format_stage_buckets('hybrid', 'author_preload')}",
         f"- API-side following interaction_state P95 bucket (approximate): SQL-only {format_stage_buckets('sql_only', 'interaction_state')}; Hybrid {format_stage_buckets('hybrid', 'interaction_state')}",
         f"- DB pool delta during 60s measured window (waits / wait seconds / connections closed by idle cap): SQL-only {format_database_pool_wait('sql_only')}; Hybrid {format_database_pool_wait('hybrid')}",
         f"- Performance Schema statement digests ({statement_window}; available SQL digests only): SQL-only {format_statement_diagnostics('sql_only')}; Hybrid {format_statement_diagnostics('hybrid')}",

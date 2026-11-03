@@ -1143,7 +1143,8 @@ func TestDatabasePoolMaxIdleClosedMetricReflectsLiveSQLDBStats(t *testing.T) {
 }
 
 func TestFeedStageMetricsExposeBoundedStagesAndErrors(t *testing.T) {
-	_, h, db := testServer(t)
+	s, h, db := testServer(t)
+	s.UseFeedFanout(2)
 	_, viewerToken := registerTestUser(t, h, "feed_stage_viewer")
 	authorID, _ := registerTestUser(t, h, "feed_stage_author")
 	if r := request(t, h, http.MethodPut, fmt.Sprintf("/api/users/me/following/%d", authorID), viewerToken, nil); r.Code != http.StatusOK {
@@ -1155,8 +1156,25 @@ func TestFeedStageMetricsExposeBoundedStagesAndErrors(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if r := request(t, h, http.MethodGet, "/api/feed?scene=following", viewerToken, nil); r.Code != http.StatusOK {
-		t.Fatalf("following feed: %d %s", r.Code, r.Body.String())
+	followingFeed := request(t, h, http.MethodGet, "/api/feed?scene=following", viewerToken, nil)
+	if followingFeed.Code != http.StatusOK {
+		t.Fatalf("following feed: %d %s", followingFeed.Code, followingFeed.Body.String())
+	}
+	var followingPage struct {
+		Items []struct {
+			Author User `json:"author"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(followingFeed.Body.Bytes(), &followingPage); err != nil {
+		t.Fatal(err)
+	}
+	if len(followingPage.Items) == 0 {
+		t.Fatalf("following feed has no items: %s", followingFeed.Body.String())
+	}
+	for _, item := range followingPage.Items {
+		if item.Author.ID != authorID || item.Author.Nickname != "feed_stage_author" {
+			t.Fatalf("author preload mismatch: got %+v, want author id %d and nickname feed_stage_author", item.Author, authorID)
+		}
 	}
 	if r := request(t, h, http.MethodGet, "/api/feed?scene=recommend", viewerToken, nil); r.Code != http.StatusOK {
 		t.Fatalf("recommendation feed: %d %s", r.Code, r.Body.String())
@@ -1168,9 +1186,13 @@ func TestFeedStageMetricsExposeBoundedStagesAndErrors(t *testing.T) {
 	}
 	for _, marker := range []string{
 		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="candidate_query"} 1`,
+		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="candidate_sql"} 1`,
+		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="author_preload"} 1`,
 		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="interaction_state"} 1`,
 		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="recommend",stage="recommendation_context"} 1`,
 		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="recommend",stage="candidate_query"} 1`,
+		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="recommend",stage="candidate_sql"} 1`,
+		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="recommend",stage="author_preload"} 1`,
 		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="recommend",stage="recommendation_cursor"} 1`,
 	} {
 		if !strings.Contains(metrics.Body.String(), marker) {
@@ -1199,6 +1221,42 @@ func TestFeedStageMetricsExposeBoundedStagesAndErrors(t *testing.T) {
 	metrics = request(t, h, http.MethodGet, "/metrics", "", nil)
 	if !strings.Contains(metrics.Body.String(), `gostream_feed_stage_duration_seconds_count{outcome="error",scene="following",stage="candidate_query"} 1`) {
 		t.Fatalf("Feed query error stage was not recorded: %s", metrics.Body.String())
+	}
+	if !strings.Contains(metrics.Body.String(), `gostream_feed_stage_duration_seconds_count{outcome="error",scene="following",stage="candidate_sql"} 1`) {
+		t.Fatalf("Feed candidate SQL error stage was not recorded: %s", metrics.Body.String())
+	}
+}
+
+func TestFeedAuthorPreloadFailureIsReportedSeparately(t *testing.T) {
+	_, h, db := testServer(t)
+	authorID, _ := registerTestUser(t, h, "preload_failure_author")
+	video := Video{AuthorID: authorID, Title: "preload failure", MediaURL: "/media/preload.mp4", Status: "published"}
+	if err := db.Create(&video).Error; err != nil {
+		t.Fatal(err)
+	}
+	const callback = "test:fail_feed_author_preload"
+	if err := db.Callback().Query().Before("gorm:query").Register(callback, func(tx *gorm.DB) {
+		if tx.Statement.Table == "users" {
+			tx.AddError(fmt.Errorf("injected author preload failure"))
+		}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Callback().Query().Remove(callback) })
+
+	response := request(t, h, http.MethodGet, "/api/feed?scene=timeline", "", nil)
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("feed with failed author preload: %d %s", response.Code, response.Body.String())
+	}
+	metrics := request(t, h, http.MethodGet, "/metrics", "", nil)
+	for _, marker := range []string{
+		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="timeline",stage="candidate_sql"} 1`,
+		`gostream_feed_stage_duration_seconds_count{outcome="error",scene="timeline",stage="author_preload"} 1`,
+		`gostream_feed_stage_duration_seconds_count{outcome="error",scene="timeline",stage="candidate_query"} 1`,
+	} {
+		if !strings.Contains(metrics.Body.String(), marker) {
+			t.Fatalf("preload failure metrics missing %q: %s", marker, metrics.Body.String())
+		}
 	}
 }
 

@@ -186,6 +186,32 @@ gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",s
 	}
 }
 
+func TestFeedStageHistogramAcceptsCandidateSubstageLabels(t *testing.T) {
+	exposition := `# TYPE gostream_feed_stage_duration_seconds histogram
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="candidate_sql",le="0.025"} 1
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="candidate_sql",le="+Inf"} 1
+gostream_feed_stage_duration_seconds_sum{outcome="success",scene="following",stage="candidate_sql"} 0.02
+gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="candidate_sql"} 1
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="author_preload",le="0.01"} 2
+gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="author_preload",le="+Inf"} 2
+gostream_feed_stage_duration_seconds_sum{outcome="success",scene="following",stage="author_preload"} 0.015
+gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="author_preload"} 2
+`
+	stages, err := parseFeedStageHistograms(exposition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stages) != 2 {
+		t.Fatalf("parsed substages = %+v, want candidate_sql and author_preload", stages)
+	}
+	if _, ok := stages[feedStageHistogramKey{Scene: "following", Stage: "candidate_sql", Outcome: "success"}]; !ok {
+		t.Fatal("candidate_sql histogram missing")
+	}
+	if _, ok := stages[feedStageHistogramKey{Scene: "following", Stage: "author_preload", Outcome: "success"}]; !ok {
+		t.Fatal("author_preload histogram missing")
+	}
+}
+
 func TestFeedStageHistogramRejectsUnknownLabels(t *testing.T) {
 	text := `# TYPE gostream_feed_stage_duration_seconds histogram
 gostream_feed_stage_duration_seconds_bucket{outcome="success",scene="following",stage="viewer-123",le="+Inf"} 1
@@ -354,7 +380,7 @@ func TestRunUsesActorPoolAndWritesRequestReport(t *testing.T) {
 			fmt.Fprintln(w, "# TYPE gostream_database_pool_max_idle_closed_total counter")
 			fmt.Fprintf(w, "gostream_database_pool_max_idle_closed_total %d\n", count/2)
 			fmt.Fprintln(w, "# TYPE gostream_feed_stage_duration_seconds histogram")
-			for _, stage := range []string{"candidate_query", "interaction_state"} {
+			for _, stage := range []string{"candidate_query", "candidate_sql", "author_preload", "interaction_state"} {
 				fmt.Fprintf(w, "gostream_feed_stage_duration_seconds_bucket{scene=\"following\",stage=\"%s\",outcome=\"success\",le=\"0.05\"} %d\n", stage, count)
 				fmt.Fprintf(w, "gostream_feed_stage_duration_seconds_bucket{scene=\"following\",stage=\"%s\",outcome=\"success\",le=\"+Inf\"} %d\n", stage, count)
 				fmt.Fprintf(w, "gostream_feed_stage_duration_seconds_sum{scene=\"following\",stage=\"%s\",outcome=\"success\"} %.3f\n", stage, float64(count)*0.01)
@@ -403,7 +429,9 @@ func TestRunUsesActorPoolAndWritesRequestReport(t *testing.T) {
 	if report.ServerFollowing == nil || report.ServerFollowing.SampleCount == 0 || report.ServerFollowing.P95BucketUpperBoundSeconds == nil {
 		t.Fatalf("following server histogram missing from report: %+v", report.ServerFollowing)
 	}
-	if len(report.ServerFeedStages) != 2 || !hasFeedStageSamples(report.ServerFeedStages, "following", "candidate_query", "success") ||
+	if len(report.ServerFeedStages) != 4 || !hasFeedStageSamples(report.ServerFeedStages, "following", "candidate_query", "success") ||
+		!hasFeedStageSamples(report.ServerFeedStages, "following", "candidate_sql", "success") ||
+		!hasFeedStageSamples(report.ServerFeedStages, "following", "author_preload", "success") ||
 		!hasFeedStageSamples(report.ServerFeedStages, "following", "interaction_state", "success") {
 		t.Fatalf("following Feed stage histograms missing from report: %+v", report.ServerFeedStages)
 	}

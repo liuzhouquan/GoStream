@@ -144,10 +144,11 @@ func (s *Server) feed(c *gin.Context) {
 		}
 	}
 	db := s.DB.WithContext(c.Request.Context())
-	q := db.Model(&Video{}).Preload("Author").Where("videos.status = ?", "published")
+	q := db.Model(&Video{}).Where("videos.status = ?", "published")
 	cursorTime := cur.createdTime()
 	var recommendation *recommendRanking
 	var items []Video
+	hybridFollowing := false
 	if scene == "recommend" {
 		anchor := time.Now().UTC()
 		if cur.Anchor > 0 {
@@ -171,6 +172,7 @@ func (s *Server) feed(c *gin.Context) {
 		q = q.Order("videos.created_at DESC").Order("videos.id DESC")
 	case "following":
 		if s.fanoutMaxFollowers > 0 {
+			hybridFollowing = true
 			items, err = s.followingVideos(c.Request.Context(), uid(c), cur, limit)
 		} else {
 			q = q.Joins("JOIN follows ON follows.followee_id = videos.author_id AND follows.follower_id = ?", uid(c))
@@ -189,8 +191,15 @@ func (s *Server) feed(c *gin.Context) {
 		respondError(c, 400, "scene must be timeline, following, recommend, or hot")
 		return
 	}
-	if err == nil && !(scene == "following" && s.fanoutMaxFollowers > 0) {
+	if err == nil && !hybridFollowing {
+		candidateSQLStart := time.Now()
 		err = q.Limit(limit + 1).Find(&items).Error
+		s.metrics.observeFeedStage(scene, "candidate_sql", candidateSQLStart, err)
+	}
+	if err == nil {
+		authorPreloadStart := time.Now()
+		err = s.preloadVideoAuthors(c.Request.Context(), items)
+		s.metrics.observeFeedStage(scene, "author_preload", authorPreloadStart, err)
 	}
 	s.metrics.observeFeedStage(scene, "candidate_query", candidateStart, err)
 	if err != nil {
