@@ -293,6 +293,25 @@ Across the three fixtures per mode, SQL-only median following P95 was **53.055 m
 
 The compact metrics are in [`benchmarks/feed-a04-mixed-2026-11-03.json`](benchmarks/feed-a04-mixed-2026-11-03.json); the original per-request samples are in [artifact 13199773388](https://github.com/liuzhouquan/GoStream/actions/runs/41566643755/artifacts/13199773388). The run log's summary line incorrectly reported ten publishes and included SQL-only drain times in the “Hybrid” maximum; the per-run JSON confirms 20 publishes per run and the maximum Hybrid drain stated above. The runner now derives both displayed values from the report and tests them.
 
+## A04 mixed load with API-side following diagnostics, 2026-11-03
+
+[Workflow run #41573060866](https://github.com/liuzhouquan/GoStream/actions/runs/41573060866) repeated the corrected six-run 20-reader comparison with the bounded Feed route histogram. It used GitHub Actions `ubuntu-24.04` (four virtual CPUs, AMD EPYC 7763), Go 1.27.2, MySQL 8.4.13, a 128 MiB InnoDB buffer pool, `REPEATABLE-READ`, and Redis/FFmpeg disabled. Each fresh schema had 2,000 users, 10,999 follows, 20,000 videos, 19,800 completed fanout jobs, 1.9 million inbox rows and 50,000 actions. Each run used a 30-second following Feed warmup and a 60-second 70/20/10 mixed window.
+
+| Mode / round | Client following P50 | Client following P95 | Client following P99 | API mean | API P95 bucket (approx.) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| SQL-only 1 | 31.544 ms | 53.649 ms | 63.217 ms | 32.139 ms | (50, 60] ms |
+| Hybrid 1 | 22.547 ms | 70.299 ms | 92.272 ms | 28.326 ms | (60, 70] ms |
+| Hybrid 2 | 23.220 ms | 73.680 ms | 93.100 ms | 29.247 ms | (70, 80] ms |
+| SQL-only 2 | 32.215 ms | 54.607 ms | 64.031 ms | 32.749 ms | (50, 60] ms |
+| SQL-only 3 | 32.044 ms | 54.644 ms | 64.516 ms | 32.674 ms | (50, 60] ms |
+| Hybrid 3 | 17.779 ms | 32.486 ms | 37.990 ms | 18.089 ms | (25, 40] ms |
+
+The SQL-only median client P95 was **54.607 ms** and the Hybrid median was **70.299 ms**, so Hybrid was 28.74% slower and the required 20% improvement still failed. All 45,737 mixed requests and 120 API publishes succeeded. Counter, Feed visibility, outbox and fanout checks passed; Hybrid fanout drained in at most 0.073683 seconds. The default remains SQL-only.
+
+The API histogram sampled about 3,000 successful following requests in each 60-second window. Its P95 bucket was (50, 60] ms for all SQL-only rounds, (60, 70] and (70, 80] ms in the first two Hybrid rounds, and (25, 40] ms in Hybrid round three. This coarse server-side distribution broadly moves with the high/low client-tail rounds, but the third Hybrid round is much faster and the P95 buckets are intervals rather than exact values. It does not isolate SQL time from the rest of Feed handling and does not establish a query-level cause. MySQL also logged repeated redo-log checkpointer-lag warnings during the run, which is an additional shared-runner measurement limitation to retain when interpreting the spread.
+
+The [compact JSON report](benchmarks/feed-a04-route-histograms-2026-11-03.json) records the environment and six per-run client/server metrics. [Artifact 13202642309](https://github.com/liuzhouquan/GoStream/actions/runs/41573060866/artifacts/13202642309) retains the raw request latencies, API logs, MySQL status and fixture evidence. The workflow exited nonzero because the documented P95 gate was not met; report retention and disposable-schema cleanup both completed.
+
 ### Follow-up diagnosis (exploratory, not a root-cause finding)
 
 On a separate disposable MySQL 8.4.11 fixture, refreshing one followed author's `follows.created_at` while keeping its 200 historical inbox rows caused the late-follow branch to find 200 candidate videos, perform 200 unique-key inbox probes, return no rows, and take 0.799 ms in one `EXPLAIN ANALYZE`. A 20-worker direct-query probe measured Hybrid P95 at 6.415 ms before and 10.021 ms after that state change; SQL-only measured 14.490 ms and 14.400 ms. This confirms extra work in the refollow path, but Hybrid remained faster in that isolated SQL probe, so it does not explain the CI end-to-end result by itself.
