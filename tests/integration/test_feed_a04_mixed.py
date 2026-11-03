@@ -231,6 +231,105 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
         self.assertIn("statement_digest_consumer_disabled", rendered)
         self.assertIn("SELECT * FROM videos WHERE id = ?", rendered)
 
+    def test_prepared_statement_event_snapshot_and_delta_include_execute_command(self):
+        before = feed_a04_mixed.parse_account_statement_event_snapshot([
+            ["statement/com/Execute", "5", "1000000000", "0", "0", "0", "0", "0"],
+            ["statement/com/Prepare", "5", "500000000", "0", "0", "0", "0", "0"],
+        ])
+        after = feed_a04_mixed.parse_account_statement_event_snapshot([
+            ["statement/com/Execute", "8", "4000000000", "0", "2", "6", "0", "0"],
+            ["statement/com/Prepare", "8", "900000000", "0", "0", "0", "0", "0"],
+            ["statement/sql/select", "3", "600000000", "0", "3", "9", "0", "0"],
+        ])
+
+        report = feed_a04_mixed.prepared_statement_event_delta(before, after, "gostream")
+
+        self.assertEqual(report["account_user"], "gostream")
+        self.assertEqual(
+            report["source"],
+            "performance_schema.events_statements_summary_by_account_by_event_name",
+        )
+        self.assertEqual(report["prepared_execute_count"], 3)
+        self.assertEqual(report["prepared_execute_sum_timer_wait_ms"], 3.0)
+        self.assertEqual(report["prepared_execute_mean_timer_wait_ms"], 1.0)
+        self.assertEqual(report["event_count_total"], 9)
+        execute = next(event for event in report["events"] if event["event_name"] == "statement/com/Execute")
+        self.assertEqual(execute["sum_rows_examined"], 6)
+
+    def test_prepared_statement_event_snapshot_rejects_invalid_rows_and_counter_resets(self):
+        with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "unexpected account statement event row"):
+            feed_a04_mixed.parse_account_statement_event_snapshot([["statement/com/Execute", "1"]])
+        with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "duplicate account statement event"):
+            feed_a04_mixed.parse_account_statement_event_snapshot([
+                ["statement/com/Execute", "1", "1", "0", "0", "0", "0", "0"],
+                ["statement/com/Execute", "1", "1", "0", "0", "0", "0", "0"],
+            ])
+
+        before = {"statement/com/Execute": {"count_star": 5, "sum_timer_wait_ps": 5}}
+        after = {"statement/com/Execute": {"count_star": 4, "sum_timer_wait_ps": 6}}
+        with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "account statement event counter reset"):
+            feed_a04_mixed.prepared_statement_event_delta(before, after, "gostream")
+
+    def test_dsn_account_user_extracts_only_a_simple_mysql_username(self):
+        self.assertEqual(
+            feed_a04_mixed.dsn_account_user("gostream:gostream-ci-only@tcp(127.0.0.1:3306)/"),
+            "gostream",
+        )
+        with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "simple account name"):
+            feed_a04_mixed.dsn_account_user("bad'user:password@tcp(127.0.0.1:3306)/")
+
+    def test_prepared_event_delta_remains_available_when_digest_consumer_is_disabled(self):
+        before = {
+            "available": False,
+            "reason": "statement_digest_consumer_disabled",
+            "account_statement_events": {
+                "available": True,
+                "account_user": "gostream",
+                "snapshot": {"statement/com/Execute": {"count_star": 1, "sum_timer_wait_ps": 2_000_000_000}},
+            },
+        }
+        after = {
+            "available": False,
+            "reason": "statement_digest_consumer_disabled",
+            "account_statement_events": {
+                "available": True,
+                "account_user": "gostream",
+                "snapshot": {"statement/com/Execute": {"count_star": 3, "sum_timer_wait_ps": 5_000_000_000}},
+            },
+        }
+
+        report = feed_a04_mixed.performance_schema_statement_delta(before, after)
+
+        self.assertFalse(report["available"])
+        self.assertEqual(report["reason"], "statement_digest_consumer_disabled")
+        self.assertTrue(report["prepared_statement_diagnostics"]["available"])
+        self.assertEqual(report["prepared_statement_diagnostics"]["prepared_execute_count"], 2)
+
+    def test_summary_retains_prepared_statement_diagnostics_without_changing_acceptance_gate(self):
+        reports = []
+        for variant, values in (("sql-only", (1000, 1100, 900)), ("hybrid", (750, 800, 700))):
+            for round_number, value in enumerate(values, 1):
+                report = run(variant, round_number, value)
+                report["database_statement_diagnostics"]["prepared_statement_diagnostics"] = {
+                    "available": True,
+                    "account_user": "gostream",
+                    "prepared_execute_count": round_number * 10,
+                    "prepared_execute_sum_timer_wait_ms": 5.0,
+                    "prepared_execute_mean_timer_wait_ms": 0.5,
+                    "event_count_total": round_number * 30,
+                    "events": [],
+                }
+                reports.append(report)
+
+        summary = feed_a04_mixed.summarize(reports, 0.20)
+
+        self.assertEqual(
+            summary["prepared_statement_diagnostics"]["sql_only"][0]["prepared_execute_count"],
+            10,
+        )
+        self.assertTrue(summary["target_met"], "diagnostic availability must not alter the P95 acceptance gate")
+        self.assertIn("prepared COM_STMT_EXECUTE", feed_a04_mixed.format_summary(summary))
+
     def test_summary_fails_below_threshold_or_on_inconsistent_state(self):
         reports = []
         for variant, values in (("sql-only", (1000, 1000, 1000)), ("hybrid", (810, 810, 810))):

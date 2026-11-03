@@ -99,6 +99,16 @@ def summarize(reports: list[dict], required_improvement: float) -> dict:
         "sql_only": [report.get("database_statement_diagnostics") for report in sql],
         "hybrid": [report.get("database_statement_diagnostics") for report in hybrid],
     }
+    prepared_statement_diagnostics = {
+        "sql_only": [
+            report.get("database_statement_diagnostics", {}).get("prepared_statement_diagnostics")
+            for report in sql
+        ],
+        "hybrid": [
+            report.get("database_statement_diagnostics", {}).get("prepared_statement_diagnostics")
+            for report in hybrid
+        ],
+    }
     improvement = (sql_p95 - hybrid_p95) / sql_p95 if sql_p95 > 0 else 0.0
     all_consistent = all(
         report["verification"]["counter_mismatches"] == 0
@@ -123,6 +133,7 @@ def summarize(reports: list[dict], required_improvement: float) -> dict:
         "server_feed_stages": server_feed_stages,
         "database_pool_wait": database_pool_wait,
         "database_statement_diagnostics": database_statement_diagnostics,
+        "prepared_statement_diagnostics": prepared_statement_diagnostics,
         "following_p95_improvement_percent": round(improvement * 100, 2),
         "required_improvement_percent": required_improvement * 100,
         "publishes_per_run": PUBLISHERS,
@@ -212,6 +223,23 @@ def format_summary(summary: dict) -> str:
             values.append(f"r{round_number} " + "; ".join(statements))
         return ", ".join(values) if values else "unavailable"
 
+    def format_prepared_statement_diagnostics(variant: str) -> str:
+        runs = summary.get("prepared_statement_diagnostics", {}).get(variant, [])
+        values = []
+        for round_number, report in enumerate(runs, 1):
+            if not report or not report.get("available"):
+                reason = report.get("reason", "snapshot_unavailable") if report else "snapshot_unavailable"
+                values.append(f"r{round_number} unavailable ({reason})")
+                continue
+            count = report["prepared_execute_count"]
+            total = report["prepared_execute_sum_timer_wait_ms"]
+            mean = report["prepared_execute_mean_timer_wait_ms"]
+            mean_text = f"{mean:.3f}ms" if mean is not None else "n/a"
+            values.append(
+                f"r{round_number} Execute n={count}, wait={total:.3f}ms, mean={mean_text}"
+            )
+        return ", ".join(values) if values else "unavailable"
+
     statement_window = next(
         (
             report.get("window")
@@ -236,7 +264,8 @@ def format_summary(summary: dict) -> str:
         f"- API-side following candidate_query P95 bucket (approximate): SQL-only {format_stage_buckets('sql_only', 'candidate_query')}; Hybrid {format_stage_buckets('hybrid', 'candidate_query')}",
         f"- API-side following interaction_state P95 bucket (approximate): SQL-only {format_stage_buckets('sql_only', 'interaction_state')}; Hybrid {format_stage_buckets('hybrid', 'interaction_state')}",
         f"- DB pool wait delta during 60s measured window (waits / seconds): SQL-only {format_database_pool_wait('sql_only')}; Hybrid {format_database_pool_wait('hybrid')}",
-        f"- Performance Schema statement digests ({statement_window}; diagnostic only): SQL-only {format_statement_diagnostics('sql_only')}; Hybrid {format_statement_diagnostics('hybrid')}",
+        f"- Performance Schema statement digests ({statement_window}; available SQL digests only): SQL-only {format_statement_diagnostics('sql_only')}; Hybrid {format_statement_diagnostics('hybrid')}",
+        f"- Performance Schema prepared COM_STMT_EXECUTE aggregates (account scoped; command-level, not per-SQL; diagnostic only): SQL-only {format_prepared_statement_diagnostics('sql_only')}; Hybrid {format_prepared_statement_diagnostics('hybrid')}",
         f"- Target met: {summary['target_met']}",
         "- Client-side P95 remains the acceptance gate. Server histogram buckets are diagnostic intervals; raw request latencies, samples, queue state, MySQL status, and API CPU/RSS are in adjacent JSON reports.",
         "",
@@ -319,6 +348,16 @@ STATEMENT_DIGEST_COUNTERS = (
     "sum_no_good_index_used",
 )
 
+ACCOUNT_STATEMENT_EVENT_COUNTERS = (
+    "count_star",
+    "sum_timer_wait_ps",
+    "sum_lock_time_ps",
+    "sum_rows_sent",
+    "sum_rows_examined",
+    "sum_no_index_used",
+    "sum_no_good_index_used",
+)
+
 
 def parse_statement_digest_snapshot(summary_rows: list[list[str]], histogram_rows: list[list[str]]) -> dict:
     statements = {}
@@ -352,6 +391,71 @@ def parse_statement_digest_snapshot(summary_rows: list[list[str]], histogram_row
             raise AcceptanceError("statement histogram snapshot contains a duplicate bucket")
         buckets[bucket_number] = {"low_ps": low_ps, "high_ps": high_ps, "count": count}
     return {"statements": statements, "histograms": histograms}
+
+
+def parse_account_statement_event_snapshot(rows: list[list[str]]) -> dict[str, dict[str, int]]:
+    events = {}
+    for row in rows:
+        if len(row) != 8:
+            raise AcceptanceError(f"unexpected account statement event row with {len(row)} columns")
+        event_name = row[0]
+        if not event_name or event_name in events:
+            raise AcceptanceError("duplicate account statement event name")
+        if not (event_name.startswith("statement/com/") or event_name.startswith("statement/sql/")):
+            raise AcceptanceError("unexpected account statement event class")
+        try:
+            counters = [int(value) for value in row[1:]]
+        except ValueError as error:
+            raise AcceptanceError(f"invalid account statement event counter: {error}") from error
+        if any(value < 0 for value in counters):
+            raise AcceptanceError("account statement event counters must be non-negative")
+        events[event_name] = dict(zip(ACCOUNT_STATEMENT_EVENT_COUNTERS, counters))
+    return events
+
+
+def prepared_statement_event_delta(before: dict, after: dict, account_user: str) -> dict:
+    deltas = []
+    for event_name, old in before.items():
+        if event_name not in after and any(old.get(field, 0) for field in ACCOUNT_STATEMENT_EVENT_COUNTERS):
+            raise AcceptanceError("Performance Schema account statement event counter reset")
+
+    for event_name, current in after.items():
+        old = before.get(event_name, {})
+        difference = {}
+        for field in ACCOUNT_STATEMENT_EVENT_COUNTERS:
+            old_value = old.get(field, 0)
+            current_value = current.get(field, 0)
+            if current_value < old_value:
+                raise AcceptanceError("Performance Schema account statement event counter reset")
+            difference[field] = current_value - old_value
+        if difference["count_star"] == 0:
+            continue
+        deltas.append({
+            "event_name": event_name,
+            "count": difference["count_star"],
+            "sum_timer_wait_ms": difference["sum_timer_wait_ps"] / 1_000_000_000,
+            "mean_timer_wait_ms": difference["sum_timer_wait_ps"] / difference["count_star"] / 1_000_000_000,
+            "sum_lock_time_ms": difference["sum_lock_time_ps"] / 1_000_000_000,
+            "sum_rows_sent": difference["sum_rows_sent"],
+            "sum_rows_examined": difference["sum_rows_examined"],
+            "sum_no_index_used": difference["sum_no_index_used"],
+            "sum_no_good_index_used": difference["sum_no_good_index_used"],
+        })
+    deltas.sort(key=lambda item: (-item["sum_timer_wait_ms"], -item["count"], item["event_name"]))
+    execute = next((item for item in deltas if item["event_name"] == "statement/com/Execute"), None)
+    execute_count = execute["count"] if execute else 0
+    execute_sum_wait_ms = execute["sum_timer_wait_ms"] if execute else 0.0
+    return {
+        "available": True,
+        "source": "performance_schema.events_statements_summary_by_account_by_event_name",
+        "scope": "account user aggregated by statement event class across the MySQL server",
+        "account_user": account_user,
+        "event_count_total": sum(item["count"] for item in deltas),
+        "prepared_execute_count": execute_count,
+        "prepared_execute_sum_timer_wait_ms": execute_sum_wait_ms,
+        "prepared_execute_mean_timer_wait_ms": execute_sum_wait_ms / execute_count if execute_count else None,
+        "events": deltas[:30],
+    }
 
 
 def _statement_percentile_bucket(buckets: dict[int, dict[str, int]], count: int, quantile: float):
@@ -430,43 +534,102 @@ def statement_digest_delta(before: dict, after: dict) -> dict:
     }
 
 
-def performance_schema_statement_snapshot(container: str, database: str) -> dict:
+def performance_schema_statement_snapshot(container: str, database: str, account_user: str) -> dict:
     if not re.fullmatch(r"gostream_feed_a04_mixed_[A-Za-z0-9_]+", database):
         raise AcceptanceError("refusing Performance Schema query outside the isolated A04 mixed prefix")
+    if not re.fullmatch(r"[A-Za-z0-9_]+", account_user):
+        raise AcceptanceError("refusing Performance Schema account query with an invalid username")
+    unavailable_account_events = {"available": False, "reason": "account_event_query_failed"}
     try:
         if scalar(container, "SELECT @@performance_schema;") != 1:
-            return {"available": False, "reason": "performance_schema_disabled"}
-        consumers = mysql_query(
-            container,
-            "SELECT ENABLED FROM performance_schema.setup_consumers WHERE NAME='statements_digest';",
-        )
-        if consumers != [["YES"]]:
-            return {"available": False, "reason": "statement_digest_consumer_disabled"}
-        summary_rows = mysql_query(
-            container,
-            "SELECT COALESCE(DIGEST,'__OTHER__'), HEX(COALESCE(DIGEST_TEXT,'')), COUNT_STAR, SUM_TIMER_WAIT, "
-            "SUM_LOCK_TIME, SUM_ROWS_SENT, SUM_ROWS_EXAMINED, SUM_NO_INDEX_USED, SUM_NO_GOOD_INDEX_USED "
-            "FROM performance_schema.events_statements_summary_by_digest "
-            f"WHERE SCHEMA_NAME='{database}' ORDER BY DIGEST;",
-        )
-        histogram_rows = mysql_query(
-            container,
-            "SELECT COALESCE(DIGEST,'__OTHER__'), BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH, COUNT_BUCKET "
-            "FROM performance_schema.events_statements_histogram_by_digest "
-            f"WHERE SCHEMA_NAME='{database}' ORDER BY DIGEST, BUCKET_NUMBER;",
-        )
-        return {"available": True, "snapshot": parse_statement_digest_snapshot(summary_rows, histogram_rows)}
+            return {
+                "available": False,
+                "reason": "performance_schema_disabled",
+                "account_statement_events": {"available": False, "reason": "performance_schema_disabled"},
+            }
+        account_statement_events = unavailable_account_events
+        try:
+            account_event_rows = mysql_query(
+                container,
+                "SELECT EVENT_NAME, SUM(COUNT_STAR), SUM(SUM_TIMER_WAIT), SUM(SUM_LOCK_TIME), "
+                "SUM(SUM_ROWS_SENT), SUM(SUM_ROWS_EXAMINED), SUM(SUM_NO_INDEX_USED), SUM(SUM_NO_GOOD_INDEX_USED) "
+                "FROM performance_schema.events_statements_summary_by_account_by_event_name "
+                f"WHERE USER='{account_user}' AND (EVENT_NAME LIKE 'statement/com/%' OR EVENT_NAME LIKE 'statement/sql/%') "
+                "GROUP BY EVENT_NAME ORDER BY EVENT_NAME;",
+            )
+            account_statement_events = {
+                "available": True,
+                "account_user": account_user,
+                "snapshot": parse_account_statement_event_snapshot(account_event_rows),
+            }
+        except (AcceptanceError, ValueError):
+            pass
+
+        digest_diagnostics = {"available": False, "reason": "performance_schema_query_failed"}
+        try:
+            consumers = mysql_query(
+                container,
+                "SELECT ENABLED FROM performance_schema.setup_consumers WHERE NAME='statements_digest';",
+            )
+            if consumers != [["YES"]]:
+                digest_diagnostics = {"available": False, "reason": "statement_digest_consumer_disabled"}
+            else:
+                summary_rows = mysql_query(
+                    container,
+                    "SELECT COALESCE(DIGEST,'__OTHER__'), HEX(COALESCE(DIGEST_TEXT,'')), COUNT_STAR, SUM_TIMER_WAIT, "
+                    "SUM_LOCK_TIME, SUM_ROWS_SENT, SUM_ROWS_EXAMINED, SUM_NO_INDEX_USED, SUM_NO_GOOD_INDEX_USED "
+                    "FROM performance_schema.events_statements_summary_by_digest "
+                    f"WHERE SCHEMA_NAME='{database}' ORDER BY DIGEST;",
+                )
+                histogram_rows = mysql_query(
+                    container,
+                    "SELECT COALESCE(DIGEST,'__OTHER__'), BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH, COUNT_BUCKET "
+                    "FROM performance_schema.events_statements_histogram_by_digest "
+                    f"WHERE SCHEMA_NAME='{database}' ORDER BY DIGEST, BUCKET_NUMBER;",
+                )
+                digest_diagnostics = {
+                    "available": True,
+                    "snapshot": parse_statement_digest_snapshot(summary_rows, histogram_rows),
+                }
+        except (AcceptanceError, ValueError):
+            pass
+        return {**digest_diagnostics, "account_statement_events": account_statement_events}
     except (AcceptanceError, ValueError):
-        return {"available": False, "reason": "performance_schema_query_failed"}
+        return {
+            "available": False,
+            "reason": "performance_schema_query_failed",
+            "account_statement_events": unavailable_account_events,
+        }
 
 
 def performance_schema_statement_delta(before: dict, after: dict) -> dict:
-    if not before.get("available") or not after.get("available"):
-        return {"available": False, "reason": before.get("reason") or after.get("reason") or "snapshot_unavailable"}
-    try:
-        return {"available": True, **statement_digest_delta(before["snapshot"], after["snapshot"])}
-    except (AcceptanceError, KeyError):
-        return {"available": False, "reason": "performance_schema_counter_reset_or_invalid_snapshot"}
+    result = {"available": False, "reason": before.get("reason") or after.get("reason") or "snapshot_unavailable"}
+    if before.get("available") and after.get("available"):
+        try:
+            result = {"available": True, **statement_digest_delta(before["snapshot"], after["snapshot"])}
+        except (AcceptanceError, KeyError):
+            result = {"available": False, "reason": "performance_schema_counter_reset_or_invalid_snapshot"}
+
+    before_events = before.get("account_statement_events", {})
+    after_events = after.get("account_statement_events", {})
+    prepared_diagnostics = {
+        "available": False,
+        "reason": before_events.get("reason") or after_events.get("reason") or "account_event_snapshot_unavailable",
+    }
+    if before_events.get("available") and after_events.get("available"):
+        try:
+            if before_events.get("account_user") != after_events.get("account_user"):
+                raise AcceptanceError("Performance Schema account user changed between snapshots")
+            prepared_diagnostics = prepared_statement_event_delta(
+                before_events["snapshot"], after_events["snapshot"], after_events["account_user"]
+            )
+        except (AcceptanceError, KeyError):
+            prepared_diagnostics = {
+                "available": False,
+                "reason": "performance_schema_account_event_reset_or_invalid_snapshot",
+            }
+    result["prepared_statement_diagnostics"] = prepared_diagnostics
+    return result
 
 
 def schema_sql(container: str, sql: str) -> None:
@@ -475,6 +638,13 @@ def schema_sql(container: str, sql: str) -> None:
 
 def schema_dsn(prefix: str, schema: str) -> str:
     return prefix + schema + "?charset=utf8mb4&parseTime=True&loc=UTC"
+
+
+def dsn_account_user(dsn_prefix: str) -> str:
+    match = re.match(r"^([A-Za-z0-9_]+)(?::[^@]*)?@tcp\(", dsn_prefix)
+    if not match:
+        raise AcceptanceError("A04 MySQL DSN must use a simple account name and the tcp protocol")
+    return match.group(1)
 
 
 def prepare_schema(container: str, schema: str) -> None:
@@ -877,7 +1047,8 @@ def run_case(args, mode: str, round_number: int) -> dict:
             token_file.write("\n".join(reader_tokens) + "\n")
         report_path = pathlib.Path(args.report_dir) / f"mixed-{mode}-round-{round_number}.json"
         driver_log = pathlib.Path(args.report_dir) / f"mixed-{mode}-round-{round_number}.log"
-        mysql_digest_before = performance_schema_statement_snapshot(args.mysql_container, database)
+        account_user = dsn_account_user(args.dsn_prefix)
+        mysql_digest_before = performance_schema_statement_snapshot(args.mysql_container, database, account_user)
         db_before = status_snapshot(args.mysql_container)
         mixed_report, _ = run_mixed_driver(
             args.mixed_driver,
@@ -891,7 +1062,7 @@ def run_case(args, mode: str, round_number: int) -> dict:
         )
         report_path.write_text(json.dumps(mixed_report, indent=2) + "\n")
         db_after_mix = status_snapshot(args.mysql_container)
-        mysql_digest_after = performance_schema_statement_snapshot(args.mysql_container, database)
+        mysql_digest_after = performance_schema_statement_snapshot(args.mysql_container, database, account_user)
         mysql_statement_diagnostics = performance_schema_statement_delta(mysql_digest_before, mysql_digest_after)
         ratios = workload_ratios(mixed_report)
         if not (0.68 <= ratios["feed"] <= 0.72 and 0.18 <= ratios["interaction"] <= 0.22 and 0.08 <= ratios["social"] <= 0.12):

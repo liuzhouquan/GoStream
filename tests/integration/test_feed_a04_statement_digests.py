@@ -61,72 +61,115 @@ class FeedA04StatementDigestTests(unittest.TestCase):
         )
         self.assertEqual(
             report,
-            {"available": False, "reason": "statement_digest_consumer_disabled"},
+            {
+                "available": False,
+                "reason": "statement_digest_consumer_disabled",
+                "prepared_statement_diagnostics": {
+                    "available": False,
+                    "reason": "account_event_snapshot_unavailable",
+                },
+            },
         )
 
     @mock.patch.object(feed_a04_mixed, "scalar", return_value=0)
     def test_snapshot_reports_performance_schema_disabled_without_querying_it(self, scalar):
         with mock.patch.object(feed_a04_mixed, "mysql_query") as mysql_query:
             report = feed_a04_mixed.performance_schema_statement_snapshot(
-                "mysql-a04", "gostream_feed_a04_mixed_123_1"
+                "mysql-a04", "gostream_feed_a04_mixed_123_1", "gostream"
             )
-        self.assertEqual(report, {"available": False, "reason": "performance_schema_disabled"})
+        self.assertEqual(
+            report,
+            {
+                "available": False,
+                "reason": "performance_schema_disabled",
+                "account_statement_events": {"available": False, "reason": "performance_schema_disabled"},
+            },
+        )
         mysql_query.assert_not_called()
         scalar.assert_called_once_with("mysql-a04", "SELECT @@performance_schema;")
 
     @mock.patch.object(feed_a04_mixed, "scalar", return_value=1)
-    @mock.patch.object(feed_a04_mixed, "mysql_query", return_value=[])
+    @mock.patch.object(feed_a04_mixed, "mysql_query")
     def test_snapshot_reports_digest_consumer_disabled(self, mysql_query, _scalar):
+        mysql_query.side_effect = [[], [["NO"]]]
         report = feed_a04_mixed.performance_schema_statement_snapshot(
-            "mysql-a04", "gostream_feed_a04_mixed_123_1"
+            "mysql-a04", "gostream_feed_a04_mixed_123_1", "gostream"
         )
-        self.assertEqual(report, {"available": False, "reason": "statement_digest_consumer_disabled"})
-        mysql_query.assert_called_once_with(
+        self.assertEqual(report["available"], False)
+        self.assertEqual(report["reason"], "statement_digest_consumer_disabled")
+        self.assertTrue(report["account_statement_events"]["available"])
+        self.assertEqual(report["account_statement_events"]["snapshot"], {})
+        mysql_query.assert_has_calls([
+            mock.call(
+                "mysql-a04",
+                "SELECT EVENT_NAME, SUM(COUNT_STAR), SUM(SUM_TIMER_WAIT), SUM(SUM_LOCK_TIME), "
+                "SUM(SUM_ROWS_SENT), SUM(SUM_ROWS_EXAMINED), SUM(SUM_NO_INDEX_USED), SUM(SUM_NO_GOOD_INDEX_USED) "
+                "FROM performance_schema.events_statements_summary_by_account_by_event_name "
+                "WHERE USER='gostream' AND (EVENT_NAME LIKE 'statement/com/%' OR EVENT_NAME LIKE 'statement/sql/%') "
+                "GROUP BY EVENT_NAME ORDER BY EVENT_NAME;",
+            ),
+            mock.call(
             "mysql-a04",
             "SELECT ENABLED FROM performance_schema.setup_consumers WHERE NAME='statements_digest';",
-        )
+            ),
+        ])
 
     @mock.patch.object(feed_a04_mixed, "scalar", return_value=1)
     @mock.patch.object(feed_a04_mixed, "mysql_query")
     def test_snapshot_reads_only_the_isolated_schema_digest(self, mysql_query, _scalar):
         sql = "SELECT * FROM videos WHERE id = ?"
         mysql_query.side_effect = [
+            [],
             [["YES"]],
             [["D1", sql.encode().hex().upper(), "3", "9000000000", "1000000000", "60", "300", "0", "0"]],
             [["D1", "1", "0", "1000000000", "2"], ["D1", "2", "1000000000", "2000000000", "1"]],
         ]
 
         result = feed_a04_mixed.performance_schema_statement_snapshot(
-            "mysql-a04", "gostream_feed_a04_mixed_123_1"
+            "mysql-a04", "gostream_feed_a04_mixed_123_1", "gostream"
         )
 
         self.assertTrue(result["available"])
         self.assertEqual(result["snapshot"]["statements"]["D1"]["statement"], sql)
-        self.assertIn("WHERE SCHEMA_NAME='gostream_feed_a04_mixed_123_1'", mysql_query.call_args_list[1].args[1])
         self.assertIn("WHERE SCHEMA_NAME='gostream_feed_a04_mixed_123_1'", mysql_query.call_args_list[2].args[1])
+        self.assertIn("WHERE SCHEMA_NAME='gostream_feed_a04_mixed_123_1'", mysql_query.call_args_list[3].args[1])
 
     @mock.patch.object(feed_a04_mixed, "scalar", return_value=1)
     @mock.patch.object(feed_a04_mixed, "mysql_query")
     def test_snapshot_treats_performance_schema_query_failure_as_diagnostic_unavailable(self, mysql_query, _scalar):
-        mysql_query.side_effect = [[['YES']], feed_a04_mixed.AcceptanceError("container stopped")]
+        def query(_container, sql):
+            if "events_statements_summary_by_account_by_event_name" in sql:
+                return []
+            raise feed_a04_mixed.AcceptanceError("container stopped")
+
+        mysql_query.side_effect = query
         result = feed_a04_mixed.performance_schema_statement_snapshot(
-            "mysql-a04", "gostream_feed_a04_mixed_123_1"
+            "mysql-a04", "gostream_feed_a04_mixed_123_1", "gostream"
         )
-        self.assertEqual(
-            result,
-            {"available": False, "reason": "performance_schema_query_failed"},
-        )
+        self.assertFalse(result["available"])
+        self.assertEqual(result["reason"], "performance_schema_query_failed")
+        self.assertTrue(result["account_statement_events"]["available"])
 
     @mock.patch.object(feed_a04_mixed, "scalar", side_effect=ValueError("unexpected scalar result"))
     def test_snapshot_treats_unparseable_capability_result_as_unavailable(self, _scalar):
         result = feed_a04_mixed.performance_schema_statement_snapshot(
-            "mysql-a04", "gostream_feed_a04_mixed_123_1"
+            "mysql-a04", "gostream_feed_a04_mixed_123_1", "gostream"
         )
-        self.assertEqual(result, {"available": False, "reason": "performance_schema_query_failed"})
+        self.assertEqual(
+            result,
+            {
+                "available": False,
+                "reason": "performance_schema_query_failed",
+                "account_statement_events": {
+                    "available": False,
+                    "reason": "account_event_query_failed",
+                },
+            },
+        )
 
     def test_snapshot_refuses_non_a04_database_prefix(self):
         with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "outside the isolated A04 mixed prefix"):
-            feed_a04_mixed.performance_schema_statement_snapshot("mysql-a04", "gostream")
+            feed_a04_mixed.performance_schema_statement_snapshot("mysql-a04", "gostream", "gostream")
 
 
 if __name__ == "__main__":
