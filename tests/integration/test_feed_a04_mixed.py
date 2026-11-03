@@ -75,6 +75,17 @@ def run(variant, round_number, following_p95_ns, publish_p95_ns=3_000_000, fanou
 
 
 class FeedA04MixedHelpersTest(unittest.TestCase):
+    def test_mysql_dsn_interpolation_is_opt_in(self):
+        prefix = "gostream:gostream-ci-only@tcp(127.0.0.1:3306)/"
+        self.assertEqual(
+            feed_a04_mixed.schema_dsn(prefix, "a04_probe"),
+            "gostream:gostream-ci-only@tcp(127.0.0.1:3306)/a04_probe?charset=utf8mb4&parseTime=True&loc=UTC",
+        )
+        self.assertEqual(
+            feed_a04_mixed.schema_dsn(prefix, "a04_probe", interpolate_params=True),
+            "gostream:gostream-ci-only@tcp(127.0.0.1:3306)/a04_probe?charset=utf8mb4&parseTime=True&loc=UTC&interpolateParams=true",
+        )
+
     def test_acceptance_summary_reports_publish_count_and_hybrid_fanout_only(self):
         reports = []
         for variant, drain_seconds in (("sql-only", 0.9), ("hybrid", 0.5)):
@@ -417,6 +428,16 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
         rendered = feed_a04_mixed.format_summary(summary)
         self.assertIn("sql-only r1 CPU=captured, goroutine=unavailable", rendered)
         self.assertIn("hybrid r1 CPU=captured, goroutine=unavailable", rendered)
+
+    def test_summary_records_mysql_interpolation_experiment_setting(self):
+        reports = [
+            run(variant, round_number, following_p95_ns=1_000)
+            for variant in ("sql-only", "hybrid")
+            for round_number in range(1, 4)
+        ]
+        summary = feed_a04_mixed.summarize(reports, 0.20, interpolate_params=True)
+        self.assertTrue(summary["mysql_interpolate_params"])
+        self.assertIn("MySQL interpolateParams: enabled", feed_a04_mixed.format_summary(summary))
 
     def test_summary_fails_below_threshold_or_on_inconsistent_state(self):
         reports = []
