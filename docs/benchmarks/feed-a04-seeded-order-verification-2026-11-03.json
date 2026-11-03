@@ -1,0 +1,472 @@
+{
+  "run_id": 41625136743,
+  "workflow_url": "https://github.com/liuzhouquan/GoStream/actions/runs/41625136743",
+  "commit": "0496d0a9a72994075c56c925f66235510737e3c3",
+  "mysql_version": "8.4.13",
+  "mysql_interpolate_params": true,
+  "runner": {
+    "os": "ubuntu-24.04",
+    "cpu_model": "AMD EPYC 7763",
+    "vcpus": 4,
+    "memory_gib": 15,
+    "go_version": "1.27.2"
+  },
+  "workload": {
+    "fixture": {
+      "users": 2000,
+      "authors": 100,
+      "videos": 20000,
+      "follows": 10999,
+      "likes": 50000,
+      "feed_inboxes": 1900000
+    },
+    "concurrency": 20,
+    "warmup_seconds": 30,
+    "measured_seconds_per_round": 60,
+    "rounds_per_variant": 3,
+    "successful_mixed_requests": 46892,
+    "failed_mixed_requests": 0,
+    "successful_following_requests": 18769,
+    "publishes": 120,
+    "publish_failures": 0,
+    "consistency_passed": true,
+    "pool_wait_count_all_rounds_zero": true,
+    "max_idle_closed_all_rounds_zero": true,
+    "max_hybrid_fanout_drain_seconds": 0.0766076449999673
+  },
+  "acceptance": {
+    "sql_only_median_following_p95_ms": 49.174157,
+    "hybrid_median_following_p95_ms": 64.791005,
+    "hybrid_p95_improvement_percent": -31.76,
+    "required_improvement_percent": 20.0,
+    "target_met": false,
+    "workflow_exit_reason": "required +20% median following P95 improvement not met"
+  },
+  "schedule_seed": 41625136743,
+  "schedule_randomized": true,
+  "schedule": [
+    {
+      "mode": "sql-only",
+      "round": 1
+    },
+    {
+      "mode": "hybrid",
+      "round": 1
+    },
+    {
+      "mode": "sql-only",
+      "round": 2
+    },
+    {
+      "mode": "hybrid",
+      "round": 2
+    },
+    {
+      "mode": "hybrid",
+      "round": 3
+    },
+    {
+      "mode": "sql-only",
+      "round": 3
+    }
+  ],
+  "rounds": [
+    {
+      "mode": "sql-only",
+      "round": 1,
+      "mixed_requests": {
+        "successes": 7833,
+        "failures": 0
+      },
+      "following": {
+        "successes": 3136,
+        "failures": 0,
+        "client_p95_ms": 48.155,
+        "api_p95_bucket_ms": [
+          40.0,
+          50.0
+        ],
+        "candidate_query": {
+          "mean_ms": 25.672,
+          "p95_bucket_ms": [
+            40.0,
+            50.0
+          ]
+        },
+        "interaction_state": {
+          "mean_ms": 3.026,
+          "p95_bucket_ms": [
+            5.0,
+            10.0
+          ]
+        }
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "client_p95_ms": 11.471
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0
+      },
+      "api_process": {
+        "average_cpu_percent": 30.69,
+        "peak_rss_kib": 34936
+      },
+      "performance_schema": {
+        "available": false,
+        "failure_stage": "digest_snapshot_parse",
+        "error": "AcceptanceError: statement histogram snapshot contains a duplicate bucket",
+        "digest_count": null,
+        "statement_count": null
+      }
+    },
+    {
+      "mode": "hybrid",
+      "round": 1,
+      "mixed_requests": {
+        "successes": 7854,
+        "failures": 0
+      },
+      "following": {
+        "successes": 3144,
+        "failures": 0,
+        "client_p95_ms": 64.791,
+        "api_p95_bucket_ms": [
+          60.0,
+          70.0
+        ],
+        "candidate_query": {
+          "mean_ms": 21.295,
+          "p95_bucket_ms": [
+            60.0,
+            70.0
+          ]
+        },
+        "interaction_state": {
+          "mean_ms": 2.72,
+          "p95_bucket_ms": [
+            5.0,
+            10.0
+          ]
+        }
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "client_p95_ms": 14.853
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_drain_seconds": 0.0729331820000425
+      },
+      "api_process": {
+        "average_cpu_percent": 52.9,
+        "peak_rss_kib": 37988
+      },
+      "performance_schema": {
+        "available": true,
+        "failure_stage": null,
+        "error": null,
+        "digest_count": 33,
+        "statement_count": 136142
+      }
+    },
+    {
+      "mode": "sql-only",
+      "round": 2,
+      "mixed_requests": {
+        "successes": 7717,
+        "failures": 0
+      },
+      "following": {
+        "successes": 3088,
+        "failures": 0,
+        "client_p95_ms": 49.174,
+        "api_p95_bucket_ms": [
+          40.0,
+          50.0
+        ],
+        "candidate_query": {
+          "mean_ms": 26.338,
+          "p95_bucket_ms": [
+            40.0,
+            50.0
+          ]
+        },
+        "interaction_state": {
+          "mean_ms": 3.042,
+          "p95_bucket_ms": [
+            5.0,
+            10.0
+          ]
+        }
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "client_p95_ms": 11.548
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_drain_seconds": 0.069262751999986
+      },
+      "api_process": {
+        "average_cpu_percent": 32.35,
+        "peak_rss_kib": 35580
+      },
+      "performance_schema": {
+        "available": true,
+        "failure_stage": null,
+        "error": null,
+        "digest_count": 33,
+        "statement_count": 85279
+      }
+    },
+    {
+      "mode": "hybrid",
+      "round": 2,
+      "mixed_requests": {
+        "successes": 8041,
+        "failures": 0
+      },
+      "following": {
+        "successes": 3217,
+        "failures": 0,
+        "client_p95_ms": 28.481,
+        "api_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "candidate_query": {
+          "mean_ms": 11.797,
+          "p95_bucket_ms": [
+            10.0,
+            25.0
+          ]
+        },
+        "interaction_state": {
+          "mean_ms": 2.905,
+          "p95_bucket_ms": [
+            5.0,
+            10.0
+          ]
+        }
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "client_p95_ms": 16.399
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_drain_seconds": 0.07359538800005794
+      },
+      "api_process": {
+        "average_cpu_percent": 53.54,
+        "peak_rss_kib": 39232
+      },
+      "performance_schema": {
+        "available": true,
+        "failure_stage": null,
+        "error": null,
+        "digest_count": 33,
+        "statement_count": 138567
+      }
+    },
+    {
+      "mode": "hybrid",
+      "round": 3,
+      "mixed_requests": {
+        "successes": 7753,
+        "failures": 0
+      },
+      "following": {
+        "successes": 3104,
+        "failures": 0,
+        "client_p95_ms": 68.98,
+        "api_p95_bucket_ms": [
+          60.0,
+          70.0
+        ],
+        "candidate_query": {
+          "mean_ms": 22.782,
+          "p95_bucket_ms": [
+            60.0,
+            70.0
+          ]
+        },
+        "interaction_state": {
+          "mean_ms": 2.772,
+          "p95_bucket_ms": [
+            5.0,
+            10.0
+          ]
+        }
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "client_p95_ms": 16.985
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_drain_seconds": 0.0766076449999673
+      },
+      "api_process": {
+        "average_cpu_percent": 53.22,
+        "peak_rss_kib": 38396
+      },
+      "performance_schema": {
+        "available": false,
+        "failure_stage": "digest_snapshot_parse",
+        "error": "AcceptanceError: statement histogram snapshot contains a duplicate bucket",
+        "digest_count": null,
+        "statement_count": null
+      }
+    },
+    {
+      "mode": "sql-only",
+      "round": 3,
+      "mixed_requests": {
+        "successes": 7694,
+        "failures": 0
+      },
+      "following": {
+        "successes": 3080,
+        "failures": 0,
+        "client_p95_ms": 51.031,
+        "api_p95_bucket_ms": [
+          50.0,
+          60.0
+        ],
+        "candidate_query": {
+          "mean_ms": 27.248,
+          "p95_bucket_ms": [
+            40.0,
+            50.0
+          ]
+        },
+        "interaction_state": {
+          "mean_ms": 2.995,
+          "p95_bucket_ms": [
+            5.0,
+            10.0
+          ]
+        }
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "client_p95_ms": 11.629
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_drain_seconds": 0.07468790800021452
+      },
+      "api_process": {
+        "average_cpu_percent": 32.46,
+        "peak_rss_kib": 35244
+      },
+      "performance_schema": {
+        "available": true,
+        "failure_stage": null,
+        "error": null,
+        "digest_count": 33,
+        "statement_count": 84671
+      }
+    }
+  ],
+  "diagnostic_summary": {
+    "digest_snapshots_available": 4,
+    "digest_snapshot_count": 6,
+    "duplicate_bucket_parse_failures": [
+      {
+        "mode": "sql-only",
+        "round": 1
+      },
+      {
+        "mode": "hybrid",
+        "round": 3
+      }
+    ],
+    "exact_duplicate_row_identity_captured": false,
+    "profiles": {
+      "sql-only": {
+        "duration_seconds": 60,
+        "cpu_samples_ms": 8970,
+        "top_flat_symbol": "internal/runtime/syscall/linux.Syscall6",
+        "top_flat_percent": 23.3,
+        "goroutine_dump_captured": true
+      },
+      "hybrid": {
+        "duration_seconds": 60,
+        "cpu_samples_ms": 9050,
+        "top_flat_symbol": "internal/runtime/syscall/linux.Syscall6",
+        "top_flat_percent": 21.44,
+        "goroutine_dump_captured": true
+      }
+    },
+    "profile_interpretation": "Linux syscall was the top flat symbol in both profiles; the profiles do not locate the client P95 cause or separate database, network, and result-scan time."
+  },
+  "notes": [
+    "The seeded schedule was reproducible and paired both modes within each round on isolated fresh fixtures; it is not same-database pairing.",
+    "The mixed workload completed with zero request failures and all consistency checks; the workflow failed only the +20% P95 acceptance gate.",
+    "Digest snapshot parsing failed in SQL-only round 1 and Hybrid round 3. The previous NULL DIGEST filter was active; the exact duplicate key rows were not retained, so the cause remains unconfirmed.",
+    "The seeded order reduced fixed order bias but did not remove fresh-fixture or server-state variation. Hybrid round 2 P95 was much lower than Hybrid rounds 1 and 3."
+  ]
+}
