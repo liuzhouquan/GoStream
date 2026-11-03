@@ -56,14 +56,21 @@ class FeedA04StatementDigestTests(unittest.TestCase):
 
     def test_statement_delta_preserves_unavailable_diagnostic_reason(self):
         report = feed_a04_mixed.performance_schema_statement_delta(
-            {"available": False, "reason": "statement_digest_consumer_disabled"},
+            {
+                "available": False,
+                "reason": "performance_schema_query_failed",
+                "failure_stage": "digest_histogram_query",
+                "error": "AcceptanceError: access denied",
+            },
             {"available": False, "reason": "snapshot_unavailable"},
         )
         self.assertEqual(
             report,
             {
                 "available": False,
-                "reason": "statement_digest_consumer_disabled",
+                "reason": "performance_schema_query_failed",
+                "failure_stage": "digest_histogram_query",
+                "error": "AcceptanceError: access denied",
                 "prepared_statement_diagnostics": {
                     "available": False,
                     "reason": "account_event_snapshot_unavailable",
@@ -150,6 +157,32 @@ class FeedA04StatementDigestTests(unittest.TestCase):
         self.assertEqual(result["reason"], "performance_schema_query_failed")
         self.assertTrue(result["account_statement_events"]["available"])
 
+    @mock.patch.object(feed_a04_mixed, "scalar", return_value=1)
+    @mock.patch.object(feed_a04_mixed, "mysql_query")
+    def test_snapshot_reports_digest_failure_stage_and_redacts_credentials(self, mysql_query, _scalar):
+        def query(_container, sql):
+            if "events_statements_summary_by_account_by_event_name" in sql:
+                return []
+            if "setup_consumers" in sql:
+                return [["YES"]]
+            raise feed_a04_mixed.AcceptanceError(
+                "Lost connection; MYSQL_PWD=fixture-secret password:other-secret "
+                "dsn=gostream:third-secret@tcp(localhost:3306)/a04 token=fixture-token"
+            )
+
+        mysql_query.side_effect = query
+        result = feed_a04_mixed.performance_schema_statement_snapshot(
+            "mysql-a04", "gostream_feed_a04_mixed_123_1", "gostream"
+        )
+
+        self.assertFalse(result["available"])
+        self.assertEqual(result["failure_stage"], "digest_summary_query")
+        self.assertIn("Lost connection", result["error"])
+        self.assertNotIn("fixture-secret", result["error"])
+        self.assertNotIn("other-secret", result["error"])
+        self.assertNotIn("third-secret", result["error"])
+        self.assertNotIn("fixture-token", result["error"])
+
     @mock.patch.object(feed_a04_mixed, "scalar", side_effect=ValueError("unexpected scalar result"))
     def test_snapshot_treats_unparseable_capability_result_as_unavailable(self, _scalar):
         result = feed_a04_mixed.performance_schema_statement_snapshot(
@@ -160,9 +193,11 @@ class FeedA04StatementDigestTests(unittest.TestCase):
             {
                 "available": False,
                 "reason": "performance_schema_query_failed",
+                "failure_stage": "performance_schema_capability_check",
+                "error": "ValueError: unexpected scalar result",
                 "account_statement_events": {
                     "available": False,
-                    "reason": "account_event_query_failed",
+                    "reason": "performance_schema_capability_check_failed",
                 },
             },
         )

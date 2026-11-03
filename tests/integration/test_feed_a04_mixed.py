@@ -292,7 +292,9 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
                 reports.append(run(variant, round_number, value))
         reports[0]["database_statement_diagnostics"] = {
             "available": False,
-            "reason": "statement_digest_consumer_disabled",
+            "reason": "performance_schema_query_failed",
+            "failure_stage": "digest_histogram_query",
+            "error": "AcceptanceError: access denied",
             "window": "mixed driver lifetime: 30s read-only warmup plus 60s measured workload",
         }
 
@@ -301,13 +303,17 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
         self.assertEqual(summary["database_pool_wait"]["sql_only"][0]["wait_count"], 1)
         self.assertEqual(
             summary["database_statement_diagnostics"]["sql_only"][0]["reason"],
-            "statement_digest_consumer_disabled",
+            "performance_schema_query_failed",
+        )
+        self.assertEqual(
+            summary["database_statement_diagnostics"]["sql_only"][0]["failure_stage"],
+            "digest_histogram_query",
         )
         self.assertTrue(summary["target_met"], "diagnostic availability must not alter the P95 acceptance gate")
         rendered = feed_a04_mixed.format_summary(summary)
         self.assertIn("DB pool delta during 60s measured window", rendered)
         self.assertIn("Performance Schema statement digests", rendered)
-        self.assertIn("statement_digest_consumer_disabled", rendered)
+        self.assertIn("performance_schema_query_failed; stage=digest_histogram_query", rendered)
         self.assertIn("SELECT * FROM videos WHERE id = ?", rendered)
 
     def test_prepared_statement_event_snapshot_and_delta_include_execute_command(self):
