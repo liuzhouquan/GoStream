@@ -613,6 +613,7 @@ def statement_digest_delta(before: dict, after: dict) -> dict:
 
         if difference["count_star"] == 0:
             continue
+        histogram_count = sum(bucket["count"] for bucket in histogram_delta.values())
         deltas.append({
             "schema_name": schema_name,
             "digest": digest,
@@ -625,10 +626,14 @@ def statement_digest_delta(before: dict, after: dict) -> dict:
             "sum_rows_examined": difference["sum_rows_examined"],
             "sum_no_index_used": difference["sum_no_index_used"],
             "sum_no_good_index_used": difference["sum_no_good_index_used"],
-            "histogram_count": sum(bucket["count"] for bucket in histogram_delta.values()),
+            "histogram_count": histogram_count,
+            "histogram_count_difference": histogram_count - difference["count_star"],
             "p50_bucket_ms": _statement_percentile_bucket(histogram_delta, difference["count_star"], 0.50),
             "p95_bucket_ms": _statement_percentile_bucket(histogram_delta, difference["count_star"], 0.95),
             "p99_bucket_ms": _statement_percentile_bucket(histogram_delta, difference["count_star"], 0.99),
+            # Diagnostic only: this uses the observed histogram sample count and
+            # does not imply that the histogram covers every statement event.
+            "observed_histogram_p95_bucket_ms": _statement_percentile_bucket(histogram_delta, histogram_count, 0.95),
         })
 
     deltas.sort(
