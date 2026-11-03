@@ -104,9 +104,11 @@ def summarize(reports: list[dict], required_improvement: float) -> dict:
         "hybrid_median_following_p95_ns": hybrid_p95,
         "following_p95_improvement_percent": round(improvement * 100, 2),
         "required_improvement_percent": required_improvement * 100,
+        "publishes_per_run": PUBLISHERS,
         "sql_only_publish_p95_ns": [report["publish"]["p95_ns"] for report in sql],
         "hybrid_publish_p95_ns": [report["publish"]["p95_ns"] for report in hybrid],
         "fanout_drain_seconds": [report["fanout"]["drain_seconds"] for report in reports],
+        "hybrid_fanout_drain_seconds": [report["fanout"]["drain_seconds"] for report in hybrid],
         "fanout_jobs_completed": [report["fanout"]["jobs_completed"] for report in reports],
         "load_successes": [report["mixed_load"]["successes"] for report in reports],
         "load_failures": [report["mixed_load"]["failures"] for report in reports],
@@ -116,6 +118,24 @@ def summarize(reports: list[dict], required_improvement: float) -> dict:
         "all_runs_consistent": all_consistent,
         "target_met": improvement >= required_improvement and all_consistent,
     }
+
+
+def format_summary(summary: dict) -> str:
+    lines = [
+        "# A04 mixed Feed acceptance",
+        "",
+        f"- SQL-only median following Feed P95: {summary['sql_only_median_following_p95_ns'] / 1_000_000:.3f} ms",
+        f"- Hybrid median following Feed P95: {summary['hybrid_median_following_p95_ns'] / 1_000_000:.3f} ms",
+        f"- Hybrid P95 improvement under mixed writes: {summary['following_p95_improvement_percent']:.2f}%",
+        f"- Required improvement: {summary['required_improvement_percent']:.0f}%",
+        f"- Load profile: {CONCURRENCY} workers, {WARMUP_SECONDS}s warmup, {DURATION_SECONDS}s measured per run; three fresh fixtures per mode",
+        f"- {summary['publishes_per_run']} real API video publishes per run; maximum Hybrid fanout drain: {max(summary['hybrid_fanout_drain_seconds']):.3f}s",
+        f"- Counter, follower Feed visibility, outbox and fanout consistency: {summary['all_runs_consistent']}",
+        f"- Target met: {summary['target_met']}",
+        "- Raw request latencies, publish samples, queue state, MySQL status, and API CPU/RSS are in adjacent JSON reports.",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def request_json(
@@ -781,21 +801,7 @@ def main() -> int:
         summary = summarize(reports, REQUIRED_IMPROVEMENT)
         summary["schedule"] = [{"mode": mode, "round": number} for mode, number in SCHEDULE]
         (report_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
-        lines = [
-            "# A04 mixed Feed acceptance",
-            "",
-            f"- SQL-only median following Feed P95: {summary['sql_only_median_following_p95_ns'] / 1_000_000:.3f} ms",
-            f"- Hybrid median following Feed P95: {summary['hybrid_median_following_p95_ns'] / 1_000_000:.3f} ms",
-            f"- Hybrid P95 improvement under mixed writes: {summary['following_p95_improvement_percent']:.2f}%",
-            f"- Required improvement: {summary['required_improvement_percent']:.0f}%",
-            f"- Load profile: {CONCURRENCY} workers, {WARMUP_SECONDS}s warmup, {DURATION_SECONDS}s measured per run; three fresh fixtures per mode",
-            f"- Ten real API video publishes per run; maximum hybrid fanout drain: {max(summary['fanout_drain_seconds']):.3f}s",
-            f"- Counter, follower Feed visibility, outbox and fanout consistency: {summary['all_runs_consistent']}",
-            f"- Target met: {summary['target_met']}",
-            "- Raw request latencies, publish samples, queue state, MySQL status, and API CPU/RSS are in adjacent JSON reports.",
-            "",
-        ]
-        (report_dir / "summary.md").write_text("\n".join(lines))
+        (report_dir / "summary.md").write_text(format_summary(summary))
         print((report_dir / "summary.md").read_text())
         return 0 if summary["target_met"] else 1
     except Exception:

@@ -274,7 +274,24 @@ The summary and per-run aggregate metrics are retained in [`benchmarks/feed-a04-
 
 ### Benchmark fixture qualification
 
-Review after this run found that the original driver paired 20 workers with only 10 reader identities. `actor[worker % len(actors)]` therefore made two workers share each JWT, target video and followee while the driver issued state-changing requests. The six-run report remains an accurate result for that workload, and its consistency checks passed, but shared-account write contention is a workload confound; it is not a clean 20-independent-client comparison and does not identify the Hybrid query as the cause. The harness now assigns 20 reader identities to 20 workers and selects 20 untouched target videos. To respect the API's 30-login-per-minute limit, it logs in 20 readers plus 10 publishers before the 90-second load, then the remaining 10 publishers plus 20 verifiers afterward. The corrected full-size profile has not yet run; the historical P95 result remains below target, the SQL-only default stays in place, and no optimization or root cause is claimed from it.
+Review after this run found that the original driver paired 20 workers with only 10 reader identities. `actor[worker % len(actors)]` therefore made two workers share each JWT, target video and followee while the driver issued state-changing requests. The six-run report remains an accurate result for that workload, and its consistency checks passed, but shared-account write contention is a workload confound; it is not a clean 20-independent-client comparison and does not identify the Hybrid query as the cause. The harness now assigns 20 reader identities to 20 workers and selects 20 untouched target videos. To respect the API's 30-login-per-minute limit, it logs in 20 readers plus 10 publishers before the 90-second load, then the remaining 10 publishers plus 20 verifiers afterward. The corrected full-size run is recorded below; it also missed the P95 target. The SQL-only default stays in place, and neither run isolates a query-level root cause.
+
+## Corrected 20-client A04 mixed read/write acceptance, 2026-11-03
+
+[Workflow run #41566643755](https://github.com/liuzhouquan/GoStream/actions/runs/41566643755) reran all six full-size cases with 20 distinct reader identities and 20 distinct video/followee targets. It used GitHub Actions `ubuntu-24.04` with four vCPUs, Go 1.27.2, MySQL 8.4.13, a 128 MiB InnoDB buffer pool, `REPEATABLE-READ`, and Redis/FFmpeg disabled. Each fresh schema contained 2,000 users, 10,999 follows, 20,000 videos, 19,800 completed fanout jobs, 1.9 million inbox rows and 50,000 actions. Each run had a 30-second read warmup and a 60-second 70/20/10 Feed/interaction/social window.
+
+| Mode / round | Following P50 | Following P95 | Following P99 | Load successes / errors | API CPU avg | Peak RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| SQL-only 1 | 31.845 ms | 54.041 ms | 65.917 ms | 7,636 / 0 | 31.98% | 35,192 KiB |
+| Hybrid 1 | 17.439 ms | 40.284 ms | 80.097 ms | 7,753 / 0 | 50.98% | 36,360 KiB |
+| Hybrid 2 | 21.913 ms | 68.163 ms | 87.912 ms | 7,661 / 0 | 50.80% | 36,864 KiB |
+| SQL-only 2 | 30.771 ms | 53.055 ms | 62.743 ms | 7,644 / 0 | 32.42% | 34,524 KiB |
+| SQL-only 3 | 30.895 ms | 52.392 ms | 61.697 ms | 7,610 / 0 | 32.26% | 34,680 KiB |
+| Hybrid 3 | 22.866 ms | 72.945 ms | 95.004 ms | 7,647 / 0 | 50.81% | 36,280 KiB |
+
+Across the three fixtures per mode, SQL-only median following P95 was **53.055 ms** and Hybrid median was **68.163 ms**. Hybrid was 28.48% slower, so the required 20% improvement still fails. All 45,951 measured requests succeeded; all 120 API video publications succeeded; all 60 Hybrid fanout jobs completed, with the slowest Hybrid drain at 0.071074 seconds. Counter mismatches, missing Feed publications, pending/dead outbox events, and pending fanout jobs were zero. Hybrid API CPU averaged about 51%, compared with about 32% for SQL-only; this is a correlation to investigate, not a root-cause finding. The corrected run confirms that the P95 gate still fails with independent actors, but it does not isolate SQL time from API processing or runner effects. Keep `FEED_FANOUT_MAX_FOLLOWERS=0` by default.
+
+The compact metrics are in [`benchmarks/feed-a04-mixed-2026-11-03.json`](benchmarks/feed-a04-mixed-2026-11-03.json); the original per-request samples are in [artifact 13199773388](https://github.com/liuzhouquan/GoStream/actions/runs/41566643755/artifacts/13199773388). The run log's summary line incorrectly reported ten publishes and included SQL-only drain times in the “Hybrid” maximum; the per-run JSON confirms 20 publishes per run and the maximum Hybrid drain stated above. The runner now derives both displayed values from the report and tests them.
 
 ### Follow-up diagnosis (exploratory, not a root-cause finding)
 

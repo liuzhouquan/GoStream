@@ -1,0 +1,221 @@
+{
+  "workflow_run": {
+    "id": 41566643755,
+    "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41566643755",
+    "head_sha": "0345b475b4880357252727dbd540ad62e5fa3d0e",
+    "conclusion": "failure",
+    "failure_reason": "required Hybrid following P95 improvement was not met"
+  },
+  "environment": {
+    "runner": "GitHub Actions ubuntu-24.04",
+    "cpu_count": 4,
+    "cpu_model": "AMD EPYC 7763 64-Core Processor",
+    "memory_gib": 15,
+    "go_version": "1.27.2",
+    "mysql_version": "8.4.13",
+    "innodb_buffer_pool_mib": 128,
+    "transaction_isolation": "REPEATABLE-READ",
+    "redis_enabled": false,
+    "ffmpeg_enabled": false
+  },
+  "workload": {
+    "workers": 20,
+    "unique_reader_accounts": 20,
+    "unique_video_targets": 20,
+    "warmup_seconds": 30,
+    "measured_seconds": 60,
+    "operations": {
+      "feed": 0.7,
+      "interaction": 0.2,
+      "social": 0.1
+    },
+    "fixtures_per_variant": 3,
+    "fixture_rows": {
+      "users": 2000,
+      "follows": 10999,
+      "videos": 20000,
+      "completed_fanout_jobs": 19800,
+      "feed_inboxes": 1900000,
+      "video_actions": 50000
+    }
+  },
+  "summary": {
+    "sql_only_median_following_p95_ms": 53.055,
+    "hybrid_median_following_p95_ms": 68.163,
+    "hybrid_p95_improvement_percent": -28.48,
+    "required_improvement_percent": 20.0,
+    "target_met": false,
+    "all_runs_consistent": true,
+    "load_successes_total": 45951,
+    "load_failures_total": 0,
+    "published_videos_total": 120,
+    "publish_failures_total": 0,
+    "hybrid_fanout_jobs_total": 60,
+    "maximum_hybrid_fanout_drain_seconds": 0.071074
+  },
+  "schedule": [
+    {
+      "mode": "sql-only",
+      "round": 1
+    },
+    {
+      "mode": "hybrid",
+      "round": 1
+    },
+    {
+      "mode": "hybrid",
+      "round": 2
+    },
+    {
+      "mode": "sql-only",
+      "round": 2
+    },
+    {
+      "mode": "sql-only",
+      "round": 3
+    },
+    {
+      "mode": "hybrid",
+      "round": 3
+    }
+  ],
+  "runs": [
+    {
+      "variant": "sql-only",
+      "round": 1,
+      "actors": 20,
+      "elapsed_seconds": 60.252,
+      "load_successes": 7636,
+      "load_failures": 0,
+      "following_p50_ms": 31.845,
+      "following_p95_ms": 54.041,
+      "following_p99_ms": 65.917,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "publish_p95_ms": 14.292,
+      "fanout_jobs_completed": 0,
+      "fanout_drain_seconds": 0.072438,
+      "counter_mismatches": 0,
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "api_average_cpu_percent": 31.98,
+      "api_peak_rss_kib": 35192
+    },
+    {
+      "variant": "hybrid",
+      "round": 1,
+      "actors": 20,
+      "elapsed_seconds": 60.244,
+      "load_successes": 7753,
+      "load_failures": 0,
+      "following_p50_ms": 17.439,
+      "following_p95_ms": 40.284,
+      "following_p99_ms": 80.097,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "publish_p95_ms": 25.368,
+      "fanout_jobs_completed": 20,
+      "fanout_drain_seconds": 0.07063,
+      "counter_mismatches": 0,
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "api_average_cpu_percent": 50.98,
+      "api_peak_rss_kib": 36360
+    },
+    {
+      "variant": "hybrid",
+      "round": 2,
+      "actors": 20,
+      "elapsed_seconds": 60.234,
+      "load_successes": 7661,
+      "load_failures": 0,
+      "following_p50_ms": 21.913,
+      "following_p95_ms": 68.163,
+      "following_p99_ms": 87.912,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "publish_p95_ms": 29.778,
+      "fanout_jobs_completed": 20,
+      "fanout_drain_seconds": 0.06968,
+      "counter_mismatches": 0,
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "api_average_cpu_percent": 50.8,
+      "api_peak_rss_kib": 36864
+    },
+    {
+      "variant": "sql-only",
+      "round": 2,
+      "actors": 20,
+      "elapsed_seconds": 60.202,
+      "load_successes": 7644,
+      "load_failures": 0,
+      "following_p50_ms": 30.771,
+      "following_p95_ms": 53.055,
+      "following_p99_ms": 62.743,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "publish_p95_ms": 20.89,
+      "fanout_jobs_completed": 0,
+      "fanout_drain_seconds": 0.069736,
+      "counter_mismatches": 0,
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "api_average_cpu_percent": 32.42,
+      "api_peak_rss_kib": 34524
+    },
+    {
+      "variant": "sql-only",
+      "round": 3,
+      "actors": 20,
+      "elapsed_seconds": 60.244,
+      "load_successes": 7610,
+      "load_failures": 0,
+      "following_p50_ms": 30.895,
+      "following_p95_ms": 52.392,
+      "following_p99_ms": 61.697,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "publish_p95_ms": 23.753,
+      "fanout_jobs_completed": 0,
+      "fanout_drain_seconds": 0.070435,
+      "counter_mismatches": 0,
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "api_average_cpu_percent": 32.26,
+      "api_peak_rss_kib": 34680
+    },
+    {
+      "variant": "hybrid",
+      "round": 3,
+      "actors": 20,
+      "elapsed_seconds": 60.186,
+      "load_successes": 7647,
+      "load_failures": 0,
+      "following_p50_ms": 22.866,
+      "following_p95_ms": 72.945,
+      "following_p99_ms": 95.004,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "publish_p95_ms": 21.194,
+      "fanout_jobs_completed": 20,
+      "fanout_drain_seconds": 0.071074,
+      "counter_mismatches": 0,
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "api_average_cpu_percent": 50.81,
+      "api_peak_rss_kib": 36280
+    }
+  ],
+  "limits": [
+    "One synthetic full-size run on a shared CI runner; not a production-capacity estimate.",
+    "The measured following-feed P95 compares this exact mixed workload; it does not isolate SQL time or establish a root cause.",
+    "Raw successful and failed request latency samples are retained in the linked GitHub Actions artifact."
+  ]
+}

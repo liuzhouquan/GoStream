@@ -10,7 +10,7 @@ import unittest
 import feed_a04_mixed
 
 
-def run(variant, round_number, following_p95_ns, publish_p95_ns=3_000_000):
+def run(variant, round_number, following_p95_ns, publish_p95_ns=3_000_000, fanout_drain_seconds=0.5):
     return {
         "variant": variant,
         "round": round_number,
@@ -26,7 +26,7 @@ def run(variant, round_number, following_p95_ns, publish_p95_ns=3_000_000):
         "publish": {"successes": 20, "failures": 0, "p95_ns": publish_p95_ns},
         "fanout": {
             "within_deadline": True,
-            "drain_seconds": 0.5,
+            "drain_seconds": fanout_drain_seconds,
             "jobs_completed": 20 if variant == "hybrid" else 0,
         },
         "verification": {"counter_mismatches": 0, "feed_visibility_failures": 0, "outbox_pending": 0, "outbox_dead": 0},
@@ -35,6 +35,16 @@ def run(variant, round_number, following_p95_ns, publish_p95_ns=3_000_000):
 
 
 class FeedA04MixedHelpersTest(unittest.TestCase):
+    def test_acceptance_summary_reports_publish_count_and_hybrid_fanout_only(self):
+        reports = []
+        for variant, drain_seconds in (("sql-only", 0.9), ("hybrid", 0.5)):
+            for round_number in range(1, 4):
+                reports.append(run(variant, round_number, 1_000, fanout_drain_seconds=drain_seconds))
+        summary = feed_a04_mixed.summarize(reports, 0.20)
+        rendered = feed_a04_mixed.format_summary(summary)
+        self.assertIn("20 real API video publishes per run", rendered)
+        self.assertIn("maximum Hybrid fanout drain: 0.500s", rendered)
+
     def test_mixed_driver_uses_one_distinct_reader_per_worker(self):
         names = feed_a04_mixed.driver_reader_names()
         self.assertEqual(len(names), feed_a04_mixed.CONCURRENCY)
