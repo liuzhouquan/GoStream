@@ -226,7 +226,7 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
         )
         self.assertTrue(summary["target_met"], "diagnostic availability must not alter the P95 acceptance gate")
         rendered = feed_a04_mixed.format_summary(summary)
-        self.assertIn("DB pool wait delta during 60s measured window", rendered)
+        self.assertIn("DB pool delta during 60s measured window", rendered)
         self.assertIn("Performance Schema statement digests", rendered)
         self.assertIn("statement_digest_consumer_disabled", rendered)
         self.assertIn("SELECT * FROM videos WHERE id = ?", rendered)

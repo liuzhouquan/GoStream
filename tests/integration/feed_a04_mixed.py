@@ -196,7 +196,8 @@ def format_summary(summary: dict) -> str:
                 values.append(f"r{round_number} unavailable")
                 continue
             values.append(
-                f"r{round_number} {report['wait_count']} / {report['wait_duration_seconds']:.3f}s"
+                f"r{round_number} {report['wait_count']} / {report['wait_duration_seconds']:.3f}s / "
+                f"{report.get('max_idle_closed', 0)} max-idle closures"
             )
         return ", ".join(values) if values else "unavailable"
 
@@ -263,7 +264,7 @@ def format_summary(summary: dict) -> str:
         f"- API-side successful following P95 bucket (approximate): SQL-only {format_server_buckets('sql_only')}; Hybrid {format_server_buckets('hybrid')}",
         f"- API-side following candidate_query P95 bucket (approximate): SQL-only {format_stage_buckets('sql_only', 'candidate_query')}; Hybrid {format_stage_buckets('hybrid', 'candidate_query')}",
         f"- API-side following interaction_state P95 bucket (approximate): SQL-only {format_stage_buckets('sql_only', 'interaction_state')}; Hybrid {format_stage_buckets('hybrid', 'interaction_state')}",
-        f"- DB pool wait delta during 60s measured window (waits / seconds): SQL-only {format_database_pool_wait('sql_only')}; Hybrid {format_database_pool_wait('hybrid')}",
+        f"- DB pool delta during 60s measured window (waits / wait seconds / connections closed by idle cap): SQL-only {format_database_pool_wait('sql_only')}; Hybrid {format_database_pool_wait('hybrid')}",
         f"- Performance Schema statement digests ({statement_window}; available SQL digests only): SQL-only {format_statement_diagnostics('sql_only')}; Hybrid {format_statement_diagnostics('hybrid')}",
         f"- Performance Schema prepared COM_STMT_EXECUTE aggregates (account scoped; command-level, not per-SQL; diagnostic only): SQL-only {format_prepared_statement_diagnostics('sql_only')}; Hybrid {format_prepared_statement_diagnostics('hybrid')}",
         f"- Target met: {summary['target_met']}",

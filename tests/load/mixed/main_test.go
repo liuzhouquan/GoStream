@@ -84,11 +84,15 @@ func TestDatabasePoolWaitMetricsReportMeasurementDelta(t *testing.T) {
 gostream_database_pool_wait_count_total 5
 # TYPE gostream_database_pool_wait_duration_seconds_total counter
 gostream_database_pool_wait_duration_seconds_total 0.25
+# TYPE gostream_database_pool_max_idle_closed_total counter
+gostream_database_pool_max_idle_closed_total 11
 `
 	afterText := `# TYPE gostream_database_pool_wait_count_total counter
 gostream_database_pool_wait_count_total 12
 # TYPE gostream_database_pool_wait_duration_seconds_total counter
 gostream_database_pool_wait_duration_seconds_total 0.75
+# TYPE gostream_database_pool_max_idle_closed_total counter
+gostream_database_pool_max_idle_closed_total 18
 `
 	before, err := parseDatabasePoolWaitMetrics(beforeText)
 	if err != nil {
@@ -102,16 +106,24 @@ gostream_database_pool_wait_duration_seconds_total 0.75
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.WaitCount != 7 || math.Abs(got.WaitDurationSeconds-0.5) > 1e-9 {
-		t.Fatalf("database pool wait delta = %+v, want 7 waits and 0.5 seconds", got)
+	if got.WaitCount != 7 || math.Abs(got.WaitDurationSeconds-0.5) > 1e-9 || got.MaxIdleClosed != 7 {
+		t.Fatalf("database pool delta = %+v, want 7 waits, 0.5 seconds and 7 max-idle closures", got)
 	}
 }
 
 func TestDatabasePoolWaitMetricsRejectReset(t *testing.T) {
-	before := databasePoolWaitSnapshot{WaitCount: 10, WaitDurationSeconds: 1.5}
-	after := databasePoolWaitSnapshot{WaitCount: 2, WaitDurationSeconds: 0.5}
+	before := databasePoolWaitSnapshot{WaitCount: 10, WaitDurationSeconds: 1.5, MaxIdleClosed: 8}
+	after := databasePoolWaitSnapshot{WaitCount: 2, WaitDurationSeconds: 0.5, MaxIdleClosed: 7}
 	if _, err := databasePoolWaitDeltaReport(before, after); err == nil {
 		t.Fatal("expected database pool counter reset to be reported")
+	}
+}
+
+func TestDatabasePoolWaitMetricsRejectIdleCloseCounterReset(t *testing.T) {
+	before := databasePoolWaitSnapshot{WaitCount: 1, WaitDurationSeconds: 0.1, MaxIdleClosed: 10}
+	after := databasePoolWaitSnapshot{WaitCount: 2, WaitDurationSeconds: 0.2, MaxIdleClosed: 3}
+	if _, err := databasePoolWaitDeltaReport(before, after); err == nil {
+		t.Fatal("expected max idle closed counter reset to be reported")
 	}
 }
 
@@ -120,6 +132,8 @@ func TestDatabasePoolWaitMetricsRejectCounterOutsideUint64Range(t *testing.T) {
 gostream_database_pool_wait_count_total 18446744073709551616
 # TYPE gostream_database_pool_wait_duration_seconds_total counter
 gostream_database_pool_wait_duration_seconds_total 0
+# TYPE gostream_database_pool_max_idle_closed_total counter
+gostream_database_pool_max_idle_closed_total 0
 `
 	if _, err := parseDatabasePoolWaitMetrics(text); err == nil {
 		t.Fatal("expected a wait count outside uint64 range to be rejected")
@@ -337,6 +351,8 @@ func TestRunUsesActorPoolAndWritesRequestReport(t *testing.T) {
 			fmt.Fprintf(w, "gostream_database_pool_wait_count_total %d\n", count)
 			fmt.Fprintln(w, "# TYPE gostream_database_pool_wait_duration_seconds_total counter")
 			fmt.Fprintf(w, "gostream_database_pool_wait_duration_seconds_total %.3f\n", float64(count)*0.002)
+			fmt.Fprintln(w, "# TYPE gostream_database_pool_max_idle_closed_total counter")
+			fmt.Fprintf(w, "gostream_database_pool_max_idle_closed_total %d\n", count/2)
 			fmt.Fprintln(w, "# TYPE gostream_feed_stage_duration_seconds histogram")
 			for _, stage := range []string{"candidate_query", "interaction_state"} {
 				fmt.Fprintf(w, "gostream_feed_stage_duration_seconds_bucket{scene=\"following\",stage=\"%s\",outcome=\"success\",le=\"0.05\"} %d\n", stage, count)
