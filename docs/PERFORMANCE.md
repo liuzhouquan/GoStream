@@ -249,11 +249,34 @@ Median observed throughput was 3,424.0 versus 882.4 requests/s, about 3.9× for 
 
 ## A04 mixed read/write acceptance preflight (2026-11-02)
 
-The new manual workflow runs three fresh full-size fixtures for each mode (SQL-only and Hybrid), with 20 workers, 30 seconds of read warmup, then 60 seconds of a 70/20/10 Feed/interaction/social workload. After the measured window it uses the real API to publish 20 videos and checks action/comment counters, follower Feed visibility, outbox state, and fanout completion. A passing six-run result requires zero failed requests or consistency mismatches, all 20 hybrid fanout jobs to complete within 60 seconds, and at least 20% lower median following-Feed P95 for Hybrid. The workflow is implemented but the six-run CI acceptance has not yet been executed.
+The new manual workflow runs three fresh full-size fixtures for each mode (SQL-only and Hybrid), with 20 workers, 30 seconds of read warmup, then 60 seconds of a 70/20/10 Feed/interaction/social workload. After the measured window it uses the real API to publish 20 videos and checks action/comment counters, follower Feed visibility, outbox state, and fanout completion. A passing six-run result requires zero failed requests or consistency mismatches, all 20 hybrid fanout jobs to complete within 60 seconds, and at least 20% lower median following-Feed P95 for Hybrid. The six-run CI outcome is recorded below; implementation of the workflow does not imply the performance target passed.
 
 One local preflight run per mode verified the full workload and publish/fanout path on Go 1.27.2 and MySQL 8.4.11. The host was WSL2 on a Ryzen 7 5800H (16 logical CPUs); MySQL used a 128 MiB InnoDB buffer pool. Each run seeded 2,000 users, 20,000 videos, 10,999 follows, 50,000 actions, 1,900,000 inbox rows, and 100 media assets. SQL-only completed 16,905 measured requests with zero failures; following Feed P95 was 48.795 ms, 20 videos published, and no fanout job was expected. Hybrid completed 14,659 measured requests with zero failures; following Feed P95 was 76.664 ms, all 20 publishes succeeded, all 20 fanout jobs drained in 0.134 seconds, and each published video was visible to its follower. Both runs ended with zero action/comment counter mismatches, zero outbox backlog/dead events, and zero follower Feed visibility failures.
 
 These were single-run local smoke checks performed sequentially, Hybrid before SQL-only. They validate harness branches and correctness assertions; their P95 values are not a controlled comparison and must not be used to claim a performance gain or regression. The disposable MySQL container and schemas were removed. The six-run GitHub Actions result is the required performance evidence.
+
+## Full-size A04 mixed read/write acceptance, 2026-11-02
+
+[Workflow run #41478569849](https://github.com/liuzhouquan/GoStream/actions/runs/41478569849) completed all six runs on GitHub Actions `ubuntu-24.04`: three fresh fixtures per mode, 20 workers, 30 seconds of warmup, and 60 seconds measured at the 70/20/10 Feed/interaction/social ratio. Go was 1.27.2, MySQL was 8.4.13 with a 128 MiB buffer pool, and Redis/FFmpeg were disabled. Each fixture had 2,000 users, 10,999 follows, 20,000 videos, 19,800 completed fanout jobs, 1.9 million inbox rows, 50,000 actions, and 100 media assets. After each load window the workflow published 20 videos through the API and checked counters, follower Feed visibility, outbox and fanout state.
+
+| Mode / round | Following P50 | Following P95 | Following P99 | Load successes / errors | API CPU avg | Peak RSS | Fanout jobs / drain |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| SQL-only 1 | 23.996 ms | 41.248 ms | 49.046 ms | 10,704 / 0 | 33.10% | 34,992 KiB | 0 / n/a |
+| Hybrid 1 | 17.808 ms | 56.414 ms | 73.098 ms | 10,703 / 0 | 51.16% | 36,224 KiB | 20 / 0.059 s |
+| Hybrid 2 | 19.665 ms | 58.873 ms | 74.327 ms | 10,631 / 0 | 51.36% | 36,724 KiB | 20 / 0.059 s |
+| SQL-only 2 | 23.215 ms | 41.233 ms | 53.348 ms | 10,567 / 0 | 33.02% | 34,944 KiB | 0 / n/a |
+| SQL-only 3 | 23.156 ms | 40.967 ms | 51.839 ms | 10,653 / 0 | 33.18% | 35,728 KiB | 0 / n/a |
+| Hybrid 3 | 17.553 ms | 55.689 ms | 73.770 ms | 10,683 / 0 | 51.04% | 37,308 KiB | 20 / 0.061 s |
+
+Every measured HTTP request succeeded. All 120 API publishes succeeded; the 60 hybrid fanout jobs completed within 0.061 seconds at maximum; counter mismatches, Feed visibility failures, pending/dead outbox events, and pending fanout jobs were all zero. Despite those correctness results, the SQL-only median following P95 was **41.233 ms** and the Hybrid median was **56.414 ms**. Hybrid was 36.82% slower, missing the required 20% improvement by a wide margin. Hybrid P50 was lower, but that does not satisfy a P95 gate. The default remains `FEED_FANOUT_MAX_FOLLOWERS=0`.
+
+The summary and per-run aggregate metrics are retained in [`benchmarks/feed-a04-mixed-2026-11-02.json`](benchmarks/feed-a04-mixed-2026-11-02.json); the workflow artifact contains the raw request latency samples and API logs.
+
+### Follow-up diagnosis (exploratory, not a root-cause finding)
+
+On a separate disposable MySQL 8.4.11 fixture, refreshing one followed author's `follows.created_at` while keeping its 200 historical inbox rows caused the late-follow branch to find 200 candidate videos, perform 200 unique-key inbox probes, return no rows, and take 0.799 ms in one `EXPLAIN ANALYZE`. A 20-worker direct-query probe measured Hybrid P95 at 6.415 ms before and 10.021 ms after that state change; SQL-only measured 14.490 ms and 14.400 ms. This confirms extra work in the refollow path, but Hybrid remained faster in that isolated SQL probe, so it does not explain the CI end-to-end result by itself.
+
+A separate short localhost handler replay showed both SQL-only and Hybrid slowing in its later sequential phase; it was too short and order-sensitive to attribute the difference. No query change is claimed from these experiments. The next performance change needs a repeatable profile or interleaved full mixed-load experiment that shows a measurable improvement while retaining late-follow and inbox de-duplication correctness.
 
 ## Remaining measurements
 
