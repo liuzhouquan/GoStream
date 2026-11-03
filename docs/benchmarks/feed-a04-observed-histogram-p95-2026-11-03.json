@@ -1,0 +1,409 @@
+{
+  "run_id": 41646149894,
+  "workflow_url": "https://github.com/liuzhouquan/GoStream/actions/runs/41646149894",
+  "commit": "7f1d6e965c82c15b1f7c505d3c2697ecf7ab2090",
+  "mysql_version": "8.4.13",
+  "mysql_interpolate_params": true,
+  "runner": {
+    "os": "ubuntu-24.04",
+    "cpu_model": "AMD EPYC 9V45",
+    "vcpus": 4,
+    "memory_gib": 15,
+    "go_version": "1.27.2"
+  },
+  "workload": {
+    "fixture": {
+      "users": 2000,
+      "authors": 100,
+      "videos": 20000,
+      "follows": 10999,
+      "likes": 50000,
+      "feed_inboxes": 1900000
+    },
+    "concurrency": 20,
+    "warmup_seconds": 30,
+    "measured_seconds_per_round": 60,
+    "rounds_per_variant": 3,
+    "successful_mixed_requests": 90679,
+    "failed_mixed_requests": 0,
+    "successful_following_requests": 36284,
+    "publishes": 120,
+    "publish_failures": 0,
+    "consistency_passed": true,
+    "pool_wait_count_all_rounds_zero": true,
+    "max_idle_closed_all_rounds_zero": true,
+    "max_hybrid_fanout_drain_seconds": 0.054806
+  },
+  "acceptance": {
+    "sql_only_median_following_p95_ms": 27.199,
+    "hybrid_median_following_p95_ms": 38.182,
+    "hybrid_p95_improvement_percent": -40.38,
+    "required_improvement_percent": 20.0,
+    "target_met": false,
+    "workflow_exit_reason": "required +20% median following P95 improvement not met"
+  },
+  "schedule_seed": 41646149894,
+  "schedule": [
+    {
+      "mode": "hybrid",
+      "round": 1
+    },
+    {
+      "mode": "sql-only",
+      "round": 1
+    },
+    {
+      "mode": "hybrid",
+      "round": 2
+    },
+    {
+      "mode": "sql-only",
+      "round": 2
+    },
+    {
+      "mode": "sql-only",
+      "round": 3
+    },
+    {
+      "mode": "hybrid",
+      "round": 3
+    }
+  ],
+  "histogram_semantics": {
+    "strict_percentile_field": "strict_p95_bucket_ms; null unless histogram_count equals statement_count",
+    "diagnostic_field": "observed_histogram_p95_bucket_ms; computed from observed histogram sample count",
+    "windows": "Performance Schema snapshots span the 30s warmup plus 60s measured mixed workload; API stage and client percentiles cover successful following requests in the measured workload",
+    "interpretation": "The histogram percentile is an observed server-side interval for one digest, not a strictly complete request percentile. Per-round counter deltas are recorded below."
+  },
+  "interpretation": {
+    "observed": "The Hybrid following candidate-query digest has a lower observed MySQL P95 bucket and lower mean server timer wait than SQL-only, while the API candidate-query P95 bucket and client following P95 are higher for Hybrid.",
+    "supports": "The measured Hybrid tail is not explained by a higher server-side P95 for this candidate SQL digest in this run.",
+    "not_proven": "The additional latency source is not isolated; client/protocol transfer, result scanning, application handling, and different measurement windows/query populations remain possible contributors. This is a localization signal, not a confirmed root cause."
+  },
+  "rounds": [
+    {
+      "mode": "sql-only",
+      "round": 1,
+      "mixed_requests": {
+        "successes": 15204,
+        "failures": 0
+      },
+      "following": {
+        "successes": 6084,
+        "failures": 0,
+        "client_p95_ms": 27.435,
+        "api_candidate_query": {
+          "sample_count": 6084,
+          "mean_ms": 13.162,
+          "p95_bucket_ms": [
+            10.0,
+            25.0
+          ]
+        },
+        "mysql_candidate_query_digest": {
+          "digest": "1548374c2e4d25d3bfe3b8f61155d80a4af258d60c2a3b22a5a5765b8ef660f9",
+          "statement_count": 38461,
+          "histogram_count": 38465,
+          "histogram_count_difference": 4,
+          "strict_p95_bucket_ms": null,
+          "observed_histogram_p95_bucket_ms": [
+            18.197009,
+            19.054607
+          ],
+          "mean_timer_wait_ms": 9.64,
+          "sum_rows_examined": 46599945,
+          "sum_rows_sent": 807723
+        }
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_jobs_completed": 0,
+        "fanout_drain_seconds": 0.051426
+      }
+    },
+    {
+      "mode": "sql-only",
+      "round": 2,
+      "mixed_requests": {
+        "successes": 15542,
+        "failures": 0
+      },
+      "following": {
+        "successes": 6218,
+        "failures": 0,
+        "client_p95_ms": 26.874,
+        "api_candidate_query": {
+          "sample_count": 6218,
+          "mean_ms": 12.579,
+          "p95_bucket_ms": [
+            10.0,
+            25.0
+          ]
+        },
+        "mysql_candidate_query_digest": {
+          "digest": "1548374c2e4d25d3bfe3b8f61155d80a4af258d60c2a3b22a5a5765b8ef660f9",
+          "statement_count": 39309,
+          "histogram_count": 39313,
+          "histogram_count_difference": 4,
+          "strict_p95_bucket_ms": null,
+          "observed_histogram_p95_bucket_ms": [
+            18.197009,
+            19.054607
+          ],
+          "mean_timer_wait_ms": 9.246,
+          "sum_rows_examined": 47586690,
+          "sum_rows_sent": 825447
+        }
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_jobs_completed": 0,
+        "fanout_drain_seconds": 0.050094
+      }
+    },
+    {
+      "mode": "sql-only",
+      "round": 3,
+      "mixed_requests": {
+        "successes": 15081,
+        "failures": 0
+      },
+      "following": {
+        "successes": 6033,
+        "failures": 0,
+        "client_p95_ms": 27.199,
+        "api_candidate_query": {
+          "sample_count": 6033,
+          "mean_ms": 12.913,
+          "p95_bucket_ms": [
+            10.0,
+            25.0
+          ]
+        },
+        "mysql_candidate_query_digest": {
+          "digest": "1548374c2e4d25d3bfe3b8f61155d80a4af258d60c2a3b22a5a5765b8ef660f9",
+          "statement_count": 39290,
+          "histogram_count": 39296,
+          "histogram_count_difference": 6,
+          "strict_p95_bucket_ms": null,
+          "observed_histogram_p95_bucket_ms": [
+            18.197009,
+            19.054607
+          ],
+          "mean_timer_wait_ms": 9.293,
+          "sum_rows_examined": 47558034,
+          "sum_rows_sent": 825132
+        }
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_jobs_completed": 0,
+        "fanout_drain_seconds": 0.049183
+      }
+    },
+    {
+      "mode": "hybrid",
+      "round": 1,
+      "mixed_requests": {
+        "successes": 14879,
+        "failures": 0
+      },
+      "following": {
+        "successes": 5952,
+        "failures": 0,
+        "client_p95_ms": 40.947,
+        "api_candidate_query": {
+          "sample_count": 5952,
+          "mean_ms": 12.828,
+          "p95_bucket_ms": [
+            25.0,
+            40.0
+          ]
+        },
+        "mysql_candidate_query_digest": {
+          "digest": "1655bb8ea17c8b42a37fcc59fd3056a19acc7614b4e9393c67418c8e64ae5358",
+          "statement_count": 72431,
+          "histogram_count": 72468,
+          "histogram_count_difference": 37,
+          "strict_p95_bucket_ms": null,
+          "observed_histogram_p95_bucket_ms": [
+            6.91831,
+            7.24436
+          ],
+          "mean_timer_wait_ms": 2.827,
+          "sum_rows_examined": 6084372,
+          "sum_rows_sent": 1521303
+        }
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_jobs_completed": 20,
+        "fanout_drain_seconds": 0.054806
+      }
+    },
+    {
+      "mode": "hybrid",
+      "round": 2,
+      "mixed_requests": {
+        "successes": 14828,
+        "failures": 0
+      },
+      "following": {
+        "successes": 5936,
+        "failures": 0,
+        "client_p95_ms": 38.182,
+        "api_candidate_query": {
+          "sample_count": 5936,
+          "mean_ms": 12.018,
+          "p95_bucket_ms": [
+            25.0,
+            40.0
+          ]
+        },
+        "mysql_candidate_query_digest": {
+          "digest": "1655bb8ea17c8b42a37fcc59fd3056a19acc7614b4e9393c67418c8e64ae5358",
+          "statement_count": 71561,
+          "histogram_count": 71598,
+          "histogram_count_difference": 37,
+          "strict_p95_bucket_ms": null,
+          "observed_histogram_p95_bucket_ms": [
+            6.91831,
+            7.24436
+          ],
+          "mean_timer_wait_ms": 2.829,
+          "sum_rows_examined": 6011628,
+          "sum_rows_sent": 1503075
+        }
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_jobs_completed": 20,
+        "fanout_drain_seconds": 0.04836
+      }
+    },
+    {
+      "mode": "hybrid",
+      "round": 3,
+      "mixed_requests": {
+        "successes": 15145,
+        "failures": 0
+      },
+      "following": {
+        "successes": 6061,
+        "failures": 0,
+        "client_p95_ms": 38.073,
+        "api_candidate_query": {
+          "sample_count": 6061,
+          "mean_ms": 12.033,
+          "p95_bucket_ms": [
+            25.0,
+            40.0
+          ]
+        },
+        "mysql_candidate_query_digest": {
+          "digest": "1655bb8ea17c8b42a37fcc59fd3056a19acc7614b4e9393c67418c8e64ae5358",
+          "statement_count": 73663,
+          "histogram_count": 73698,
+          "histogram_count_difference": 35,
+          "strict_p95_bucket_ms": null,
+          "observed_histogram_p95_bucket_ms": [
+            6.606934,
+            6.91831
+          ],
+          "mean_timer_wait_ms": 2.742,
+          "sum_rows_examined": 6188196,
+          "sum_rows_sent": 1547196
+        }
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_jobs_completed": 20,
+        "fanout_drain_seconds": 0.049559
+      }
+    }
+  ],
+  "profile_schedule": [
+    {
+      "mode": "sql-only",
+      "round": 4,
+      "excluded_from_acceptance_gate": true
+    },
+    {
+      "mode": "hybrid",
+      "round": 4,
+      "excluded_from_acceptance_gate": true
+    }
+  ],
+  "profile_summary": [
+    {
+      "mode": "sql-only",
+      "round": 4,
+      "cpu_profile_captured": true,
+      "cpu_profile_bytes": 50222,
+      "goroutine_dump_captured": true,
+      "goroutine_dump_bytes": 172830
+    },
+    {
+      "mode": "hybrid",
+      "round": 4,
+      "cpu_profile_captured": true,
+      "cpu_profile_bytes": 51228,
+      "goroutine_dump_captured": true,
+      "goroutine_dump_bytes": 170544
+    }
+  ]
+}
