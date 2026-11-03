@@ -73,7 +73,7 @@ def publisher_login_batches(
     return before_load, after_load
 
 
-def summarize(reports: list[dict], required_improvement: float) -> dict:
+def summarize(reports: list[dict], required_improvement: float, interpolate_params: bool = False) -> dict:
     sql = [report for report in reports if report["variant"] == "sql-only"]
     hybrid = [report for report in reports if report["variant"] == "hybrid"]
     if len(sql) != 3 or len(hybrid) != 3:
@@ -137,6 +137,7 @@ def summarize(reports: list[dict], required_improvement: float) -> dict:
         "concurrency": CONCURRENCY,
         "warmup_seconds": WARMUP_SECONDS,
         "duration_seconds": DURATION_SECONDS,
+        "mysql_interpolate_params": interpolate_params,
         "sql_only_median_following_p95_ns": sql_p95,
         "hybrid_median_following_p95_ns": hybrid_p95,
         "server_following_latency": server_following_latency,
@@ -284,6 +285,7 @@ def format_summary(summary: dict) -> str:
         f"- Hybrid P95 improvement under mixed writes: {summary['following_p95_improvement_percent']:.2f}%",
         f"- Required improvement: {summary['required_improvement_percent']:.0f}%",
         f"- Load profile: {CONCURRENCY} workers, {WARMUP_SECONDS}s warmup, {DURATION_SECONDS}s measured per run; three fresh fixtures per mode",
+        f"- MySQL interpolateParams: {'enabled' if summary.get('mysql_interpolate_params') else 'disabled'}",
         f"- {summary['publishes_per_run']} real API video publishes per run; maximum Hybrid fanout drain: {max(summary['hybrid_fanout_drain_seconds']):.3f}s",
         f"- Counter, follower Feed visibility, outbox and fanout consistency: {summary['all_runs_consistent']}",
         f"- API-side successful following P95 bucket (approximate): SQL-only {format_server_buckets('sql_only')}; Hybrid {format_server_buckets('hybrid')}",
@@ -663,8 +665,11 @@ def schema_sql(container: str, sql: str) -> None:
     mysql_query(container, sql)
 
 
-def schema_dsn(prefix: str, schema: str) -> str:
-    return prefix + schema + "?charset=utf8mb4&parseTime=True&loc=UTC"
+def schema_dsn(prefix: str, schema: str, interpolate_params: bool = False) -> str:
+    dsn = prefix + schema + "?charset=utf8mb4&parseTime=True&loc=UTC"
+    if interpolate_params:
+        dsn += "&interpolateParams=true"
+    return dsn
 
 
 def dsn_account_user(dsn_prefix: str) -> str:
@@ -742,6 +747,7 @@ def start_api(
     round_number: int,
     args,
     capture_profiles: bool = False,
+    interpolate_params: bool = False,
 ):
     port = args.port
     address = f"127.0.0.1:{port}"
@@ -753,7 +759,7 @@ def start_api(
         {
             "ADDR": address,
             "DB_DRIVER": "mysql",
-            "DB_DSN": schema_dsn(prefix, database),
+            "DB_DSN": schema_dsn(prefix, database, interpolate_params),
             "MEDIA_DIR": media_dir,
             "JWT_SECRET": jwt_secret,
             "REDIS_ADDR": "",
@@ -1122,7 +1128,7 @@ def run_case(args, mode: str, round_number: int, diagnostic_only: bool = False) 
     media_dir = None
     token_path = None
     try:
-        dsn = schema_dsn(args.dsn_prefix, database)
+        dsn = schema_dsn(args.dsn_prefix, database, args.interpolate_params)
         seed_schema(args.go_bin, dsn, pathlib.Path(args.report_dir), mode, round_number)
         seed_count = mysql_query(
             args.mysql_container,
@@ -1143,6 +1149,7 @@ def run_case(args, mode: str, round_number: int, diagnostic_only: bool = False) 
         api, log_handle, api_log_path, base_url, media_dir = start_api(
             args.api_binary, database, args.dsn_prefix, jwt_secret, pathlib.Path(args.report_dir), mode, round_number, args,
             capture_profiles=diagnostic_only,
+            interpolate_params=args.interpolate_params,
         )
         reader_names = driver_reader_names()
         publisher_names = [f"load-u-{i:06d}" for i in range(1, PUBLISHERS + 1)]
@@ -1262,6 +1269,7 @@ def run_case(args, mode: str, round_number: int, diagnostic_only: bool = False) 
             "variant": mode,
             "round": round_number,
             "diagnostic_only": diagnostic_only,
+            "mysql_interpolate_params": args.interpolate_params,
             "database": database,
             "fixture_rows": {"users": 2000, "authors": 100, "videos": 20000, "follows": 10999, "likes": 50000, "feed_inboxes": 1900000},
             "mixed_load": mixed_report,
@@ -1334,6 +1342,11 @@ def parse_args():
     parser.add_argument("--port", type=int, default=18087)
     parser.add_argument("--pprof-port", type=int, default=18088)
     parser.add_argument("--go-bin", default="go")
+    parser.add_argument(
+        "--interpolate-params",
+        action="store_true",
+        help="enable go-sql-driver/mysql parameter interpolation for this isolated A04 experiment",
+    )
     args = parser.parse_args()
     if not (1 <= args.pprof_port <= 65535) or args.pprof_port == args.port:
         parser.error("pprof port must be in 1..65535 and differ from the API port")
@@ -1376,7 +1389,7 @@ def main() -> int:
                 }
             profile_reports.append(report)
             (report_dir / "profile-partial-summary.json").write_text(json.dumps(profile_reports, indent=2) + "\n")
-        summary = summarize(reports, REQUIRED_IMPROVEMENT)
+        summary = summarize(reports, REQUIRED_IMPROVEMENT, interpolate_params=args.interpolate_params)
         summary["schedule"] = [{"mode": mode, "round": number} for mode, number in SCHEDULE]
         summary["diagnostic_profiles"] = [
             {

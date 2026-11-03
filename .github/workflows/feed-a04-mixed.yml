@@ -2,6 +2,12 @@ name: Feed A04 Mixed Read Write Acceptance
 
 on:
   workflow_dispatch:
+    inputs:
+      interpolate_params:
+        description: Enable go-sql-driver/mysql interpolation to reduce protocol round trips and expose per-SQL Performance Schema digests
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -66,13 +72,18 @@ jobs:
 
       - name: Run six acceptance comparisons and two diagnostic fixtures
         run: |
+          interpolate_args=()
+          if [[ "${{ inputs.interpolate_params }}" == "true" ]]; then
+            interpolate_args+=(--interpolate-params)
+          fi
           python3 tests/integration/feed_a04_mixed.py \
             --api-binary "$RUNNER_TEMP/gostream-feed-a04-mixed-api" \
             --mixed-driver "$RUNNER_TEMP/gostream-feed-a04-mixed-driver" \
             --report-dir "$RUNNER_TEMP/gostream-feed-a04-mixed" \
             --mysql-container "$GOSTREAM_FEED_A04_MYSQL_CONTAINER" \
             --schema-prefix "$GOSTREAM_FEED_A04_SCHEMA_PREFIX" \
-            --go-bin "$(command -v go)"
+            --go-bin "$(command -v go)" \
+            "${interpolate_args[@]}"
 
       - name: Remove any remaining prefixed fixture schemas
         if: always()

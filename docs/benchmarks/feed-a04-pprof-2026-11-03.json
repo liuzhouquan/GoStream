@@ -1,0 +1,358 @@
+{
+  "workflow_run": 41601458252,
+  "source_commit": "18fa787a79c7734df5665b96e8b9e16a8af1bbaf",
+  "environment": {
+    "runner": "ubuntu-24.04 GitHub Actions",
+    "go": "1.27.2",
+    "cpu_count": 4,
+    "mysql": "8.4.13",
+    "redis": "disabled",
+    "ffmpeg": "disabled"
+  },
+  "workload": {
+    "workers": 20,
+    "warmup_seconds": 30,
+    "measurement_seconds": 60,
+    "ratio": "70/20/10 Feed/interaction/social",
+    "publishes_per_run": 20
+  },
+  "acceptance": {
+    "runs_per_mode": 3,
+    "sql_only_median_following_p95_ms": 45.027281,
+    "hybrid_median_following_p95_ms": 59.552876,
+    "hybrid_slower_percent": 32.26,
+    "required_improvement_percent": 20.0,
+    "request_successes": 62549,
+    "request_failures": 0,
+    "publishes": 120,
+    "all_runs_consistent": true,
+    "target_met": false
+  },
+  "following_candidate_stage": {
+    "sql_only": [
+      {
+        "round": 1,
+        "candidate_mean_ms": 22.947,
+        "candidate_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "interaction_mean_ms": 3.632,
+        "interaction_p95_bucket_ms": [
+          5.0,
+          10.0
+        ]
+      },
+      {
+        "round": 2,
+        "candidate_mean_ms": 20.598,
+        "candidate_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "interaction_mean_ms": 3.381,
+        "interaction_p95_bucket_ms": [
+          5.0,
+          10.0
+        ]
+      },
+      {
+        "round": 3,
+        "candidate_mean_ms": 21.875,
+        "candidate_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "interaction_mean_ms": 3.496,
+        "interaction_p95_bucket_ms": [
+          5.0,
+          10.0
+        ]
+      }
+    ],
+    "hybrid": [
+      {
+        "round": 1,
+        "candidate_mean_ms": 19.808,
+        "candidate_p95_bucket_ms": [
+          50.0,
+          60.0
+        ],
+        "interaction_mean_ms": 3.452,
+        "interaction_p95_bucket_ms": [
+          5.0,
+          10.0
+        ]
+      },
+      {
+        "round": 2,
+        "candidate_mean_ms": 18.991,
+        "candidate_p95_bucket_ms": [
+          50.0,
+          60.0
+        ],
+        "interaction_mean_ms": 3.408,
+        "interaction_p95_bucket_ms": [
+          5.0,
+          10.0
+        ]
+      },
+      {
+        "round": 3,
+        "candidate_mean_ms": 22.222,
+        "candidate_p95_bucket_ms": [
+          50.0,
+          60.0
+        ],
+        "interaction_mean_ms": 3.581,
+        "interaction_p95_bucket_ms": [
+          5.0,
+          10.0
+        ]
+      }
+    ]
+  },
+  "database_pool_wait": {
+    "sql_only": [
+      {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      }
+    ],
+    "hybrid": [
+      {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      }
+    ]
+  },
+  "account_aggregated_prepared_execute": {
+    "sql_only": [
+      {
+        "round": 1,
+        "digest_count": 4,
+        "execute_count": 99674,
+        "execute_mean_timer_wait_ms": 13.871,
+        "execute_rows_examined": 93782802,
+        "execute_rows_sent": 822653,
+        "execute_no_index_used": 0
+      },
+      {
+        "round": 2,
+        "digest_count": 4,
+        "execute_count": 105376,
+        "execute_mean_timer_wait_ms": 13.075,
+        "execute_rows_examined": 97903332,
+        "execute_rows_sent": 872828,
+        "execute_no_index_used": 0
+      },
+      {
+        "round": 3,
+        "digest_count": 4,
+        "execute_count": 103459,
+        "execute_mean_timer_wait_ms": 13.15,
+        "execute_rows_examined": 95245390,
+        "execute_rows_sent": 857606,
+        "execute_no_index_used": 0
+      }
+    ],
+    "hybrid": [
+      {
+        "round": 1,
+        "digest_count": 4,
+        "execute_count": 156162,
+        "execute_mean_timer_wait_ms": 7.896,
+        "execute_rows_examined": 69675533,
+        "execute_rows_sent": 1330165,
+        "execute_no_index_used": 42928
+      },
+      {
+        "round": 2,
+        "digest_count": 4,
+        "execute_count": 160527,
+        "execute_mean_timer_wait_ms": 7.671,
+        "execute_rows_examined": 70944306,
+        "execute_rows_sent": 1369412,
+        "execute_no_index_used": 44222
+      },
+      {
+        "round": 3,
+        "digest_count": 4,
+        "execute_count": 152804,
+        "execute_mean_timer_wait_ms": 7.742,
+        "execute_rows_examined": 68929928,
+        "execute_rows_sent": 1300837,
+        "execute_no_index_used": 41904
+      }
+    ]
+  },
+  "cpu_profiles": {
+    "sql_only": {
+      "fixture_round": 4,
+      "diagnostic_only": true,
+      "duration_seconds": 60,
+      "sampled_cpu_seconds": 10.41,
+      "profile_started_at_utc": "2026-11-03T08:28:57Z",
+      "top_flat_samples": [
+        {
+          "function": "internal/runtime/syscall/linux.Syscall6",
+          "seconds": 2.55,
+          "percent": 24.5
+        },
+        {
+          "function": "runtime.futex",
+          "seconds": 0.7,
+          "percent": 6.72
+        },
+        {
+          "function": "runtime.tryDeferToSpanScan",
+          "seconds": 0.3,
+          "percent": 2.88
+        },
+        {
+          "function": "runtime.lock2",
+          "seconds": 0.2,
+          "percent": 1.92
+        },
+        {
+          "function": "runtime.unlock2",
+          "seconds": 0.18,
+          "percent": 1.73
+        },
+        {
+          "function": "database/sql.convertAssignRows",
+          "seconds": 0.09,
+          "percent": 0.86
+        }
+      ]
+    },
+    "hybrid": {
+      "fixture_round": 4,
+      "diagnostic_only": true,
+      "duration_seconds": 60,
+      "sampled_cpu_seconds": 11.22,
+      "profile_started_at_utc": "2026-11-03T08:31:18Z",
+      "top_flat_samples": [
+        {
+          "function": "internal/runtime/syscall/linux.Syscall6",
+          "seconds": 2.38,
+          "percent": 21.21
+        },
+        {
+          "function": "runtime.futex",
+          "seconds": 0.61,
+          "percent": 5.44
+        },
+        {
+          "function": "runtime.scanObject",
+          "seconds": 0.21,
+          "percent": 1.87
+        },
+        {
+          "function": "runtime.tryDeferToSpanScan",
+          "seconds": 0.3,
+          "percent": 2.67
+        },
+        {
+          "function": "runtime.unlock2",
+          "seconds": 0.15,
+          "percent": 1.34
+        },
+        {
+          "function": "database/sql.convertAssignRows",
+          "seconds": 0.09,
+          "percent": 0.8
+        }
+      ],
+      "followingVideos_cumulative_cpu_seconds": 1.7,
+      "gorm_Find_cumulative_cpu_seconds": 1.61,
+      "sql_builder_cpu_seconds_approx": 0.01
+    },
+    "interpretation": "CPU profiles do not identify one Go compute-heavy function as the candidate-stage tail cause. Cumulative values include nested work and are not wall-clock query latency."
+  },
+  "goroutine_snapshots": {
+    "sql_only": {
+      "fixture_round": 4,
+      "total_goroutines": 78,
+      "states": {
+        "running": 1,
+        "select": 31,
+        "IO wait": 44,
+        "syscall": 2
+      },
+      "mysql_buffer_fill_stacks": 20,
+      "mysql_connection_watcher_stacks": 22,
+      "mutex_lock_stack_matches": 0,
+      "semaphore_wait_states": 0
+    },
+    "hybrid": {
+      "fixture_round": 4,
+      "total_goroutines": 78,
+      "states": {
+        "running": 1,
+        "select": 30,
+        "IO wait": 41,
+        "syscall": 2,
+        "runnable": 4
+      },
+      "mysql_buffer_fill_stacks": 21,
+      "mysql_connection_watcher_stacks": 22,
+      "mutex_lock_stack_matches": 0,
+      "semaphore_wait_states": 0
+    }
+  },
+  "local_mysql_interpolation_probe": {
+    "driver": "go-sql-driver/mysql v1.7.0",
+    "mysql_image": "mysql:8.4",
+    "interpolate_params_disabled": {
+      "event_name": "statement/com/Execute",
+      "sql_text": null,
+      "digest_text": null,
+      "rows_examined": 1,
+      "rows_sent": 1
+    },
+    "interpolate_params_enabled": {
+      "event_name": "statement/sql/select",
+      "sql_text": "SELECT 'bound-marker' AS marker, value FROM prepared_probe WHERE id = 1",
+      "digest_text": "SELECT ? AS `marker` , VALUE FROM `prepared_probe` WHERE `id` = ?",
+      "rows_examined": 1,
+      "rows_sent": 1
+    },
+    "scope": "one disposable local behavior probe; not an A04 latency comparison"
+  },
+  "artifacts": {
+    "sql_only_cpu": "feed-a04-pprof-2026-11-03/sql-only-round-4-cpu.pb.gz",
+    "sql_only_goroutines": "feed-a04-pprof-2026-11-03/sql-only-round-4-goroutines.txt.gz",
+    "hybrid_cpu": "feed-a04-pprof-2026-11-03/hybrid-round-4-cpu.pb.gz",
+    "hybrid_goroutines": "feed-a04-pprof-2026-11-03/hybrid-round-4-goroutines.txt.gz",
+    "workflow_artifact": "https://github.com/liuzhouquan/GoStream/actions/runs/41601458252"
+  },
+  "limits": [
+    "CPU and goroutine files are one diagnostic-only fixture per mode and are excluded from the six-round client P95 gate.",
+    "A goroutine dump is a point-in-time view; socket-read stacks do not distinguish MySQL execution time from result transfer or client scheduling.",
+    "Performance Schema prepared execute counters are account-wide command aggregates, not per-query measurements.",
+    "The local interpolation probe validates observability semantics only; no A04 latency improvement from interpolation is claimed."
+  ]
+}
