@@ -9,6 +9,7 @@ import json
 import math
 import os
 import pathlib
+import random
 import re
 import secrets
 import signal
@@ -36,15 +37,22 @@ FOLLOWERS = 20
 LOGIN_RATE_BUDGET = 30
 FANOUT_DEADLINE_SECONDS = 60
 REQUIRED_IMPROVEMENT = 0.20
-SCHEDULE = (
-    ("sql-only", 1),
-    ("hybrid", 1),
-    ("hybrid", 2),
-    ("sql-only", 2),
-    ("sql-only", 3),
-    ("hybrid", 3),
-)
+DEFAULT_SCHEDULE_SEED = 0
 PROFILE_SCHEDULE = (("sql-only", 4), ("hybrid", 4))
+
+
+def acceptance_schedule(seed: int) -> tuple[tuple[str, int], ...]:
+    """Return three adjacent mode pairs with deterministic, counterbalanced order."""
+    rng = random.Random(seed)
+    first_mode = rng.choice(("sql-only", "hybrid"))
+    second_mode = "hybrid" if first_mode == "sql-only" else "sql-only"
+    first_modes = [first_mode, first_mode, second_mode]
+    rng.shuffle(first_modes)
+    return tuple(
+        (mode, round_number)
+        for round_number, first in enumerate(first_modes, 1)
+        for mode in (first, second_mode if first == first_mode else first_mode)
+    )
 
 
 def percentile(values: list[int], numerator: int) -> int:
@@ -281,9 +289,15 @@ def format_summary(summary: dict) -> str:
         "driver lifetime; diagnostic only",
     )
 
+    schedule_text = ", ".join(
+        "{} r{}".format(entry["mode"], entry["round"])
+        for entry in summary.get("schedule", [])
+    )
     lines = [
         "# A04 mixed Feed acceptance",
         "",
+        f"- Schedule seed: {summary.get('schedule_seed', 'not recorded')}",
+        f"- Acceptance run order: {schedule_text or 'not recorded'}",
         f"- SQL-only median following Feed P95: {summary['sql_only_median_following_p95_ns'] / 1_000_000:.3f} ms",
         f"- Hybrid median following Feed P95: {summary['hybrid_median_following_p95_ns'] / 1_000_000:.3f} ms",
         f"- Hybrid P95 improvement under mixed writes: {summary['following_p95_improvement_percent']:.2f}%",
@@ -1399,6 +1413,12 @@ def parse_args():
     parser.add_argument("--pprof-port", type=int, default=18088)
     parser.add_argument("--go-bin", default="go")
     parser.add_argument(
+        "--schedule-seed",
+        type=int,
+        default=DEFAULT_SCHEDULE_SEED,
+        help="seed for deterministic, counterbalanced SQL-only/Hybrid round order",
+    )
+    parser.add_argument(
         "--interpolate-params",
         action="store_true",
         help="enable go-sql-driver/mysql parameter interpolation for this isolated A04 experiment",
@@ -1426,9 +1446,10 @@ def main() -> int:
     version = subprocess.run([args.go_bin, "version"], capture_output=True, text=True, check=False)
     if version.returncode != 0 or "go1.27.2" not in version.stdout:
         raise AcceptanceError(f"A04 mixed acceptance requires Go 1.27.2; got {version.stdout.strip()}")
+    schedule = acceptance_schedule(args.schedule_seed)
     reports = []
     try:
-        for mode, round_number in SCHEDULE:
+        for mode, round_number in schedule:
             report = run_case(args, mode, round_number)
             reports.append(report)
             (report_dir / "partial-summary.json").write_text(json.dumps(reports, indent=2) + "\n")
@@ -1446,7 +1467,8 @@ def main() -> int:
             profile_reports.append(report)
             (report_dir / "profile-partial-summary.json").write_text(json.dumps(profile_reports, indent=2) + "\n")
         summary = summarize(reports, REQUIRED_IMPROVEMENT, interpolate_params=args.interpolate_params)
-        summary["schedule"] = [{"mode": mode, "round": number} for mode, number in SCHEDULE]
+        summary["schedule_seed"] = args.schedule_seed
+        summary["schedule"] = [{"mode": mode, "round": number} for mode, number in schedule]
         summary["diagnostic_profiles"] = [
             {
                 "variant": report["variant"],
