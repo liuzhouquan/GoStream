@@ -57,9 +57,20 @@ type feedStageHistogramKey struct {
 	Outcome string
 }
 
+type databasePoolWaitSnapshot struct {
+	WaitCount           uint64
+	WaitDurationSeconds float64
+}
+
+type databasePoolWaitReport struct {
+	WaitCount           uint64  `json:"wait_count"`
+	WaitDurationSeconds float64 `json:"wait_duration_seconds"`
+}
+
 type apiHistogramSnapshot struct {
-	Following feedHistogramSnapshot
-	Stages    map[feedStageHistogramKey]feedHistogramSnapshot
+	Following    feedHistogramSnapshot
+	Stages       map[feedStageHistogramKey]feedHistogramSnapshot
+	DatabasePool databasePoolWaitSnapshot
 }
 
 type serverLatencyReport struct {
@@ -88,6 +99,7 @@ type loadReport struct {
 	Operations          map[string]operationReport `json:"operations"`
 	ServerFollowing     *serverLatencyReport       `json:"server_following_latency,omitempty"`
 	ServerFeedStages    []serverFeedStageReport    `json:"server_feed_stages,omitempty"`
+	DatabasePoolWait    *databasePoolWaitReport    `json:"database_pool_wait,omitempty"`
 }
 
 const maxMetricsResponseBytes = 8 << 20
@@ -121,7 +133,11 @@ func scrapeAPIHistograms(client *http.Client, baseURL string) (apiHistogramSnaps
 	if err != nil {
 		return apiHistogramSnapshot{}, err
 	}
-	return apiHistogramSnapshot{Following: following, Stages: stages}, nil
+	databasePool, err := parseDatabasePoolWaitMetrics(exposition)
+	if err != nil {
+		return apiHistogramSnapshot{}, err
+	}
+	return apiHistogramSnapshot{Following: following, Stages: stages, DatabasePool: databasePool}, nil
 }
 
 func scrapeFollowingHistogram(client *http.Client, baseURL string) (feedHistogramSnapshot, error) {
@@ -244,6 +260,52 @@ func parseFeedStageHistograms(exposition string) (map[feedStageHistogramKey]feed
 		stages[key] = snapshot
 	}
 	return stages, nil
+}
+
+func parseDatabasePoolWaitMetrics(exposition string) (databasePoolWaitSnapshot, error) {
+	parser := expfmt.NewTextParser(model.UTF8Validation)
+	families, err := parser.TextToMetricFamilies(strings.NewReader(exposition))
+	if err != nil {
+		return databasePoolWaitSnapshot{}, fmt.Errorf("parse Prometheus exposition: %w", err)
+	}
+	readCounter := func(name string) (float64, error) {
+		family := families[name]
+		if family == nil || family.GetType() != dto.MetricType_COUNTER || len(family.GetMetric()) != 1 {
+			return 0, fmt.Errorf("missing or invalid database pool counter %q", name)
+		}
+		metric := family.GetMetric()[0]
+		if len(metric.GetLabel()) != 0 || metric.GetCounter() == nil {
+			return 0, fmt.Errorf("database pool counter %q must have no labels", name)
+		}
+		value := metric.GetCounter().GetValue()
+		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			return 0, fmt.Errorf("database pool counter %q has invalid value %v", name, value)
+		}
+		return value, nil
+	}
+	waitCount, err := readCounter("gostream_database_pool_wait_count_total")
+	if err != nil {
+		return databasePoolWaitSnapshot{}, err
+	}
+	if math.Trunc(waitCount) != waitCount || waitCount >= math.Exp2(64) {
+		return databasePoolWaitSnapshot{}, fmt.Errorf("database pool wait count is not an integer")
+	}
+	waitDuration, err := readCounter("gostream_database_pool_wait_duration_seconds_total")
+	if err != nil {
+		return databasePoolWaitSnapshot{}, err
+	}
+	return databasePoolWaitSnapshot{WaitCount: uint64(waitCount), WaitDurationSeconds: waitDuration}, nil
+}
+
+func databasePoolWaitDeltaReport(before, after databasePoolWaitSnapshot) (*databasePoolWaitReport, error) {
+	if after.WaitCount < before.WaitCount || after.WaitDurationSeconds+1e-12 < before.WaitDurationSeconds {
+		return nil, fmt.Errorf("database pool wait counter reset during measurement")
+	}
+	duration := after.WaitDurationSeconds - before.WaitDurationSeconds
+	if duration < 0 {
+		duration = 0
+	}
+	return &databasePoolWaitReport{WaitCount: after.WaitCount - before.WaitCount, WaitDurationSeconds: duration}, nil
 }
 
 func feedStageHistogramDeltaReports(before, after map[feedStageHistogramKey]feedHistogramSnapshot) ([]serverFeedStageReport, error) {
@@ -538,6 +600,10 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 	if err != nil {
 		return err
 	}
+	databasePoolWait, err := databasePoolWaitDeltaReport(serverHistogramBefore.DatabasePool, serverHistogramAfter.DatabasePool)
+	if err != nil {
+		return err
+	}
 	if !hasFeedStageSamples(serverFeedStages, "following", "candidate_query", "success") ||
 		!hasFeedStageSamples(serverFeedStages, "following", "interaction_state", "success") {
 		return fmt.Errorf("measurement did not contain successful following Feed candidate and interaction stages")
@@ -560,6 +626,8 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 			fmt.Printf("%s]\n", time.Duration(*stage.Latency.P95BucketUpperBoundSeconds*float64(time.Second)).Round(time.Microsecond))
 		}
 	}
+	fmt.Printf("database_pool_wait count=%d duration=%s\n", databasePoolWait.WaitCount,
+		time.Duration(databasePoolWait.WaitDurationSeconds*float64(time.Second)).Round(time.Microsecond))
 	close(results)
 	merged := make(map[string]*sample)
 	var all []time.Duration
@@ -609,7 +677,7 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 		report := loadReport{
 			Concurrency: concurrency, ActorCount: len(actors), WarmupNS: int64(warmup), RequestedDurationNS: int64(duration),
 			ElapsedNS: int64(elapsed), Successes: successes, Failures: failed, Operations: operationReports,
-			ServerFollowing: serverFollowing, ServerFeedStages: serverFeedStages,
+			ServerFollowing: serverFollowing, ServerFeedStages: serverFeedStages, DatabasePoolWait: databasePoolWait,
 		}
 		if err := writeReport(reportPath, report); err != nil {
 			return err

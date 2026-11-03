@@ -1047,11 +1047,59 @@ func TestReadinessAndPrometheusMetrics(t *testing.T) {
 		`gostream_feed_request_duration_seconds_count{outcome="success",scene="following"} 1`,
 		`gostream_feed_request_duration_seconds_count{outcome="error",scene="invalid"} 2`,
 		`gostream_feed_request_duration_seconds_bucket{outcome="error",scene="following",le="0.005"} 1`,
+		`# TYPE gostream_database_pool_wait_count_total counter`,
+		`gostream_database_pool_wait_count_total`,
+		`gostream_database_pool_wait_duration_seconds_total`,
 		`gostream_websocket_connections`,
 	} {
 		if !strings.Contains(metrics.Body.String(), marker) {
 			t.Fatalf("metrics missing %q", marker)
 		}
+	}
+}
+
+func TestDatabasePoolWaitMetricsReflectLiveSQLDBStats(t *testing.T) {
+	_, h, gormDB := testServer(t)
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(1)
+	held, err := sqlDB.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+
+	queryCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	queryDone := make(chan error, 1)
+	go func() {
+		var value int
+		queryDone <- sqlDB.QueryRowContext(queryCtx, "SELECT 1").Scan(&value)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for sqlDB.Stats().WaitCount == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if sqlDB.Stats().WaitCount == 0 {
+		t.Fatal("second query did not wait for the only pooled connection")
+	}
+	time.Sleep(10 * time.Millisecond)
+	if err := held.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-queryDone; err != nil {
+		t.Fatal(err)
+	}
+
+	metrics := request(t, h, http.MethodGet, "/metrics", "", nil)
+	if metrics.Code != http.StatusOK {
+		t.Fatalf("metrics endpoint: %d %s", metrics.Code, metrics.Body.String())
+	}
+	if !strings.Contains(metrics.Body.String(), "gostream_database_pool_wait_count_total 1\n") {
+		t.Fatalf("live database pool wait counter missing or incorrect:\n%s", metrics.Body.String())
 	}
 }
 
