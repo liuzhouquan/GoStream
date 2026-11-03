@@ -3,6 +3,7 @@ package platform
 import (
 	"context"
 	"strings"
+	"time"
 )
 
 // Each branch is capped at one page before the UNION. Completed fanout jobs
@@ -61,9 +62,11 @@ SELECT id, created_at FROM (
 ) AS feed_page ON feed_page.id = videos.id`)
 	args = append(args, limit+1)
 	var videos []Video
-	err := s.DB.WithContext(ctx).Model(&Video{}).Preload("Author").
+	queryStart := time.Now()
+	err := s.DB.WithContext(ctx).Model(&Video{}).
 		Joins(sql.String(), args...).Where("videos.status = ?", "published").
 		Order("feed_page.created_at DESC, feed_page.id DESC").Limit(limit + 1).Find(&videos).Error
+	s.metrics.observeFeedStage("following", "candidate_sql", queryStart, err)
 	if err != nil {
 		return nil, err
 	}
@@ -71,4 +74,37 @@ SELECT id, created_at FROM (
 		videos = []Video{}
 	}
 	return videos, nil
+}
+
+func (s *Server) preloadVideoAuthors(ctx context.Context, videos []Video) error {
+	if len(videos) == 0 {
+		return nil
+	}
+	authorIDs := make([]uint, 0, len(videos))
+	seen := make(map[uint]struct{}, len(videos))
+	for _, video := range videos {
+		if video.AuthorID == 0 {
+			continue
+		}
+		if _, ok := seen[video.AuthorID]; ok {
+			continue
+		}
+		seen[video.AuthorID] = struct{}{}
+		authorIDs = append(authorIDs, video.AuthorID)
+	}
+	if len(authorIDs) == 0 {
+		return nil
+	}
+	var authors []User
+	if err := s.DB.WithContext(ctx).Where("id IN ?", authorIDs).Find(&authors).Error; err != nil {
+		return err
+	}
+	byID := make(map[uint]User, len(authors))
+	for _, author := range authors {
+		byID[author.ID] = author
+	}
+	for i := range videos {
+		videos[i].Author = byID[videos[i].AuthorID]
+	}
+	return nil
 }
