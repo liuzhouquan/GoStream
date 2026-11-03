@@ -458,7 +458,28 @@ This run supports that excluding NULL digest rows avoids the previously observed
 
 The per-SQL digest means for the following candidate were 21.86–23.54 ms for SQL-only and 5.46–5.87 ms for Hybrid, with roughly 24.6–26.4 million versus 3.58–3.69 million rows examined. Those Performance Schema totals span the 30-second warmup and 60-second mixed window, while client P95 is a request-tail measurement; the aggregates are not directly comparable and do not explain why the Hybrid client tail is higher. The separate 60-second CPU profiles parsed with Go 1.27.2: Linux syscall was the largest flat symbol at 15.08% for SQL-only and 13.90% for Hybrid; futex, GC scanning, synchronization and JSON/allocation work followed. No single Go computation accounts for the observed latency gap, and the profiles cannot separate MySQL execution, socket transfer and response scanning.
 
-The compact [post-merge report](benchmarks/feed-a04-null-digest-fix-verification-2026-11-03.json) records every round, digest count, execution order and profile summary without raw request samples or SQL text. The diagnostics fix is verified for this run; the Hybrid performance target remains open. The A04 runner now randomizes which mode starts each adjacent same-round pair and stores the seed and realized order. Each mode still uses an isolated, freshly seeded fixture because the mixed workload writes state; this reduces time-order bias but is not same-database pairing. Use that schedule in the next full run, then collect a controlled following-only plan alongside mixed load before any production query change.
+The compact [post-merge report](benchmarks/feed-a04-null-digest-fix-verification-2026-11-03.json) records every round, digest count, execution order and profile summary without raw request samples or SQL text. The diagnostics fix is verified for this run; the Hybrid performance target remains open. The A04 runner now randomizes which mode starts each adjacent same-round pair and stores the seed and realized order. Each mode still uses an isolated, freshly seeded fixture because the mixed workload writes state; this reduces time-order bias but is not same-database pairing. Its first full-size seeded run is recorded next.
+
+### Seeded round-order verification, 2026-11-03
+
+[Workflow #41625136743](https://github.com/liuzhouquan/GoStream/actions/runs/41625136743) ran on merge commit `0496d0a` with `interpolateParams=true` and schedule seed `41625136743`. The runner recorded this order: SQL-only r1, Hybrid r1, SQL-only r2, Hybrid r2, Hybrid r3, SQL-only r3. Each adjacent pair contains one run per mode, and SQL-only started two of three pairs. The fixtures remained separate and freshly seeded. The run used Go 1.27.2, MySQL 8.4.13 with a 128 MiB InnoDB buffer pool, and an Ubuntu 24.04 GitHub runner with four vCPUs.
+
+It completed **46,892** mixed requests with zero failures, **120/120** API publishes, zero counter/visibility/outbox/fanout mismatches, and zero DB pool waits or MaxIdleClosed events. The workflow exited nonzero only because the required +20% median following P95 gate failed: SQL-only was **49.174 ms**, Hybrid **64.791 ms** (**31.76% slower**).
+
+| Mode / round | Client following P95 | API following P95 bucket | Candidate-query mean | Candidate-query P95 bucket | Interaction-state mean / P95 bucket |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| SQL-only 1 | 48.155 ms | (40, 50] ms | 25.672 ms | (40, 50] ms | 3.026 ms / (5, 10] ms |
+| Hybrid 1 | 64.791 ms | (60, 70] ms | 21.295 ms | (60, 70] ms | 2.720 ms / (5, 10] ms |
+| SQL-only 2 | 49.174 ms | (40, 50] ms | 26.338 ms | (40, 50] ms | 3.042 ms / (5, 10] ms |
+| Hybrid 2 | 28.481 ms | (25, 40] ms | 11.797 ms | (10, 25] ms | 2.905 ms / (5, 10] ms |
+| Hybrid 3 | 68.980 ms | (60, 70] ms | 22.782 ms | (60, 70] ms | 2.772 ms / (5, 10] ms |
+| SQL-only 3 | 51.031 ms | (50, 60] ms | 27.248 ms | (40, 50] ms | 2.995 ms / (5, 10] ms |
+
+The Hybrid round-2 P95 is much lower than its other two rounds, so the six observations still show substantial run-to-run variability; randomized pair start order alone cannot remove it. MySQL emitted repeated InnoDB redo checkpointer-lag warnings during the job. They are an environment signal, not proven to be the cause of any particular P95. The separate 60-second CPU profiles parsed with Go 1.27.2: Linux syscall was the top flat symbol at 23.30% for SQL-only and 21.44% for Hybrid. Both profiles also show futex, GC scanning and JSON/row processing; they do not isolate the end-to-end latency source.
+
+Performance Schema digest snapshots parsed in four of six rounds. SQL-only r1 and Hybrid r3 again failed at `digest_snapshot_parse` with `statement histogram snapshot contains a duplicate bucket`, although NULL DIGEST rows were already filtered. The parser did not retain duplicate row identity, so the cause remains unconfirmed. MySQL documents the histogram grouping and unique index as `(SCHEMA_NAME, DIGEST, BUCKET_NUMBER)` ([statement histogram summary tables](https://dev.mysql.com/doc/refman/8.4/en/performance-schema-statement-histogram-summary-tables.html)). The follow-up change now selects and keys both `SCHEMA_NAME` and `DIGEST`, and includes the complete bucket identity in duplicate errors. This matches the documented grouping key; it is not yet verified to eliminate the observed duplicate. Another full-size run must check both digest availability and the +20% gate.
+
+The [compact seeded-run report](benchmarks/feed-a04-seeded-order-verification-2026-11-03.json) records the actual seed, order, workload, per-round P95/stage buckets, diagnostic availability and profile summaries without retaining raw request samples. Seeded order reduces fixed time-order bias but these are still independent fixture runs, not same-database pairs.
 
 ### Follow-up diagnosis (exploratory, not a root-cause finding)
 

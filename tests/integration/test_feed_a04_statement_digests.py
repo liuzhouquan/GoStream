@@ -5,24 +5,72 @@ import feed_a04_mixed
 
 
 class FeedA04StatementDigestTests(unittest.TestCase):
+    def test_digest_delta_scopes_reused_digest_to_schema(self):
+        digest_text_hex = b"SELECT * FROM videos WHERE id = ?".hex().upper()
+        before = feed_a04_mixed.parse_statement_digest_snapshot(
+            [
+                ["a04_schema_a", "D1", digest_text_hex, "1", "1000000000", "0", "1", "10", "0", "0"],
+                ["a04_schema_b", "D1", digest_text_hex, "1", "2000000000", "0", "1", "20", "0", "0"],
+            ],
+            [
+                ["a04_schema_a", "D1", "1", "0", "1000000000", "1"],
+                ["a04_schema_b", "D1", "1", "0", "1000000000", "1"],
+            ],
+        )
+        after = feed_a04_mixed.parse_statement_digest_snapshot(
+            [
+                ["a04_schema_a", "D1", digest_text_hex, "2", "3000000000", "0", "2", "20", "0", "0"],
+                ["a04_schema_b", "D1", digest_text_hex, "2", "5000000000", "0", "2", "40", "0", "0"],
+            ],
+            [
+                ["a04_schema_a", "D1", "1", "0", "1000000000", "2"],
+                ["a04_schema_b", "D1", "1", "0", "1000000000", "2"],
+            ],
+        )
+
+        report = feed_a04_mixed.statement_digest_delta(before, after)
+
+        self.assertEqual(report["statement_count"], 2)
+        self.assertEqual(
+            {(item["schema_name"], item["digest"], item["count"]) for item in report["top_statements"]},
+            {("a04_schema_a", "D1", 1), ("a04_schema_b", "D1", 1)},
+        )
+
+    def test_digest_histogram_duplicate_error_identifies_full_key(self):
+        with self.assertRaisesRegex(
+            feed_a04_mixed.AcceptanceError,
+            r"duplicate bucket.*schema='a04_schema_a'.*digest=D1.*bucket=1",
+        ):
+            feed_a04_mixed.parse_statement_digest_snapshot(
+                [],
+                [
+                    ["a04_schema_a", "D1", "1", "0", "1000000000", "1"],
+                    ["a04_schema_a", "D1", "1", "0", "1000000000", "1"],
+                ],
+            )
+
     def test_digest_delta_reports_statement_latency_rows_and_interval_histogram(self):
         sql = "SELECT * FROM videos WHERE id = ?"
         digest_text_hex = sql.encode().hex().upper()
         follow_count_sql = "SELECT COUNT(*) FROM follows"
+        schema_name = "gostream_feed_a04_mixed_123_1"
         before = feed_a04_mixed.parse_statement_digest_snapshot(
-            [["D1", digest_text_hex, "2", "4000000000", "1000000000", "10", "100", "0", "0"]],
-            [["D1", "1", "0", "1000000000", "2"], ["D1", "2", "1000000000", "2000000000", "0"]],
+            [[schema_name, "D1", digest_text_hex, "2", "4000000000", "1000000000", "10", "100", "0", "0"]],
+            [
+                [schema_name, "D1", "1", "0", "1000000000", "2"],
+                [schema_name, "D1", "2", "1000000000", "2000000000", "0"],
+            ],
         )
         after = feed_a04_mixed.parse_statement_digest_snapshot(
             [
-                ["D1", digest_text_hex, "5", "14000000000", "2000000000", "20", "400", "1", "0"],
-                ["D2", follow_count_sql.encode().hex().upper(), "2", "10000000000", "0", "2", "80", "0", "0"],
+                [schema_name, "D1", digest_text_hex, "5", "14000000000", "2000000000", "20", "400", "1", "0"],
+                [schema_name, "D2", follow_count_sql.encode().hex().upper(), "2", "10000000000", "0", "2", "80", "0", "0"],
             ],
             [
-                ["D1", "1", "0", "1000000000", "2"],
-                ["D1", "2", "1000000000", "2000000000", "3"],
-                ["D2", "2", "1000000000", "2000000000", "1"],
-                ["D2", "3", "2000000000", "4000000000", "1"],
+                [schema_name, "D1", "1", "0", "1000000000", "2"],
+                [schema_name, "D1", "2", "1000000000", "2000000000", "3"],
+                [schema_name, "D2", "2", "1000000000", "2000000000", "1"],
+                [schema_name, "D2", "3", "2000000000", "4000000000", "1"],
             ],
         )
 
@@ -32,6 +80,7 @@ class FeedA04StatementDigestTests(unittest.TestCase):
         self.assertEqual(report["sum_timer_wait_ms"], 20.0)
         digests = {item["digest"]: item for item in report["top_statements"]}
         self.assertEqual(digests["D1"]["statement"], sql)
+        self.assertEqual(digests["D1"]["schema_name"], schema_name)
         self.assertEqual(digests["D1"]["count"], 3)
         self.assertEqual(digests["D1"]["mean_timer_wait_ms"], 10 / 3)
         self.assertEqual(digests["D1"]["sum_rows_examined"], 300)
@@ -40,11 +89,12 @@ class FeedA04StatementDigestTests(unittest.TestCase):
         self.assertEqual(digests["D2"]["p95_bucket_ms"], [2.0, 4.0])
 
     def test_digest_delta_rejects_performance_schema_counter_reset(self):
+        schema_name = "gostream_feed_a04_mixed_123_1"
         before = feed_a04_mixed.parse_statement_digest_snapshot(
-            [["D1", "", "5", "1000000000", "0", "0", "0", "0", "0"]], []
+            [[schema_name, "D1", "", "5", "1000000000", "0", "0", "0", "0", "0"]], []
         )
         after = feed_a04_mixed.parse_statement_digest_snapshot(
-            [["D1", "", "2", "500000000", "0", "0", "0", "0", "0"]], []
+            [[schema_name, "D1", "", "2", "500000000", "0", "0", "0", "0", "0"]], []
         )
 
         with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "counter reset"):
@@ -52,7 +102,7 @@ class FeedA04StatementDigestTests(unittest.TestCase):
 
     def test_digest_snapshot_rejects_invalid_rows(self):
         with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "unexpected statement digest row"):
-            feed_a04_mixed.parse_statement_digest_snapshot([["D1", "abcd"]], [])
+            feed_a04_mixed.parse_statement_digest_snapshot([["schema", "D1", "abcd"]], [])
 
     def test_statement_delta_preserves_unavailable_diagnostic_reason(self):
         report = feed_a04_mixed.performance_schema_statement_delta(
@@ -125,11 +175,15 @@ class FeedA04StatementDigestTests(unittest.TestCase):
     @mock.patch.object(feed_a04_mixed, "mysql_query")
     def test_snapshot_reads_only_the_isolated_schema_digest(self, mysql_query, _scalar):
         sql = "SELECT * FROM videos WHERE id = ?"
+        schema_name = "gostream_feed_a04_mixed_123_1"
         mysql_query.side_effect = [
             [],
             [["YES"]],
-            [["D1", sql.encode().hex().upper(), "3", "9000000000", "1000000000", "60", "300", "0", "0"]],
-            [["D1", "1", "0", "1000000000", "2"], ["D1", "2", "1000000000", "2000000000", "1"]],
+            [[schema_name, "D1", sql.encode().hex().upper(), "3", "9000000000", "1000000000", "60", "300", "0", "0"]],
+            [
+                [schema_name, "D1", "1", "0", "1000000000", "2"],
+                [schema_name, "D1", "2", "1000000000", "2000000000", "1"],
+            ],
         ]
 
         result = feed_a04_mixed.performance_schema_statement_snapshot(
@@ -137,9 +191,11 @@ class FeedA04StatementDigestTests(unittest.TestCase):
         )
 
         self.assertTrue(result["available"])
-        self.assertEqual(result["snapshot"]["statements"]["D1"]["statement"], sql)
+        self.assertEqual(result["snapshot"]["statements"][(schema_name, "D1")]["statement"], sql)
         self.assertIn("WHERE SCHEMA_NAME='gostream_feed_a04_mixed_123_1'", mysql_query.call_args_list[2].args[1])
         self.assertIn("WHERE SCHEMA_NAME='gostream_feed_a04_mixed_123_1'", mysql_query.call_args_list[3].args[1])
+        self.assertIn("SELECT SCHEMA_NAME, DIGEST,", mysql_query.call_args_list[2].args[1])
+        self.assertIn("SELECT SCHEMA_NAME, DIGEST,", mysql_query.call_args_list[3].args[1])
         self.assertIn("DIGEST IS NOT NULL", mysql_query.call_args_list[2].args[1])
         self.assertIn("DIGEST IS NOT NULL", mysql_query.call_args_list[3].args[1])
 

@@ -409,33 +409,57 @@ ACCOUNT_STATEMENT_EVENT_COUNTERS = (
 def parse_statement_digest_snapshot(summary_rows: list[list[str]], histogram_rows: list[list[str]]) -> dict:
     statements = {}
     for row in summary_rows:
-        if len(row) != 9:
+        if len(row) != 10:
             raise AcceptanceError(f"unexpected statement digest row with {len(row)} columns")
-        digest = row[0]
-        if not digest or digest in statements:
-            raise AcceptanceError("statement digest snapshot contains a blank or duplicate digest")
+        schema_name, digest = row[:2]
+        identity = (schema_name, digest)
+        if not schema_name or not digest or identity in statements:
+            raise AcceptanceError(
+                "statement digest snapshot contains a blank or duplicate identity: "
+                f"schema={schema_name!r} digest={digest}"
+            )
         try:
-            statement = bytes.fromhex(row[1]).decode("utf-8") if row[1] else ""
-            counters = [int(value) for value in row[2:]]
+            statement = bytes.fromhex(row[2]).decode("utf-8") if row[2] else ""
+            counters = [int(value) for value in row[3:]]
         except (UnicodeDecodeError, ValueError) as error:
             raise AcceptanceError(f"invalid statement digest counters or text: {error}") from error
         if any(value < 0 for value in counters):
             raise AcceptanceError("statement digest counters must be non-negative")
-        statements[digest] = {"statement": statement, **dict(zip(STATEMENT_DIGEST_COUNTERS, counters))}
+        statements[identity] = {
+            "schema_name": schema_name,
+            "digest": digest,
+            "statement": statement,
+            **dict(zip(STATEMENT_DIGEST_COUNTERS, counters)),
+        }
 
-    histograms: dict[str, dict[int, dict[str, int]]] = {}
+    histograms: dict[tuple[str, str], dict[int, dict[str, int]]] = {}
     for row in histogram_rows:
-        if len(row) != 5:
+        if len(row) != 6:
             raise AcceptanceError(f"unexpected statement histogram row with {len(row)} columns")
+        schema_name, digest = row[:2]
         try:
-            bucket_number, low_ps, high_ps, count = map(int, row[1:])
+            bucket_number, low_ps, high_ps, count = map(int, row[2:])
         except ValueError as error:
             raise AcceptanceError(f"invalid statement histogram counter: {error}") from error
-        if not row[0] or bucket_number < 0 or low_ps < 0 or high_ps <= low_ps or count < 0:
+        if (
+            not schema_name
+            or not digest
+            or bucket_number < 0
+            or low_ps < 0
+            or high_ps <= low_ps
+            or count < 0
+        ):
             raise AcceptanceError("statement histogram bucket values are invalid")
-        buckets = histograms.setdefault(row[0], {})
+        identity = (schema_name, digest)
+        buckets = histograms.setdefault(identity, {})
         if bucket_number in buckets:
-            raise AcceptanceError("statement histogram snapshot contains a duplicate bucket")
+            previous = buckets[bucket_number]
+            raise AcceptanceError(
+                "statement histogram snapshot contains a duplicate bucket: "
+                f"schema={schema_name!r} digest={digest} bucket={bucket_number} "
+                f"existing=({previous['low_ps']},{previous['high_ps']},{previous['count']}) "
+                f"current=({low_ps},{high_ps},{count})"
+            )
         buckets[bucket_number] = {"low_ps": low_ps, "high_ps": high_ps, "count": count}
     return {"statements": statements, "histograms": histograms}
 
@@ -548,20 +572,27 @@ def statement_digest_delta(before: dict, after: dict) -> dict:
     after_histograms = after.get("histograms", {})
     deltas = []
 
-    for digest, old in before_statements.items():
-        if digest not in after_statements and any(old[field] for field in STATEMENT_DIGEST_COUNTERS):
-            raise AcceptanceError("Performance Schema statement digest counter reset")
+    for identity, old in before_statements.items():
+        if identity not in after_statements and any(old[field] for field in STATEMENT_DIGEST_COUNTERS):
+            raise AcceptanceError(
+                "Performance Schema statement digest counter reset: "
+                f"schema={identity[0]!r} digest={identity[1]}"
+            )
 
-    for digest, current in after_statements.items():
-        old = before_statements.get(digest, {field: 0 for field in STATEMENT_DIGEST_COUNTERS})
+    for identity, current in after_statements.items():
+        schema_name, digest = identity
+        old = before_statements.get(identity, {field: 0 for field in STATEMENT_DIGEST_COUNTERS})
         difference = {}
         for field in STATEMENT_DIGEST_COUNTERS:
             if current[field] < old[field]:
-                raise AcceptanceError("Performance Schema statement digest counter reset")
+                raise AcceptanceError(
+                    "Performance Schema statement digest counter reset: "
+                    f"schema={schema_name!r} digest={digest}"
+                )
             difference[field] = current[field] - old[field]
 
-        old_buckets = before_histograms.get(digest, {})
-        current_buckets = after_histograms.get(digest, {})
+        old_buckets = before_histograms.get(identity, {})
+        current_buckets = after_histograms.get(identity, {})
         if any(bucket["count"] and number not in current_buckets for number, bucket in old_buckets.items()):
             raise AcceptanceError("Performance Schema statement histogram counter reset")
         histogram_delta = {}
@@ -578,6 +609,7 @@ def statement_digest_delta(before: dict, after: dict) -> dict:
         if difference["count_star"] == 0:
             continue
         deltas.append({
+            "schema_name": schema_name,
             "digest": digest,
             "statement": current["statement"] or "<statement text unavailable>",
             "count": difference["count_star"],
@@ -594,7 +626,14 @@ def statement_digest_delta(before: dict, after: dict) -> dict:
             "p99_bucket_ms": _statement_percentile_bucket(histogram_delta, difference["count_star"], 0.99),
         })
 
-    deltas.sort(key=lambda item: (-item["sum_timer_wait_ms"], -item["count"], item["digest"]))
+    deltas.sort(
+        key=lambda item: (
+            -item["sum_timer_wait_ms"],
+            -item["count"],
+            item["schema_name"],
+            item["digest"],
+        )
+    )
     return {
         "digest_count": len(deltas),
         "statement_count": sum(item["count"] for item in deltas),
@@ -652,7 +691,7 @@ def performance_schema_statement_snapshot(container: str, database: str, account
                 # no per-SQL identity and their histogram rows can share bucket numbers.
                 summary_rows = mysql_query(
                     container,
-                    "SELECT DIGEST, HEX(COALESCE(DIGEST_TEXT,'')), COUNT_STAR, SUM_TIMER_WAIT, "
+                    "SELECT SCHEMA_NAME, DIGEST, HEX(COALESCE(DIGEST_TEXT,'')), COUNT_STAR, SUM_TIMER_WAIT, "
                     "SUM_LOCK_TIME, SUM_ROWS_SENT, SUM_ROWS_EXAMINED, SUM_NO_INDEX_USED, SUM_NO_GOOD_INDEX_USED "
                     "FROM performance_schema.events_statements_summary_by_digest "
                     f"WHERE SCHEMA_NAME='{database}' AND DIGEST IS NOT NULL ORDER BY DIGEST;",
@@ -660,7 +699,7 @@ def performance_schema_statement_snapshot(container: str, database: str, account
                 digest_stage = "digest_histogram_query"
                 histogram_rows = mysql_query(
                     container,
-                    "SELECT DIGEST, BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH, COUNT_BUCKET "
+                    "SELECT SCHEMA_NAME, DIGEST, BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH, COUNT_BUCKET "
                     "FROM performance_schema.events_statements_histogram_by_digest "
                     f"WHERE SCHEMA_NAME='{database}' AND DIGEST IS NOT NULL ORDER BY DIGEST, BUCKET_NUMBER;",
                 )
