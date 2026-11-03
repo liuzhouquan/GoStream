@@ -29,8 +29,10 @@ CONCURRENCY = 20
 WARMUP_SECONDS = 30
 DURATION_SECONDS = 60
 PUBLISHERS = 20
-DRIVER_ACTORS = 10
+DRIVER_ACTORS = CONCURRENCY
 FOLLOWERS = 20
+# Keep each batch within POST /api/sessions' per-IP budget in internal/platform/server.go.
+LOGIN_RATE_BUDGET = 30
 FANOUT_DEADLINE_SECONDS = 60
 REQUIRED_IMPROVEMENT = 0.20
 SCHEDULE = (
@@ -48,6 +50,25 @@ def percentile(values: list[int], numerator: int) -> int:
     if not ordered:
         return 0
     return ordered[(len(ordered) - 1) * numerator // 100]
+
+
+def driver_reader_names() -> list[str]:
+    return [f"load-u-{500 + index:06d}" for index in range(DRIVER_ACTORS)]
+
+
+def publisher_login_batches(
+    reader_count: int, publisher_names: list[str], verifier_count: int
+) -> tuple[list[str], list[str]]:
+    if reader_count < 0 or verifier_count < 0:
+        raise AcceptanceError("login counts cannot be negative")
+    preload_count = max(0, LOGIN_RATE_BUDGET - reader_count)
+    before_load = publisher_names[:preload_count]
+    after_load = publisher_names[preload_count:]
+    if reader_count + len(before_load) > LOGIN_RATE_BUDGET:
+        raise AcceptanceError("reader and publisher logins exceed the pre-load login budget")
+    if len(after_load) + verifier_count > LOGIN_RATE_BUDGET:
+        raise AcceptanceError("deferred publisher and verifier logins exceed the post-load login budget")
+    return before_load, after_load
 
 
 def summarize(reports: list[dict], required_improvement: float) -> dict:
@@ -313,7 +334,7 @@ def initial_workload_targets(container: str, database: str, reader_names: list[s
         f"SELECT v.id FROM `{database}`.videos v "
         "WHERE v.status='published' AND NOT EXISTS "
         f"(SELECT 1 FROM `{database}`.video_actions a WHERE a.video_id=v.id) "
-        "ORDER BY v.id LIMIT 10;",
+        f"ORDER BY v.id LIMIT {DRIVER_ACTORS};",
     )
     video_ids = [int(row[0]) for row in rows]
     if len(video_ids) != DRIVER_ACTORS:
@@ -556,10 +577,13 @@ def run_case(args, mode: str, round_number: int) -> dict:
         api, log_handle, api_log_path, base_url, media_dir = start_api(
             args.api_binary, database, args.dsn_prefix, jwt_secret, pathlib.Path(args.report_dir), mode, round_number, args
         )
-        reader_names = [f"load-u-{500 + i:06d}" for i in range(DRIVER_ACTORS)]
+        reader_names = driver_reader_names()
         publisher_names = [f"load-u-{i:06d}" for i in range(1, PUBLISHERS + 1)]
+        publishers_before_load, publishers_after_load = publisher_login_batches(
+            len(reader_names), publisher_names, FOLLOWERS
+        )
         reader_tokens = [login(base_url, username) for username in reader_names]
-        publisher_tokens = [login(base_url, username) for username in publisher_names]
+        publisher_tokens = [login(base_url, username) for username in publishers_before_load]
         video_ids, followee_ids = initial_workload_targets(args.mysql_container, database, reader_names)
         token_fd, token_name = tempfile.mkstemp(prefix="gostream-feed-a04-mixed-", suffix=".tokens")
         token_path = pathlib.Path(token_name)
@@ -589,7 +613,9 @@ def run_case(args, mode: str, round_number: int) -> dict:
         if drained["fanout_pending"] or drained["outbox_pending"] or drained["outbox_dead"]:
             raise AcceptanceError(f"workload outbox did not drain cleanly: {drained}")
 
-        # The 90-second workload window has elapsed, so the login budget used above has reset.
+        # Split 30 logins into each rate-limit window: readers plus the first publisher batch
+        # run before the 90-second workload; deferred publishers share the next window with verifiers.
+        publisher_tokens.extend(login(base_url, username) for username in publishers_after_load)
         verifier_names = [f"load-u-{99 + i:06d}" for i in range(1, FOLLOWERS + 1)]
         verifier_tokens = [login(base_url, username) for username in verifier_names]
         publisher_ids = [id_for(args.mysql_container, database, username) for username in publisher_names]

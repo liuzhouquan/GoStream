@@ -35,6 +35,36 @@ def run(variant, round_number, following_p95_ns, publish_p95_ns=3_000_000):
 
 
 class FeedA04MixedHelpersTest(unittest.TestCase):
+    def test_mixed_driver_uses_one_distinct_reader_per_worker(self):
+        names = feed_a04_mixed.driver_reader_names()
+        self.assertEqual(len(names), feed_a04_mixed.CONCURRENCY)
+        self.assertEqual(len(set(names)), feed_a04_mixed.CONCURRENCY)
+        self.assertEqual(names[0], "load-u-000500")
+        self.assertEqual(names[-1], "load-u-000519")
+
+    def test_publisher_logins_are_split_across_rate_limit_windows(self):
+        publishers = [f"load-u-{index:06d}" for index in range(1, feed_a04_mixed.PUBLISHERS + 1)]
+        before, after = feed_a04_mixed.publisher_login_batches(
+            reader_count=feed_a04_mixed.CONCURRENCY,
+            publisher_names=publishers,
+            verifier_count=feed_a04_mixed.FOLLOWERS,
+        )
+        self.assertEqual(before, publishers[:10])
+        self.assertEqual(after, publishers[10:])
+        self.assertLessEqual(feed_a04_mixed.CONCURRENCY + len(before), feed_a04_mixed.LOGIN_RATE_BUDGET)
+        self.assertLessEqual(len(after) + feed_a04_mixed.FOLLOWERS, feed_a04_mixed.LOGIN_RATE_BUDGET)
+
+    def test_publisher_login_planning_rejects_a_post_load_budget_overflow(self):
+        publishers = [f"load-u-{index:06d}" for index in range(1, feed_a04_mixed.PUBLISHERS + 2)]
+        with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "post-load login budget"):
+            feed_a04_mixed.publisher_login_batches(
+                reader_count=feed_a04_mixed.CONCURRENCY,
+                publisher_names=publishers,
+                verifier_count=feed_a04_mixed.FOLLOWERS,
+            )
+        with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "cannot be negative"):
+            feed_a04_mixed.publisher_login_batches(reader_count=-1, publisher_names=[], verifier_count=0)
+
     def test_request_json_checks_the_endpoint_status_code(self):
         class Handler(http.server.BaseHTTPRequestHandler):
             def do_GET(self):

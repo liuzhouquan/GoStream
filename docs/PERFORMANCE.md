@@ -272,6 +272,10 @@ Every measured HTTP request succeeded. All 120 API publishes succeeded; the 60 h
 
 The summary and per-run aggregate metrics are retained in [`benchmarks/feed-a04-mixed-2026-11-02.json`](benchmarks/feed-a04-mixed-2026-11-02.json); the workflow artifact contains the raw request latency samples and API logs.
 
+### Benchmark fixture qualification
+
+Review after this run found that the original driver paired 20 workers with only 10 reader identities. `actor[worker % len(actors)]` therefore made two workers share each JWT, target video and followee while the driver issued state-changing requests. The six-run report remains an accurate result for that workload, and its consistency checks passed, but shared-account write contention is a workload confound; it is not a clean 20-independent-client comparison and does not identify the Hybrid query as the cause. The harness now assigns 20 reader identities to 20 workers and selects 20 untouched target videos. To respect the API's 30-login-per-minute limit, it logs in 20 readers plus 10 publishers before the 90-second load, then the remaining 10 publishers plus 20 verifiers afterward. The corrected full-size profile has not yet run; the historical P95 result remains below target, the SQL-only default stays in place, and no optimization or root cause is claimed from it.
+
 ### Follow-up diagnosis (exploratory, not a root-cause finding)
 
 On a separate disposable MySQL 8.4.11 fixture, refreshing one followed author's `follows.created_at` while keeping its 200 historical inbox rows caused the late-follow branch to find 200 candidate videos, perform 200 unique-key inbox probes, return no rows, and take 0.799 ms in one `EXPLAIN ANALYZE`. A 20-worker direct-query probe measured Hybrid P95 at 6.415 ms before and 10.021 ms after that state change; SQL-only measured 14.490 ms and 14.400 ms. This confirms extra work in the refollow path, but Hybrid remained faster in that isolated SQL probe, so it does not explain the CI end-to-end result by itself.
