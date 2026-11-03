@@ -219,7 +219,9 @@ def format_summary(summary: dict) -> str:
         for round_number, report in enumerate(runs, 1):
             if not report or not report.get("available"):
                 reason = report.get("reason", "snapshot_unavailable") if report else "snapshot_unavailable"
-                values.append(f"r{round_number} unavailable ({reason})")
+                failure_stage = report.get("failure_stage") if report else None
+                detail = f"; stage={failure_stage}" if failure_stage else ""
+                values.append(f"r{round_number} unavailable ({reason}{detail})")
                 continue
             top = report.get("top_statements", [])[:3]
             if not top:
@@ -242,7 +244,9 @@ def format_summary(summary: dict) -> str:
         for round_number, report in enumerate(runs, 1):
             if not report or not report.get("available"):
                 reason = report.get("reason", "snapshot_unavailable") if report else "snapshot_unavailable"
-                values.append(f"r{round_number} unavailable ({reason})")
+                failure_stage = report.get("failure_stage") if report else None
+                detail = f"; stage={failure_stage}" if failure_stage else ""
+                values.append(f"r{round_number} unavailable ({reason}{detail})")
                 continue
             count = report["prepared_execute_count"]
             total = report["prepared_execute_sum_timer_wait_ms"]
@@ -422,6 +426,29 @@ def parse_statement_digest_snapshot(summary_rows: list[list[str]], histogram_row
     return {"statements": statements, "histograms": histograms}
 
 
+def redact_diagnostic_error(error: Exception) -> str:
+    """Keep useful Performance Schema failure context without persisting credentials."""
+    message = " ".join(str(error).split())
+    message = re.sub(r"(?i)\bMYSQL_PWD\s*=\s*[^\s,;]+", "MYSQL_PWD=<REDACTED>", message)
+    message = re.sub(r"(?i)\b(password|passwd|pwd)\s*[:=]\s*[^\s,;]+", r"\1=<REDACTED>", message)
+    message = re.sub(r"(?i)\b(token|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+", r"\1=<REDACTED>", message)
+    message = re.sub(r"(?i)\bdsn\s*=\s*[^\s,;]+", "dsn=<REDACTED>", message)
+    message = re.sub(r"(?i)\bBearer\s+[^\s,;]+", "Bearer <REDACTED>", message)
+    message = "".join(character for character in message if character.isprintable())
+    if len(message) > 500:
+        message = message[:497] + "..."
+    return f"{type(error).__name__}: {message}"
+
+
+def diagnostic_failure(reason: str, stage: str, error: Exception) -> dict:
+    return {
+        "available": False,
+        "reason": reason,
+        "failure_stage": stage,
+        "error": redact_diagnostic_error(error),
+    }
+
+
 def parse_account_statement_event_snapshot(rows: list[list[str]]) -> dict[str, dict[str, int]]:
     events = {}
     for row in rows:
@@ -568,7 +595,7 @@ def performance_schema_statement_snapshot(container: str, database: str, account
         raise AcceptanceError("refusing Performance Schema query outside the isolated A04 mixed prefix")
     if not re.fullmatch(r"[A-Za-z0-9_]+", account_user):
         raise AcceptanceError("refusing Performance Schema account query with an invalid username")
-    unavailable_account_events = {"available": False, "reason": "account_event_query_failed"}
+    unavailable_account_events = {"available": False, "reason": "performance_schema_capability_check_failed"}
     try:
         if scalar(container, "SELECT @@performance_schema;") != 1:
             return {
@@ -591,10 +618,13 @@ def performance_schema_statement_snapshot(container: str, database: str, account
                 "account_user": account_user,
                 "snapshot": parse_account_statement_event_snapshot(account_event_rows),
             }
-        except (AcceptanceError, ValueError):
-            pass
+        except Exception as error:
+            account_statement_events = diagnostic_failure(
+                "account_event_query_failed", "account_event_query", error
+            )
 
         digest_diagnostics = {"available": False, "reason": "performance_schema_query_failed"}
+        digest_stage = "digest_consumer_check"
         try:
             consumers = mysql_query(
                 container,
@@ -603,6 +633,7 @@ def performance_schema_statement_snapshot(container: str, database: str, account
             if consumers != [["YES"]]:
                 digest_diagnostics = {"available": False, "reason": "statement_digest_consumer_disabled"}
             else:
+                digest_stage = "digest_summary_query"
                 summary_rows = mysql_query(
                     container,
                     "SELECT COALESCE(DIGEST,'__OTHER__'), HEX(COALESCE(DIGEST_TEXT,'')), COUNT_STAR, SUM_TIMER_WAIT, "
@@ -610,34 +641,48 @@ def performance_schema_statement_snapshot(container: str, database: str, account
                     "FROM performance_schema.events_statements_summary_by_digest "
                     f"WHERE SCHEMA_NAME='{database}' ORDER BY DIGEST;",
                 )
+                digest_stage = "digest_histogram_query"
                 histogram_rows = mysql_query(
                     container,
                     "SELECT COALESCE(DIGEST,'__OTHER__'), BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH, COUNT_BUCKET "
                     "FROM performance_schema.events_statements_histogram_by_digest "
                     f"WHERE SCHEMA_NAME='{database}' ORDER BY DIGEST, BUCKET_NUMBER;",
                 )
+                digest_stage = "digest_snapshot_parse"
                 digest_diagnostics = {
                     "available": True,
                     "snapshot": parse_statement_digest_snapshot(summary_rows, histogram_rows),
                 }
-        except (AcceptanceError, ValueError):
-            pass
+        except Exception as error:
+            digest_diagnostics = diagnostic_failure(
+                "performance_schema_query_failed", digest_stage, error
+            )
         return {**digest_diagnostics, "account_statement_events": account_statement_events}
-    except (AcceptanceError, ValueError):
+    except Exception as error:
         return {
-            "available": False,
-            "reason": "performance_schema_query_failed",
+            **diagnostic_failure("performance_schema_query_failed", "performance_schema_capability_check", error),
             "account_statement_events": unavailable_account_events,
         }
 
 
 def performance_schema_statement_delta(before: dict, after: dict) -> dict:
     result = {"available": False, "reason": before.get("reason") or after.get("reason") or "snapshot_unavailable"}
+    failed_snapshot = None
+    if not before.get("available"):
+        failed_snapshot = before
+    elif not after.get("available"):
+        failed_snapshot = after
+    if failed_snapshot:
+        for field in ("failure_stage", "error"):
+            if failed_snapshot.get(field):
+                result[field] = failed_snapshot[field]
     if before.get("available") and after.get("available"):
         try:
             result = {"available": True, **statement_digest_delta(before["snapshot"], after["snapshot"])}
-        except (AcceptanceError, KeyError):
-            result = {"available": False, "reason": "performance_schema_counter_reset_or_invalid_snapshot"}
+        except (AcceptanceError, KeyError) as error:
+            result = diagnostic_failure(
+                "performance_schema_counter_reset_or_invalid_snapshot", "statement_digest_delta", error
+            )
 
     before_events = before.get("account_statement_events", {})
     after_events = after.get("account_statement_events", {})
@@ -645,6 +690,15 @@ def performance_schema_statement_delta(before: dict, after: dict) -> dict:
         "available": False,
         "reason": before_events.get("reason") or after_events.get("reason") or "account_event_snapshot_unavailable",
     }
+    failed_events = None
+    if not before_events.get("available"):
+        failed_events = before_events
+    elif not after_events.get("available"):
+        failed_events = after_events
+    if failed_events:
+        for field in ("failure_stage", "error"):
+            if failed_events.get(field):
+                prepared_diagnostics[field] = failed_events[field]
     if before_events.get("available") and after_events.get("available"):
         try:
             if before_events.get("account_user") != after_events.get("account_user"):
