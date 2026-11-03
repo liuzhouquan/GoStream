@@ -36,16 +36,30 @@ class FeedA04StatementDigestTests(unittest.TestCase):
             {("a04_schema_a", "D1", 1), ("a04_schema_b", "D1", 1)},
         )
 
-    def test_digest_histogram_duplicate_error_identifies_full_key(self):
+    def test_digest_histogram_collapses_identical_duplicate_bucket_rows(self):
+        snapshot = feed_a04_mixed.parse_statement_digest_snapshot(
+            [],
+            [
+                ["a04_schema_a", "D1", "1", "0", "1000000000", "0"],
+                ["a04_schema_a", "D1", "1", "0", "1000000000", "0"],
+            ],
+        )
+
+        self.assertEqual(
+            snapshot["histograms"],
+            {("a04_schema_a", "D1"): {1: {"low_ps": 0, "high_ps": 1_000_000_000, "count": 0}}},
+        )
+
+    def test_digest_histogram_conflicting_duplicate_error_identifies_full_key(self):
         with self.assertRaisesRegex(
             feed_a04_mixed.AcceptanceError,
-            r"duplicate bucket.*schema='a04_schema_a'.*digest=D1.*bucket=1",
+            r"conflicting duplicate bucket.*schema='a04_schema_a'.*digest=D1.*bucket=1",
         ):
             feed_a04_mixed.parse_statement_digest_snapshot(
                 [],
                 [
                     ["a04_schema_a", "D1", "1", "0", "1000000000", "1"],
-                    ["a04_schema_a", "D1", "1", "0", "1000000000", "1"],
+                    ["a04_schema_a", "D1", "1", "0", "1000000000", "2"],
                 ],
             )
 
@@ -195,7 +209,15 @@ class FeedA04StatementDigestTests(unittest.TestCase):
         self.assertIn("WHERE SCHEMA_NAME='gostream_feed_a04_mixed_123_1'", mysql_query.call_args_list[2].args[1])
         self.assertIn("WHERE SCHEMA_NAME='gostream_feed_a04_mixed_123_1'", mysql_query.call_args_list[3].args[1])
         self.assertIn("SELECT SCHEMA_NAME, DIGEST,", mysql_query.call_args_list[2].args[1])
-        self.assertIn("SELECT SCHEMA_NAME, DIGEST,", mysql_query.call_args_list[3].args[1])
+        histogram_query = mysql_query.call_args_list[3].args[1]
+        self.assertIn(
+            "SELECT SCHEMA_NAME, DIGEST, BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH, MAX(COUNT_BUCKET)",
+            histogram_query,
+        )
+        self.assertIn(
+            "GROUP BY SCHEMA_NAME, DIGEST, BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH",
+            histogram_query,
+        )
         self.assertIn("DIGEST IS NOT NULL", mysql_query.call_args_list[2].args[1])
         self.assertIn("DIGEST IS NOT NULL", mysql_query.call_args_list[3].args[1])
 
