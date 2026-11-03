@@ -456,7 +456,7 @@ def performance_schema_statement_snapshot(container: str, database: str) -> dict
             f"WHERE SCHEMA_NAME='{database}' ORDER BY DIGEST, BUCKET_NUMBER;",
         )
         return {"available": True, "snapshot": parse_statement_digest_snapshot(summary_rows, histogram_rows)}
-    except AcceptanceError:
+    except (AcceptanceError, ValueError):
         return {"available": False, "reason": "performance_schema_query_failed"}
 
 

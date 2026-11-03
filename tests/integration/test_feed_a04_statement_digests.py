@@ -117,6 +117,13 @@ class FeedA04StatementDigestTests(unittest.TestCase):
             {"available": False, "reason": "performance_schema_query_failed"},
         )
 
+    @mock.patch.object(feed_a04_mixed, "scalar", side_effect=ValueError("unexpected scalar result"))
+    def test_snapshot_treats_unparseable_capability_result_as_unavailable(self, _scalar):
+        result = feed_a04_mixed.performance_schema_statement_snapshot(
+            "mysql-a04", "gostream_feed_a04_mixed_123_1"
+        )
+        self.assertEqual(result, {"available": False, "reason": "performance_schema_query_failed"})
+
     def test_snapshot_refuses_non_a04_database_prefix(self):
         with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "outside the isolated A04 mixed prefix"):
             feed_a04_mixed.performance_schema_statement_snapshot("mysql-a04", "gostream")
