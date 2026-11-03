@@ -102,6 +102,29 @@ class FeedA04StatementDigestTests(unittest.TestCase):
         self.assertEqual(digests["D2"]["statement"], follow_count_sql)
         self.assertEqual(digests["D2"]["p95_bucket_ms"], [2.0, 4.0])
 
+    def test_digest_delta_keeps_strict_p95_unavailable_but_reports_observed_histogram_p95(self):
+        schema_name = "gostream_feed_a04_mixed_123_1"
+        before = feed_a04_mixed.parse_statement_digest_snapshot(
+            [[schema_name, "D1", "", "10", "10000000000", "0", "0", "0", "0", "0"]],
+            [[schema_name, "D1", "1", "0", "1000000000", "4"]],
+        )
+        after = feed_a04_mixed.parse_statement_digest_snapshot(
+            [[schema_name, "D1", "", "12", "14000000000", "0", "0", "0", "0", "0"]],
+            [
+                [schema_name, "D1", "1", "0", "1000000000", "5"],
+                [schema_name, "D1", "2", "1000000000", "2000000000", "2"],
+            ],
+        )
+
+        report = feed_a04_mixed.statement_digest_delta(before, after)
+        digest = report["top_statements"][0]
+
+        self.assertEqual(digest["count"], 2)
+        self.assertEqual(digest["histogram_count"], 3)
+        self.assertEqual(digest["histogram_count_difference"], 1)
+        self.assertIsNone(digest["p95_bucket_ms"])
+        self.assertEqual(digest["observed_histogram_p95_bucket_ms"], [1.0, 2.0])
+
     def test_digest_delta_rejects_performance_schema_counter_reset(self):
         schema_name = "gostream_feed_a04_mixed_123_1"
         before = feed_a04_mixed.parse_statement_digest_snapshot(
