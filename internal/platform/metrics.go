@@ -28,29 +28,33 @@ type serverMetrics struct {
 	wsConnections     prometheus.Gauge
 }
 
-type databasePoolWaitCollector struct {
-	db           *sql.DB
-	waitCount    *prometheus.Desc
-	waitDuration *prometheus.Desc
+type databasePoolStatsCollector struct {
+	db            *sql.DB
+	waitCount     *prometheus.Desc
+	waitDuration  *prometheus.Desc
+	maxIdleClosed *prometheus.Desc
 }
 
-func newDatabasePoolWaitCollector(db *sql.DB) *databasePoolWaitCollector {
-	return &databasePoolWaitCollector{
-		db:           db,
-		waitCount:    prometheus.NewDesc("gostream_database_pool_wait_count_total", "Total database/sql connection-pool waits.", nil, nil),
-		waitDuration: prometheus.NewDesc("gostream_database_pool_wait_duration_seconds_total", "Total time spent waiting for a database/sql connection.", nil, nil),
+func newDatabasePoolStatsCollector(db *sql.DB) *databasePoolStatsCollector {
+	return &databasePoolStatsCollector{
+		db:            db,
+		waitCount:     prometheus.NewDesc("gostream_database_pool_wait_count_total", "Total database/sql connection-pool waits.", nil, nil),
+		waitDuration:  prometheus.NewDesc("gostream_database_pool_wait_duration_seconds_total", "Total time spent waiting for a database/sql connection.", nil, nil),
+		maxIdleClosed: prometheus.NewDesc("gostream_database_pool_max_idle_closed_total", "Total database/sql connections closed because the idle pool limit was exceeded.", nil, nil),
 	}
 }
 
-func (c *databasePoolWaitCollector) Describe(ch chan<- *prometheus.Desc) {
+func (c *databasePoolStatsCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.waitCount
 	ch <- c.waitDuration
+	ch <- c.maxIdleClosed
 }
 
-func (c *databasePoolWaitCollector) Collect(ch chan<- prometheus.Metric) {
+func (c *databasePoolStatsCollector) Collect(ch chan<- prometheus.Metric) {
 	stats := c.db.Stats()
 	ch <- prometheus.MustNewConstMetric(c.waitCount, prometheus.CounterValue, float64(stats.WaitCount))
 	ch <- prometheus.MustNewConstMetric(c.waitDuration, prometheus.CounterValue, stats.WaitDuration.Seconds())
+	ch <- prometheus.MustNewConstMetric(c.maxIdleClosed, prometheus.CounterValue, float64(stats.MaxIdleClosed))
 }
 
 func newServerMetrics(db *sql.DB) *serverMetrics {
@@ -102,7 +106,7 @@ func newServerMetrics(db *sql.DB) *serverMetrics {
 	m.registry.MustRegister(m.requests, m.duration, m.feedDuration, m.feedStageDuration, m.outbox, m.feedCache, m.rateLimit, m.feedFanout, m.feedFanoutAge, m.feedFanoutJobs, m.mediaReconcile, m.wsConnections)
 	m.registry.MustRegister(m.brokerMessages, m.brokerConnected)
 	if db != nil {
-		m.registry.MustRegister(newDatabasePoolWaitCollector(db))
+		m.registry.MustRegister(newDatabasePoolStatsCollector(db))
 	}
 	m.registry.MustRegister(prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	return m

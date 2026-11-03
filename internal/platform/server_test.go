@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -1050,6 +1051,7 @@ func TestReadinessAndPrometheusMetrics(t *testing.T) {
 		`# TYPE gostream_database_pool_wait_count_total counter`,
 		`gostream_database_pool_wait_count_total`,
 		`gostream_database_pool_wait_duration_seconds_total`,
+		`gostream_database_pool_max_idle_closed_total`,
 		`gostream_websocket_connections`,
 	} {
 		if !strings.Contains(metrics.Body.String(), marker) {
@@ -1100,6 +1102,43 @@ func TestDatabasePoolWaitMetricsReflectLiveSQLDBStats(t *testing.T) {
 	}
 	if !strings.Contains(metrics.Body.String(), "gostream_database_pool_wait_count_total 1\n") {
 		t.Fatalf("live database pool wait counter missing or incorrect:\n%s", metrics.Body.String())
+	}
+}
+
+func TestDatabasePoolMaxIdleClosedMetricReflectsLiveSQLDBStats(t *testing.T) {
+	_, h, gormDB := testServer(t)
+	sqlDB, err := gormDB.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(3)
+	sqlDB.SetMaxIdleConns(1)
+	baseline := sqlDB.Stats().MaxIdleClosed
+
+	connections := make([]*sql.Conn, 0, 3)
+	for range 3 {
+		conn, err := sqlDB.Conn(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		connections = append(connections, conn)
+	}
+	for _, conn := range connections {
+		if err := conn.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := sqlDB.Stats().MaxIdleClosed - baseline; got != 2 {
+		t.Fatalf("max idle closed delta = %d, want 2", got)
+	}
+
+	metrics := request(t, h, http.MethodGet, "/metrics", "", nil)
+	if metrics.Code != http.StatusOK {
+		t.Fatalf("metrics endpoint: %d %s", metrics.Code, metrics.Body.String())
+	}
+	want := fmt.Sprintf("gostream_database_pool_max_idle_closed_total %d\n", sqlDB.Stats().MaxIdleClosed)
+	if !strings.Contains(metrics.Body.String(), want) {
+		t.Fatalf("live max idle closed counter missing or incorrect; want %q:\n%s", want, metrics.Body.String())
 	}
 }
 

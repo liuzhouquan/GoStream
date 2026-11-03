@@ -60,11 +60,13 @@ type feedStageHistogramKey struct {
 type databasePoolWaitSnapshot struct {
 	WaitCount           uint64
 	WaitDurationSeconds float64
+	MaxIdleClosed       uint64
 }
 
 type databasePoolWaitReport struct {
 	WaitCount           uint64  `json:"wait_count"`
 	WaitDurationSeconds float64 `json:"wait_duration_seconds"`
+	MaxIdleClosed       uint64  `json:"max_idle_closed"`
 }
 
 type apiHistogramSnapshot struct {
@@ -294,18 +296,31 @@ func parseDatabasePoolWaitMetrics(exposition string) (databasePoolWaitSnapshot, 
 	if err != nil {
 		return databasePoolWaitSnapshot{}, err
 	}
-	return databasePoolWaitSnapshot{WaitCount: uint64(waitCount), WaitDurationSeconds: waitDuration}, nil
+	maxIdleClosed, err := readCounter("gostream_database_pool_max_idle_closed_total")
+	if err != nil {
+		return databasePoolWaitSnapshot{}, err
+	}
+	if math.Trunc(maxIdleClosed) != maxIdleClosed || maxIdleClosed >= math.Exp2(64) {
+		return databasePoolWaitSnapshot{}, fmt.Errorf("database pool max idle closed count is not an integer")
+	}
+	return databasePoolWaitSnapshot{
+		WaitCount: uint64(waitCount), WaitDurationSeconds: waitDuration, MaxIdleClosed: uint64(maxIdleClosed),
+	}, nil
 }
 
 func databasePoolWaitDeltaReport(before, after databasePoolWaitSnapshot) (*databasePoolWaitReport, error) {
-	if after.WaitCount < before.WaitCount || after.WaitDurationSeconds+1e-12 < before.WaitDurationSeconds {
-		return nil, fmt.Errorf("database pool wait counter reset during measurement")
+	if after.WaitCount < before.WaitCount || after.WaitDurationSeconds+1e-12 < before.WaitDurationSeconds || after.MaxIdleClosed < before.MaxIdleClosed {
+		return nil, fmt.Errorf("database pool counter reset during measurement")
 	}
 	duration := after.WaitDurationSeconds - before.WaitDurationSeconds
 	if duration < 0 {
 		duration = 0
 	}
-	return &databasePoolWaitReport{WaitCount: after.WaitCount - before.WaitCount, WaitDurationSeconds: duration}, nil
+	return &databasePoolWaitReport{
+		WaitCount:           after.WaitCount - before.WaitCount,
+		WaitDurationSeconds: duration,
+		MaxIdleClosed:       after.MaxIdleClosed - before.MaxIdleClosed,
+	}, nil
 }
 
 func feedStageHistogramDeltaReports(before, after map[feedStageHistogramKey]feedHistogramSnapshot) ([]serverFeedStageReport, error) {
@@ -626,8 +641,8 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 			fmt.Printf("%s]\n", time.Duration(*stage.Latency.P95BucketUpperBoundSeconds*float64(time.Second)).Round(time.Microsecond))
 		}
 	}
-	fmt.Printf("database_pool_wait count=%d duration=%s\n", databasePoolWait.WaitCount,
-		time.Duration(databasePoolWait.WaitDurationSeconds*float64(time.Second)).Round(time.Microsecond))
+	fmt.Printf("database_pool_wait count=%d duration=%s max_idle_closed=%d\n", databasePoolWait.WaitCount,
+		time.Duration(databasePoolWait.WaitDurationSeconds*float64(time.Second)).Round(time.Microsecond), databasePoolWait.MaxIdleClosed)
 	close(results)
 	merged := make(map[string]*sample)
 	var all []time.Duration

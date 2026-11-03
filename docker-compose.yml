@@ -51,6 +51,8 @@ services:
       ADDR: :8080
       DB_DRIVER: mysql
       DB_DSN: gostream:gostream-local@tcp(mysql:3306)/gostream?charset=utf8mb4&parseTime=True&loc=Local
+      DB_MAX_OPEN_CONNS: ${DB_MAX_OPEN_CONNS:-50}
+      DB_MAX_IDLE_CONNS: ${DB_MAX_IDLE_CONNS:-25}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a unique random value in .env or the shell}
       MEDIA_DIR: /app/data/media
       REDIS_ADDR: redis:6379
