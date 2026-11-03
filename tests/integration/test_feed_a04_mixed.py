@@ -17,6 +17,12 @@ def run(variant, round_number, following_p95_ns, publish_p95_ns=3_000_000, fanou
         "mixed_load": {
             "successes": 1000,
             "failures": 0,
+            "server_following_latency": {
+                "sample_count": 400,
+                "mean_seconds": 0.045,
+                "p95_bucket_lower_bound_seconds": 0.04,
+                "p95_bucket_upper_bound_seconds": 0.05,
+            },
             "operations": {
                 "feed_following": {"successes": 400, "failures": 0, "p95_ns": following_p95_ns},
                 "like": {"successes": 100, "failures": 0},
@@ -146,6 +152,9 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
         self.assertEqual(summary["runs_per_variant"], 3)
         self.assertEqual(summary["hybrid_publish_p95_ns"], [2_000_001, 2_000_002, 2_000_003])
         self.assertEqual(summary["fanout_drain_seconds"], [0.5] * 6)
+        self.assertEqual(len(summary["server_following_latency"]["sql_only"]), 3)
+        self.assertEqual(summary["server_following_latency"]["hybrid"][0]["sample_count"], 400)
+        self.assertIn("API-side successful following P95 bucket", feed_a04_mixed.format_summary(summary))
         self.assertTrue(summary["target_met"])
 
     def test_summary_fails_below_threshold_or_on_inconsistent_state(self):

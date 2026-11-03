@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,6 +13,71 @@ import (
 	"testing"
 	"time"
 )
+
+func TestParseFollowingHistogramAndDeltaReport(t *testing.T) {
+	beforeText := `# TYPE gostream_feed_request_duration_seconds histogram
+gostream_feed_request_duration_seconds_bucket{scene="following",outcome="success",le="0.01"} 2
+gostream_feed_request_duration_seconds_bucket{scene="following",outcome="success",le="0.05"} 4
+gostream_feed_request_duration_seconds_bucket{scene="following",outcome="success",le="+Inf"} 4
+gostream_feed_request_duration_seconds_sum{scene="following",outcome="success"} 0.12
+gostream_feed_request_duration_seconds_count{scene="following",outcome="success"} 4
+gostream_feed_request_duration_seconds_count{scene="recommend",outcome="success"} 500
+`
+	afterText := `# TYPE gostream_feed_request_duration_seconds histogram
+gostream_feed_request_duration_seconds_bucket{scene="following",outcome="success",le="0.01"} 4
+gostream_feed_request_duration_seconds_bucket{scene="following",outcome="success",le="0.05"} 10
+gostream_feed_request_duration_seconds_bucket{scene="following",outcome="success",le="+Inf"} 10
+gostream_feed_request_duration_seconds_sum{scene="following",outcome="success"} 0.47
+gostream_feed_request_duration_seconds_count{scene="following",outcome="success"} 10
+`
+	before, err := parseFollowingHistogram(beforeText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := parseFollowingHistogram(afterText)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := histogramDeltaReport(before, after)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SampleCount != 6 || got.SumSeconds < 0.349999 || got.SumSeconds > 0.350001 {
+		t.Fatalf("unexpected histogram delta: %+v", got)
+	}
+	if got.MeanSeconds < 0.058333 || got.MeanSeconds > 0.058334 {
+		t.Fatalf("mean = %.9f, want about 0.058333 seconds", got.MeanSeconds)
+	}
+	if got.P95BucketLowerBoundSeconds != 0.01 || got.P95BucketUpperBoundSeconds == nil || *got.P95BucketUpperBoundSeconds != 0.05 {
+		t.Fatalf("p95 bucket = [%v,%v], want [0.01,0.05]", got.P95BucketLowerBoundSeconds, got.P95BucketUpperBoundSeconds)
+	}
+}
+
+func TestParseFollowingHistogramRejectsInconsistentSamples(t *testing.T) {
+	for name, exposition := range map[string]string{
+		"count without buckets": `# TYPE gostream_feed_request_duration_seconds histogram
+gostream_feed_request_duration_seconds_count{scene="following",outcome="success"} 3`,
+		"fractional count": `# TYPE gostream_feed_request_duration_seconds histogram
+gostream_feed_request_duration_seconds_count{scene="following",outcome="success"} 1.5`,
+		"duplicate bucket": `# TYPE gostream_feed_request_duration_seconds histogram
+gostream_feed_request_duration_seconds_bucket{scene="following",outcome="success",le="0.01"} 1
+gostream_feed_request_duration_seconds_bucket{scene="following",outcome="success",le="0.01"} 2`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := parseFollowingHistogram(exposition); err == nil {
+				t.Fatal("expected malformed histogram to fail")
+			}
+		})
+	}
+}
+
+func TestHistogramDeltaReportRejectsReset(t *testing.T) {
+	before := feedHistogramSnapshot{Count: 8, SumSeconds: 0.8, Buckets: map[float64]uint64{0.05: 8, math.Inf(1): 8}}
+	after := feedHistogramSnapshot{Count: 3, SumSeconds: 0.3, Buckets: map[float64]uint64{0.05: 3, math.Inf(1): 3}}
+	if _, err := histogramDeltaReport(before, after); err == nil {
+		t.Fatal("expected process reset to be reported")
+	}
+}
 
 func TestChooseOperationWeightsAndMethods(t *testing.T) {
 	counts := make(map[string]int)
@@ -151,10 +218,25 @@ func TestLoadReportPercentilesUseSuccessfulSamples(t *testing.T) {
 func TestRunUsesActorPoolAndWritesRequestReport(t *testing.T) {
 	var mu sync.Mutex
 	seen := make(map[string]int)
+	var followingCount int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/metrics" {
+			mu.Lock()
+			count := followingCount
+			mu.Unlock()
+			fmt.Fprintln(w, "# TYPE gostream_feed_request_duration_seconds histogram")
+			fmt.Fprintf(w, "gostream_feed_request_duration_seconds_bucket{scene=\"following\",outcome=\"success\",le=\"0.05\"} %d\n", count)
+			fmt.Fprintf(w, "gostream_feed_request_duration_seconds_bucket{scene=\"following\",outcome=\"success\",le=\"+Inf\"} %d\n", count)
+			fmt.Fprintf(w, "gostream_feed_request_duration_seconds_sum{scene=\"following\",outcome=\"success\"} %.3f\n", float64(count)*0.01)
+			fmt.Fprintf(w, "gostream_feed_request_duration_seconds_count{scene=\"following\",outcome=\"success\"} %d\n", count)
+			return
+		}
 		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		mu.Lock()
 		seen[token]++
+		if r.URL.Path == "/api/feed" && r.URL.Query().Get("scene") == "following" {
+			followingCount++
+		}
 		mu.Unlock()
 		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/comments") {
 			w.WriteHeader(http.StatusCreated)
@@ -186,6 +268,9 @@ func TestRunUsesActorPoolAndWritesRequestReport(t *testing.T) {
 	}
 	if report.ActorCount != 2 || report.Concurrency != 2 || report.Successes == 0 || report.Failures != 0 {
 		t.Fatalf("unexpected mixed workload report: %+v", report)
+	}
+	if report.ServerFollowing == nil || report.ServerFollowing.SampleCount == 0 || report.ServerFollowing.P95BucketUpperBoundSeconds == nil {
+		t.Fatalf("following server histogram missing from report: %+v", report.ServerFollowing)
 	}
 	for name, operation := range report.Operations {
 		if operation.Successes == 0 || len(operation.SuccessfulLatencyNS) != operation.Successes {

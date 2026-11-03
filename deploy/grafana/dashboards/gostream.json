@@ -35,6 +35,13 @@
       "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
       "datasource": {"type": "prometheus", "uid": "gostream-prometheus"},
       "targets": [{"expr": "sum by (result) (rate(gostream_feed_cache_total[5m]))", "legendFormat": "{{result}}", "refId": "A"}]
+    },
+    {
+      "id": 6, "title": "Successful Feed P95 by scene", "type": "timeseries",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+      "datasource": {"type": "prometheus", "uid": "gostream-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le, scene) (rate(gostream_feed_request_duration_seconds_bucket{outcome=\"success\"}[5m])))", "legendFormat": "{{scene}}", "refId": "A"}]
     }
   ]
 }

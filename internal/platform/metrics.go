@@ -13,6 +13,7 @@ type serverMetrics struct {
 	registry        *prometheus.Registry
 	requests        *prometheus.CounterVec
 	duration        *prometheus.HistogramVec
+	feedDuration    *prometheus.HistogramVec
 	outbox          *prometheus.CounterVec
 	brokerMessages  *prometheus.CounterVec
 	brokerConnected *prometheus.GaugeVec
@@ -37,6 +38,10 @@ func newServerMetrics() *serverMetrics {
 			Name: "gostream_http_request_duration_seconds", Help: "HTTP request duration in seconds.",
 			Buckets: prometheus.DefBuckets,
 		}, []string{"method", "route"}),
+		feedDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: "gostream_feed_request_duration_seconds", Help: "Feed request duration in seconds by bounded feed scene and response outcome.",
+			Buckets: []float64{0.005, 0.01, 0.025, 0.04, 0.05, 0.06, 0.07, 0.08, 0.1, 0.15, 0.25, 0.5, 1, 2.5},
+		}, []string{"scene", "outcome"}),
 		outbox: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "gostream_outbox_events_total", Help: "Outbox event dispatch attempts by result.",
 		}, []string{"result"}),
@@ -63,7 +68,7 @@ func newServerMetrics() *serverMetrics {
 			Name: "gostream_websocket_connections", Help: "Current local WebSocket connections.",
 		}),
 	}
-	m.registry.MustRegister(m.requests, m.duration, m.outbox, m.feedCache, m.rateLimit, m.feedFanout, m.feedFanoutAge, m.feedFanoutJobs, m.mediaReconcile, m.wsConnections)
+	m.registry.MustRegister(m.requests, m.duration, m.feedDuration, m.outbox, m.feedCache, m.rateLimit, m.feedFanout, m.feedFanoutAge, m.feedFanoutJobs, m.mediaReconcile, m.wsConnections)
 	m.registry.MustRegister(m.brokerMessages, m.brokerConnected)
 	m.registry.MustRegister(prometheus.NewGoCollector(), prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 	return m
@@ -77,8 +82,22 @@ func (m *serverMetrics) middleware() gin.HandlerFunc {
 		if route == "" {
 			route = "unmatched"
 		}
+		elapsed := time.Since(start).Seconds()
 		m.requests.WithLabelValues(c.Request.Method, route, strconv.Itoa(c.Writer.Status())).Inc()
-		m.duration.WithLabelValues(c.Request.Method, route).Observe(time.Since(start).Seconds())
+		m.duration.WithLabelValues(c.Request.Method, route).Observe(elapsed)
+		if route == "/api/feed" {
+			scene := c.DefaultQuery("scene", "timeline")
+			switch scene {
+			case "timeline", "following", "recommend", "hot":
+			default:
+				scene = "invalid"
+			}
+			outcome := "error"
+			if c.Writer.Status() >= 200 && c.Writer.Status() < 300 {
+				outcome = "success"
+			}
+			m.feedDuration.WithLabelValues(scene, outcome).Observe(elapsed)
+		}
 	}
 }
 

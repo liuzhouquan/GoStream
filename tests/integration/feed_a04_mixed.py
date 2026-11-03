@@ -82,6 +82,10 @@ def summarize(reports: list[dict], required_improvement: float) -> dict:
     hybrid_p95 = statistics.median(
         report["mixed_load"]["operations"]["feed_following"]["p95_ns"] for report in hybrid
     )
+    server_following_latency = {
+        "sql_only": [report["mixed_load"].get("server_following_latency") for report in sql],
+        "hybrid": [report["mixed_load"].get("server_following_latency") for report in hybrid],
+    }
     improvement = (sql_p95 - hybrid_p95) / sql_p95 if sql_p95 > 0 else 0.0
     all_consistent = all(
         report["verification"]["counter_mismatches"] == 0
@@ -102,6 +106,7 @@ def summarize(reports: list[dict], required_improvement: float) -> dict:
         "duration_seconds": DURATION_SECONDS,
         "sql_only_median_following_p95_ns": sql_p95,
         "hybrid_median_following_p95_ns": hybrid_p95,
+        "server_following_latency": server_following_latency,
         "following_p95_improvement_percent": round(improvement * 100, 2),
         "required_improvement_percent": required_improvement * 100,
         "publishes_per_run": PUBLISHERS,
@@ -121,6 +126,18 @@ def summarize(reports: list[dict], required_improvement: float) -> dict:
 
 
 def format_summary(summary: dict) -> str:
+    def format_server_buckets(variant: str) -> str:
+        buckets = summary["server_following_latency"][variant]
+        if not buckets or any(bucket is None for bucket in buckets):
+            return "unavailable"
+        values = []
+        for round_number, bucket in enumerate(buckets, 1):
+            lower = bucket["p95_bucket_lower_bound_seconds"] * 1000
+            upper_value = bucket.get("p95_bucket_upper_bound_seconds")
+            upper = f"{upper_value * 1000:.1f}" if upper_value is not None else "+Inf"
+            values.append(f"r{round_number} ({lower:.1f}, {upper}] ms (n={bucket['sample_count']})")
+        return ", ".join(values)
+
     lines = [
         "# A04 mixed Feed acceptance",
         "",
@@ -131,8 +148,9 @@ def format_summary(summary: dict) -> str:
         f"- Load profile: {CONCURRENCY} workers, {WARMUP_SECONDS}s warmup, {DURATION_SECONDS}s measured per run; three fresh fixtures per mode",
         f"- {summary['publishes_per_run']} real API video publishes per run; maximum Hybrid fanout drain: {max(summary['hybrid_fanout_drain_seconds']):.3f}s",
         f"- Counter, follower Feed visibility, outbox and fanout consistency: {summary['all_runs_consistent']}",
+        f"- API-side successful following P95 bucket (approximate): SQL-only {format_server_buckets('sql_only')}; Hybrid {format_server_buckets('hybrid')}",
         f"- Target met: {summary['target_met']}",
-        "- Raw request latencies, publish samples, queue state, MySQL status, and API CPU/RSS are in adjacent JSON reports.",
+        "- Client-side P95 remains the acceptance gate. Server histogram buckets are diagnostic intervals; raw request latencies, samples, queue state, MySQL status, and API CPU/RSS are in adjacent JSON reports.",
         "",
     ]
     return "\n".join(lines)

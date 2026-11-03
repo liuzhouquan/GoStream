@@ -1023,6 +1023,19 @@ func TestReadinessAndPrometheusMetrics(t *testing.T) {
 	if r := request(t, h, http.MethodGet, "/ready", "", nil); r.Code != http.StatusOK {
 		t.Fatalf("readiness: %d %s", r.Code, r.Body.String())
 	}
+	if r := request(t, h, http.MethodGet, "/api/feed?scene=following", "", nil); r.Code != http.StatusUnauthorized {
+		t.Fatalf("anonymous following feed: %d %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodGet, "/api/feed?scene=unknown", "", nil); r.Code != http.StatusBadRequest {
+		t.Fatalf("invalid feed scene: %d %s", r.Code, r.Body.String())
+	}
+	if r := request(t, h, http.MethodGet, "/api/feed?scene=another-unbounded-value", "", nil); r.Code != http.StatusBadRequest {
+		t.Fatalf("second invalid feed scene: %d %s", r.Code, r.Body.String())
+	}
+	_, token := registerTestUser(t, h, "metrics_following")
+	if r := request(t, h, http.MethodGet, "/api/feed?scene=following", token, nil); r.Code != http.StatusOK {
+		t.Fatalf("authenticated following feed: %d %s", r.Code, r.Body.String())
+	}
 	metrics := request(t, h, http.MethodGet, "/metrics", "", nil)
 	if metrics.Code != http.StatusOK {
 		t.Fatalf("metrics: %d %s", metrics.Code, metrics.Body.String())
@@ -1030,6 +1043,10 @@ func TestReadinessAndPrometheusMetrics(t *testing.T) {
 	for _, marker := range []string{
 		`gostream_http_requests_total{method="GET",route="/health",status="200"} 1`,
 		`gostream_http_request_duration_seconds_bucket`,
+		`gostream_feed_request_duration_seconds_count{outcome="error",scene="following"} 1`,
+		`gostream_feed_request_duration_seconds_count{outcome="success",scene="following"} 1`,
+		`gostream_feed_request_duration_seconds_count{outcome="error",scene="invalid"} 2`,
+		`gostream_feed_request_duration_seconds_bucket{outcome="error",scene="following",le="0.005"} 1`,
 		`gostream_websocket_connections`,
 	} {
 		if !strings.Contains(metrics.Body.String(), marker) {
