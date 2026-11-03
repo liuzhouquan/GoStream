@@ -1,0 +1,316 @@
+{
+  "workflow_run": 41595760362,
+  "commit": "444ca7bdbc4ed20635c591a6d700e82fc249861f",
+  "captured_at_utc": "2026-11-03T07:22:50Z",
+  "cpu_count": 4,
+  "mysql": "8.4.13",
+  "environment": {
+    "runner": "ubuntu-24.04",
+    "go": "1.27.2",
+    "mysql": "8.4.13",
+    "innodb_buffer_pool_mib": 128,
+    "redis": "disabled",
+    "ffmpeg": "disabled"
+  },
+  "workload": {
+    "workers": 20,
+    "reader_identities": 20,
+    "warmup_seconds": 30,
+    "measurement_seconds": 60,
+    "ratio": "70/20/10 Feed/interaction/social",
+    "fixture": {
+      "users": 2000,
+      "follows": 10999,
+      "videos": 20000,
+      "completed_fanout_jobs": 19800,
+      "inbox_rows": 1900000,
+      "actions": 50000
+    }
+  },
+  "pool_config": {
+    "DB_MAX_OPEN_CONNS": 50,
+    "DB_MAX_IDLE_CONNS": 25,
+    "idle_close_deltas_per_round": {
+      "sql_only": [
+        0,
+        0,
+        0
+      ],
+      "hybrid": [
+        0,
+        0,
+        0
+      ]
+    },
+    "pool_wait_count_per_round": {
+      "sql_only": [
+        0,
+        0,
+        0
+      ],
+      "hybrid": [
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "acceptance": {
+    "sql_only_median_following_p95_ms": 53.502,
+    "hybrid_median_following_p95_ms": 77.99,
+    "hybrid_improvement_percent": -45.77,
+    "required_improvement_percent": 20.0,
+    "load_successes": 45110,
+    "load_failures": 0,
+    "publishes": 120,
+    "all_runs_consistent": true,
+    "target_met": false
+  },
+  "connection_setup_event_counts": {
+    "sql_only": [
+      17,
+      17,
+      17
+    ],
+    "hybrid": [
+      17,
+      17,
+      17
+    ]
+  },
+  "prior_run_connection_setup_event_counts": {
+    "sql_only": [
+      3661,
+      3708,
+      3773
+    ],
+    "hybrid": [
+      11790,
+      11852,
+      11760
+    ]
+  },
+  "prepared_execute_count": {
+    "sql_only": [
+      73107,
+      73666,
+      74259
+    ],
+    "hybrid": [
+      111621,
+      110375,
+      112234
+    ]
+  },
+  "prepared_execute_mean_timer_wait_ms": {
+    "sql_only": [
+      20.189,
+      20.05,
+      19.878
+    ],
+    "hybrid": [
+      11.547,
+      11.647,
+      11.462
+    ]
+  },
+  "rounds": {
+    "sql_only": [
+      {
+        "round": 1,
+        "following_client_p50_ms": 32.001,
+        "following_client_p95_ms": 52.868,
+        "following_client_p99_ms": 63.825,
+        "load_successes": 7528,
+        "load_failures": 0,
+        "api_cpu_percent_avg": 33.42,
+        "api_peak_rss_kib": 34968,
+        "following_route_p95_bucket_ms": [
+          50.0,
+          60.0
+        ],
+        "candidate_query_mean_ms": 28.343,
+        "candidate_query_p95_bucket_ms": [
+          40.0,
+          50.0
+        ],
+        "interaction_state_mean_ms": 3.761,
+        "interaction_state_p95_bucket_ms": [
+          5.0,
+          10.0
+        ],
+        "mysql_threads_connected_before": 6,
+        "mysql_threads_connected_after_warmup_and_measurement": 23,
+        "prepared_execute_count": 73107,
+        "prepared_execute_mean_timer_wait_ms": 20.189,
+        "statement_sql_set_option_count": 17,
+        "pool_wait_count": 0,
+        "pool_wait_seconds": 0,
+        "max_idle_closed": 0
+      },
+      {
+        "round": 2,
+        "following_client_p50_ms": 32.002,
+        "following_client_p95_ms": 53.946,
+        "following_client_p99_ms": 64.759,
+        "load_successes": 7495,
+        "load_failures": 0,
+        "api_cpu_percent_avg": 34.14,
+        "api_peak_rss_kib": 35376,
+        "following_route_p95_bucket_ms": [
+          50.0,
+          60.0
+        ],
+        "candidate_query_mean_ms": 28.024,
+        "candidate_query_p95_bucket_ms": [
+          40.0,
+          50.0
+        ],
+        "interaction_state_mean_ms": 3.9,
+        "interaction_state_p95_bucket_ms": [
+          5.0,
+          10.0
+        ],
+        "mysql_threads_connected_before": 6,
+        "mysql_threads_connected_after_warmup_and_measurement": 23,
+        "prepared_execute_count": 73666,
+        "prepared_execute_mean_timer_wait_ms": 20.05,
+        "statement_sql_set_option_count": 17,
+        "pool_wait_count": 0,
+        "pool_wait_seconds": 0,
+        "max_idle_closed": 0
+      },
+      {
+        "round": 3,
+        "following_client_p50_ms": 31.856,
+        "following_client_p95_ms": 53.502,
+        "following_client_p99_ms": 62.634,
+        "load_successes": 7534,
+        "load_failures": 0,
+        "api_cpu_percent_avg": 34.08,
+        "api_peak_rss_kib": 34936,
+        "following_route_p95_bucket_ms": [
+          50.0,
+          60.0
+        ],
+        "candidate_query_mean_ms": 28.417,
+        "candidate_query_p95_bucket_ms": [
+          40.0,
+          50.0
+        ],
+        "interaction_state_mean_ms": 3.857,
+        "interaction_state_p95_bucket_ms": [
+          5.0,
+          10.0
+        ],
+        "mysql_threads_connected_before": 6,
+        "mysql_threads_connected_after_warmup_and_measurement": 23,
+        "prepared_execute_count": 74259,
+        "prepared_execute_mean_timer_wait_ms": 19.878,
+        "statement_sql_set_option_count": 17,
+        "pool_wait_count": 0,
+        "pool_wait_seconds": 0,
+        "max_idle_closed": 0
+      }
+    ],
+    "hybrid": [
+      {
+        "round": 1,
+        "following_client_p50_ms": 23.87,
+        "following_client_p95_ms": 77.99,
+        "following_client_p99_ms": 100.092,
+        "load_successes": 7460,
+        "load_failures": 0,
+        "api_cpu_percent_avg": 52.88,
+        "api_peak_rss_kib": 36472,
+        "following_route_p95_bucket_ms": [
+          70.0,
+          80.0
+        ],
+        "candidate_query_mean_ms": 26.224,
+        "candidate_query_p95_bucket_ms": [
+          70.0,
+          80.0
+        ],
+        "interaction_state_mean_ms": 3.862,
+        "interaction_state_p95_bucket_ms": [
+          5.0,
+          10.0
+        ],
+        "mysql_threads_connected_before": 6,
+        "mysql_threads_connected_after_warmup_and_measurement": 23,
+        "prepared_execute_count": 111621,
+        "prepared_execute_mean_timer_wait_ms": 11.547,
+        "statement_sql_set_option_count": 17,
+        "pool_wait_count": 0,
+        "pool_wait_seconds": 0,
+        "max_idle_closed": 0
+      },
+      {
+        "round": 2,
+        "following_client_p50_ms": 24.477,
+        "following_client_p95_ms": 80.659,
+        "following_client_p99_ms": 104.357,
+        "load_successes": 7496,
+        "load_failures": 0,
+        "api_cpu_percent_avg": 52.77,
+        "api_peak_rss_kib": 36580,
+        "following_route_p95_bucket_ms": [
+          70.0,
+          80.0
+        ],
+        "candidate_query_mean_ms": 27.64,
+        "candidate_query_p95_bucket_ms": [
+          70.0,
+          80.0
+        ],
+        "interaction_state_mean_ms": 3.846,
+        "interaction_state_p95_bucket_ms": [
+          5.0,
+          10.0
+        ],
+        "mysql_threads_connected_before": 6,
+        "mysql_threads_connected_after_warmup_and_measurement": 23,
+        "prepared_execute_count": 110375,
+        "prepared_execute_mean_timer_wait_ms": 11.647,
+        "statement_sql_set_option_count": 17,
+        "pool_wait_count": 0,
+        "pool_wait_seconds": 0,
+        "max_idle_closed": 0
+      },
+      {
+        "round": 3,
+        "following_client_p50_ms": 22.117,
+        "following_client_p95_ms": 75.034,
+        "following_client_p99_ms": 96.553,
+        "load_successes": 7597,
+        "load_failures": 0,
+        "api_cpu_percent_avg": 52.67,
+        "api_peak_rss_kib": 37076,
+        "following_route_p95_bucket_ms": [
+          70.0,
+          80.0
+        ],
+        "candidate_query_mean_ms": 24.507,
+        "candidate_query_p95_bucket_ms": [
+          60.0,
+          70.0
+        ],
+        "interaction_state_mean_ms": 3.685,
+        "interaction_state_p95_bucket_ms": [
+          5.0,
+          10.0
+        ],
+        "mysql_threads_connected_before": 6,
+        "mysql_threads_connected_after_warmup_and_measurement": 23,
+        "prepared_execute_count": 112234,
+        "prepared_execute_mean_timer_wait_ms": 11.462,
+        "statement_sql_set_option_count": 17,
+        "pool_wait_count": 0,
+        "pool_wait_seconds": 0,
+        "max_idle_closed": 0
+      }
+    ]
+  },
+  "limits": "statement/sql/set_option is an event-class counter, not SQL text. The DSN specifies charset=utf8mb4; go-sql-driver/mysql sends SET NAMES when opening a connection with charset configured. This event count is a connection-setup proxy, not a direct connection count."
+}

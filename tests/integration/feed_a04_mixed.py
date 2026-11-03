@@ -44,6 +44,7 @@ SCHEDULE = (
     ("sql-only", 3),
     ("hybrid", 3),
 )
+PROFILE_SCHEDULE = (("sql-only", 4), ("hybrid", 4))
 
 
 def percentile(values: list[int], numerator: int) -> int:
@@ -109,6 +110,15 @@ def summarize(reports: list[dict], required_improvement: float) -> dict:
             for report in hybrid
         ],
     }
+    diagnostic_profiles = [
+        {
+            "variant": report["variant"],
+            "round": report["round"],
+            **report["mixed_load"]["diagnostic_profiles"],
+        }
+        for report in reports
+        if report["mixed_load"].get("diagnostic_profiles")
+    ]
     improvement = (sql_p95 - hybrid_p95) / sql_p95 if sql_p95 > 0 else 0.0
     all_consistent = all(
         report["verification"]["counter_mismatches"] == 0
@@ -134,6 +144,7 @@ def summarize(reports: list[dict], required_improvement: float) -> dict:
         "database_pool_wait": database_pool_wait,
         "database_statement_diagnostics": database_statement_diagnostics,
         "prepared_statement_diagnostics": prepared_statement_diagnostics,
+        "diagnostic_profiles": diagnostic_profiles,
         "following_p95_improvement_percent": round(improvement * 100, 2),
         "required_improvement_percent": required_improvement * 100,
         "publishes_per_run": PUBLISHERS,
@@ -241,6 +252,20 @@ def format_summary(summary: dict) -> str:
             )
         return ", ".join(values) if values else "unavailable"
 
+    def format_diagnostic_profiles() -> str:
+        profiles = summary.get("diagnostic_profiles", [])
+        if not profiles:
+            return "not captured"
+        values = []
+        for profile in profiles:
+            if profile.get("run_error"):
+                values.append(f"{profile['variant']} r{profile['round']} run unavailable ({profile['run_error']})")
+                continue
+            cpu = "captured" if profile.get("cpu", {}).get("captured") else "unavailable"
+            goroutine = "captured" if profile.get("goroutine", {}).get("captured") else "unavailable"
+            values.append(f"{profile['variant']} r{profile['round']} CPU={cpu}, goroutine={goroutine}")
+        return "; ".join(values)
+
     statement_window = next(
         (
             report.get("window")
@@ -267,6 +292,7 @@ def format_summary(summary: dict) -> str:
         f"- DB pool delta during 60s measured window (waits / wait seconds / connections closed by idle cap): SQL-only {format_database_pool_wait('sql_only')}; Hybrid {format_database_pool_wait('hybrid')}",
         f"- Performance Schema statement digests ({statement_window}; available SQL digests only): SQL-only {format_statement_diagnostics('sql_only')}; Hybrid {format_statement_diagnostics('hybrid')}",
         f"- Performance Schema prepared COM_STMT_EXECUTE aggregates (account scoped; command-level, not per-SQL; diagnostic only): SQL-only {format_prepared_statement_diagnostics('sql_only')}; Hybrid {format_prepared_statement_diagnostics('hybrid')}",
+        f"- Go pprof diagnostics (separate from the 6-run acceptance gate): {format_diagnostic_profiles()}",
         f"- Target met: {summary['target_met']}",
         "- Client-side P95 remains the acceptance gate. Server histogram buckets are diagnostic intervals; raw request latencies, samples, queue state, MySQL status, and API CPU/RSS are in adjacent JSON reports.",
         "",
@@ -706,7 +732,17 @@ def seed_schema(go_bin: str, dsn: str, report_dir: pathlib.Path, mode: str, roun
         raise AcceptanceError(f"full-size fixture seed failed for {mode} round {round_number}")
 
 
-def start_api(binary: str, database: str, prefix: str, jwt_secret: str, report_dir: pathlib.Path, mode: str, round_number: int, args):
+def start_api(
+    binary: str,
+    database: str,
+    prefix: str,
+    jwt_secret: str,
+    report_dir: pathlib.Path,
+    mode: str,
+    round_number: int,
+    args,
+    capture_profiles: bool = False,
+):
     port = args.port
     address = f"127.0.0.1:{port}"
     log_path = report_dir / f"api-{mode}-round-{round_number}.log"
@@ -726,6 +762,8 @@ def start_api(binary: str, database: str, prefix: str, jwt_secret: str, report_d
             "FEED_FANOUT_MAX_FOLLOWERS": "0" if mode == "sql-only" else "1000",
         }
     )
+    if should_capture_pprof(mode, capture_profiles):
+        environment["PPROF_ADDR"] = f"127.0.0.1:{args.pprof_port}"
     pathlib.Path(environment["MEDIA_DIR"]).mkdir(parents=True, exist_ok=True)
     process = subprocess.Popen([binary], stdout=log_handle, stderr=subprocess.STDOUT, env=environment)
     base_url = f"http://{address}"
@@ -820,6 +858,39 @@ def collect_api_samples(pid: int, stop: threading.Event, samples: list[tuple[flo
         stop.wait(0.5)
 
 
+def should_capture_pprof(variant: str, diagnostic_only: bool) -> bool:
+    return diagnostic_only and variant in {"sql-only", "hybrid"}
+
+
+def capture_pprof_artifact(url: str, output_path: pathlib.Path, timeout_seconds: float) -> dict:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_seconds) as response:
+            payload = response.read()
+    except urllib.error.HTTPError as error:
+        return {"captured": False, "error": f"HTTP {error.code}"}
+    except Exception as error:
+        return {"captured": False, "error": type(error).__name__}
+    if not payload:
+        return {"captured": False, "error": "profiler returned an empty response"}
+    try:
+        output_path.write_bytes(payload)
+    except OSError as error:
+        return {"captured": False, "error": type(error).__name__}
+    return {"captured": True, "path": output_path.name, "bytes": len(payload)}
+
+
+def capture_pprof_after_delay(
+    stop: threading.Event,
+    delay_seconds: float,
+    url: str,
+    output_path: pathlib.Path,
+    timeout_seconds: float,
+) -> dict:
+    if stop.wait(delay_seconds):
+        return {"captured": False, "error": "load finished before capture started"}
+    return capture_pprof_artifact(url, output_path, timeout_seconds)
+
+
 def run_mixed_driver(
     driver: str,
     base_url: str,
@@ -829,6 +900,7 @@ def run_mixed_driver(
     report_path: pathlib.Path,
     log_path: pathlib.Path,
     api_pid: int,
+    pprof_base_url: str = "",
 ) -> tuple[dict, dict]:
     command = [
         driver,
@@ -854,6 +926,35 @@ def run_mixed_driver(
     stop = threading.Event()
     sampler = threading.Thread(target=collect_api_samples, args=(api_pid, stop, samples), daemon=True)
     sampler.start()
+    profile_results: dict[str, dict] = {}
+    profile_threads = []
+    if pprof_base_url:
+        cpu_path = report_path.with_name(report_path.stem + "-cpu.pb.gz")
+        goroutine_path = report_path.with_name(report_path.stem + "-goroutines.txt")
+        profile_targets = (
+            (
+                "cpu",
+                WARMUP_SECONDS + 0.25,
+                f"{pprof_base_url}/debug/pprof/profile?seconds={DURATION_SECONDS}",
+                cpu_path,
+                DURATION_SECONDS + 20,
+            ),
+            (
+                "goroutine",
+                WARMUP_SECONDS + DURATION_SECONDS / 2,
+                f"{pprof_base_url}/debug/pprof/goroutine?debug=2",
+                goroutine_path,
+                10,
+            ),
+        )
+
+        def capture_profile(name, delay, url, path, timeout):
+            profile_results[name] = capture_pprof_after_delay(stop, delay, url, path, timeout)
+
+        for name, delay, url, path, timeout in profile_targets:
+            thread = threading.Thread(target=capture_profile, args=(name, delay, url, path, timeout), daemon=True)
+            thread.start()
+            profile_threads.append(thread)
     try:
         result = subprocess.run(
             command,
@@ -868,6 +969,8 @@ def run_mixed_driver(
     finally:
         stop.set()
         sampler.join(timeout=5)
+        for thread in profile_threads:
+            thread.join(timeout=DURATION_SECONDS + 25)
     log_path.write_text(result.stdout + result.stderr)
     if not report_path.exists():
         raise AcceptanceError(f"mixed load driver wrote no report; see {log_path}")
@@ -878,6 +981,12 @@ def run_mixed_driver(
     if report["successes"] == 0 or report["failures"] != 0:
         raise AcceptanceError(f"mixed load returned no successes or had failures; see {log_path}")
     report["api_process"] = process_metrics(samples)
+    if pprof_base_url:
+        report["diagnostic_profiles"] = {
+            "capture_window": "Separate diagnostic-only fixture: CPU profile is scheduled 250ms after the 30s warmup for 60s; goroutine dump is scheduled halfway through the measured load.",
+            "cpu": profile_results.get("cpu", {"captured": False, "error": "capture thread did not finish"}),
+            "goroutine": profile_results.get("goroutine", {"captured": False, "error": "capture thread did not finish"}),
+        }
     return report, {"stdout": result.stdout, "stderr": result.stderr}
 
 
@@ -1004,7 +1113,7 @@ def published_video_rows(container: str, database: str, video_ids: list[int]) ->
     ]
 
 
-def run_case(args, mode: str, round_number: int) -> dict:
+def run_case(args, mode: str, round_number: int, diagnostic_only: bool = False) -> dict:
     database = f"{args.schema_prefix}_{mode.replace('-', '')}_r{round_number}"
     prepare_schema(args.mysql_container, database)
     api = None
@@ -1032,7 +1141,8 @@ def run_case(args, mode: str, round_number: int) -> dict:
 
         jwt_secret = secrets.token_urlsafe(48)
         api, log_handle, api_log_path, base_url, media_dir = start_api(
-            args.api_binary, database, args.dsn_prefix, jwt_secret, pathlib.Path(args.report_dir), mode, round_number, args
+            args.api_binary, database, args.dsn_prefix, jwt_secret, pathlib.Path(args.report_dir), mode, round_number, args,
+            capture_profiles=diagnostic_only,
         )
         reader_names = driver_reader_names()
         publisher_names = [f"load-u-{i:06d}" for i in range(1, PUBLISHERS + 1)]
@@ -1060,6 +1170,11 @@ def run_case(args, mode: str, round_number: int) -> dict:
             report_path,
             driver_log,
             api.pid,
+            pprof_base_url=(
+                f"http://127.0.0.1:{args.pprof_port}"
+                if should_capture_pprof(mode, diagnostic_only)
+                else ""
+            ),
         )
         report_path.write_text(json.dumps(mixed_report, indent=2) + "\n")
         db_after_mix = status_snapshot(args.mysql_container)
@@ -1146,6 +1261,7 @@ def run_case(args, mode: str, round_number: int) -> dict:
         full_report = {
             "variant": mode,
             "round": round_number,
+            "diagnostic_only": diagnostic_only,
             "database": database,
             "fixture_rows": {"users": 2000, "authors": 100, "videos": 20000, "follows": 10999, "likes": 50000, "feed_inboxes": 1900000},
             "mixed_load": mixed_report,
@@ -1216,8 +1332,11 @@ def parse_args():
     parser.add_argument("--mysql-container", required=True)
     parser.add_argument("--schema-prefix", required=True)
     parser.add_argument("--port", type=int, default=18087)
+    parser.add_argument("--pprof-port", type=int, default=18088)
     parser.add_argument("--go-bin", default="go")
     args = parser.parse_args()
+    if not (1 <= args.pprof_port <= 65535) or args.pprof_port == args.port:
+        parser.error("pprof port must be in 1..65535 and differ from the API port")
     if not re.fullmatch(r"gostream_feed_a04_mixed_[A-Za-z0-9_]+", args.schema_prefix):
         parser.error("schema prefix must use gostream_feed_a04_mixed_<run>_<attempt>")
     args.dsn_prefix = os.environ.get("GOSTREAM_FEED_A04_DSN_PREFIX", "")
@@ -1244,8 +1363,37 @@ def main() -> int:
             report = run_case(args, mode, round_number)
             reports.append(report)
             (report_dir / "partial-summary.json").write_text(json.dumps(reports, indent=2) + "\n")
+        profile_reports = []
+        for mode, round_number in PROFILE_SCHEDULE:
+            try:
+                report = run_case(args, mode, round_number, diagnostic_only=True)
+            except Exception as error:
+                report = {
+                    "variant": mode,
+                    "round": round_number,
+                    "diagnostic_only": True,
+                    "run_error": f"{type(error).__name__}: diagnostic-only fixture failed",
+                }
+            profile_reports.append(report)
+            (report_dir / "profile-partial-summary.json").write_text(json.dumps(profile_reports, indent=2) + "\n")
         summary = summarize(reports, REQUIRED_IMPROVEMENT)
         summary["schedule"] = [{"mode": mode, "round": number} for mode, number in SCHEDULE]
+        summary["diagnostic_profiles"] = [
+            {
+                "variant": report["variant"],
+                "round": report["round"],
+                **(
+                    report["mixed_load"].get("diagnostic_profiles", {})
+                    if "mixed_load" in report
+                    else {"run_error": report.get("run_error", "diagnostic run produced no report")}
+                ),
+            }
+            for report in profile_reports
+        ]
+        summary["diagnostic_profile_schedule"] = [
+            {"mode": mode, "round": number, "excluded_from_acceptance_gate": True}
+            for mode, number in PROFILE_SCHEDULE
+        ]
         (report_dir / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
         (report_dir / "summary.md").write_text(format_summary(summary))
         print((report_dir / "summary.md").read_text())

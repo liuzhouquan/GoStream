@@ -139,6 +139,74 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
             thread.join(timeout=2)
             server.server_close()
 
+    def test_capture_pprof_artifact_writes_successful_payload(self):
+        payload = b"compressed profile fixture"
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+
+            def log_message(self, format, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                destination = pathlib.Path(directory) / "cpu.pb.gz"
+                result = feed_a04_mixed.capture_pprof_artifact(
+                    f"http://127.0.0.1:{server.server_port}/debug/pprof/profile?seconds=60",
+                    destination,
+                    timeout_seconds=2,
+                )
+                self.assertEqual(result, {"captured": True, "path": "cpu.pb.gz", "bytes": len(payload)})
+                self.assertEqual(destination.read_bytes(), payload)
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            server.server_close()
+
+    def test_capture_pprof_artifact_records_http_failure_without_raising(self):
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_error(503, "profiler unavailable")
+
+            def log_message(self, format, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                destination = pathlib.Path(directory) / "cpu.pb.gz"
+                result = feed_a04_mixed.capture_pprof_artifact(
+                    f"http://127.0.0.1:{server.server_port}/debug/pprof/profile?seconds=60",
+                    destination,
+                    timeout_seconds=2,
+                )
+                self.assertFalse(result["captured"])
+                self.assertEqual(result["error"], "HTTP 503")
+                self.assertNotIn("/debug/pprof", result["error"])
+                self.assertFalse(destination.exists())
+        finally:
+            server.shutdown()
+            thread.join(timeout=2)
+            server.server_close()
+
+    def test_a04_pprof_capture_runs_separately_from_acceptance_rounds(self):
+        self.assertEqual(len(feed_a04_mixed.SCHEDULE), 6)
+        self.assertEqual(feed_a04_mixed.PROFILE_SCHEDULE, (("sql-only", 4), ("hybrid", 4)))
+        self.assertFalse(set(feed_a04_mixed.SCHEDULE) & set(feed_a04_mixed.PROFILE_SCHEDULE))
+        self.assertTrue(feed_a04_mixed.should_capture_pprof("sql-only", True))
+        self.assertTrue(feed_a04_mixed.should_capture_pprof("hybrid", True))
+        self.assertFalse(feed_a04_mixed.should_capture_pprof("sql-only", False))
+        self.assertFalse(feed_a04_mixed.should_capture_pprof("unknown", True))
+
     def test_stop_api_accepts_intentional_sigterm_but_rejects_crash(self):
         with tempfile.TemporaryFile(mode="w+") as log:
             process = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
@@ -329,6 +397,26 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
         )
         self.assertTrue(summary["target_met"], "diagnostic availability must not alter the P95 acceptance gate")
         self.assertIn("prepared COM_STMT_EXECUTE", feed_a04_mixed.format_summary(summary))
+
+    def test_summary_retains_pprof_results_without_changing_acceptance_gate(self):
+        reports = []
+        for variant, following_p95_ns in (("sql-only", 100_000_000), ("hybrid", 40_000_000)):
+            for round_number in range(1, 4):
+                report = run(variant, round_number, following_p95_ns)
+                if round_number == 1:
+                    report["mixed_load"]["diagnostic_profiles"] = {
+                        "capture_window": "measured workload",
+                        "cpu": {"captured": True, "path": "cpu.pb.gz", "bytes": 12},
+                        "goroutine": {"captured": False, "error": "test capture unavailable"},
+                    }
+                reports.append(report)
+
+        summary = feed_a04_mixed.summarize(reports, 0.20)
+        self.assertTrue(summary["target_met"], "diagnostic profile status must not change the P95 acceptance gate")
+        self.assertEqual(len(summary["diagnostic_profiles"]), 2)
+        rendered = feed_a04_mixed.format_summary(summary)
+        self.assertIn("sql-only r1 CPU=captured, goroutine=unavailable", rendered)
+        self.assertIn("hybrid r1 CPU=captured, goroutine=unavailable", rendered)
 
     def test_summary_fails_below_threshold_or_on_inconsistent_state(self):
         reports = []

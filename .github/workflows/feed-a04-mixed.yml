@@ -64,7 +64,7 @@ jobs:
           go build -o "$RUNNER_TEMP/gostream-feed-a04-mixed-driver" ./tests/load/mixed
           mkdir -p "$RUNNER_TEMP/gostream-feed-a04-mixed"
 
-      - name: Run six full-size mixed-load comparisons
+      - name: Run six acceptance comparisons and two diagnostic fixtures
         run: |
           python3 tests/integration/feed_a04_mixed.py \
             --api-binary "$RUNNER_TEMP/gostream-feed-a04-mixed-api" \
