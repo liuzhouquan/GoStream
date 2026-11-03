@@ -418,7 +418,28 @@ Interpolation made normalized SQL statements visible in Performance Schema for s
 
 The same diagnostic windows recorded hot-ranking digests averaging about 198–204 ms and recommendation-ranking digests about 385–397 ms, each examining roughly 30–34 million rows. Those operations were part of both mixed workloads and may contribute database contention, but the aggregates do not show whether or how much they caused the SQL-only/Hybrid difference. Two of six digest snapshots were unavailable; that run retained only the generic `performance_schema_query_failed` reason, so their failing query stage is unknown. The benchmark runner now adds a sanitized failure stage and error to future diagnostic records.
 
-The [compact report](benchmarks/feed-a04-interpolate-2026-11-03.json) preserves the six client percentiles, API stage buckets, digest availability and selected query counters without raw request logs or credentials. No production DSN or Feed query change follows from this run. Next, use the improved failure report and capture an exact following query plan under a controlled following-only and mixed workload before proposing a query change.
+The [compact report](benchmarks/feed-a04-interpolate-2026-11-03.json) preserves the six client percentiles, API stage buckets, digest availability and selected query counters without raw request logs or credentials. No production DSN or Feed query change follows from this run. The subsequent full-size rerun and its captured failure stage are recorded below.
+
+### Interpolated diagnostic rerun, 2026-11-03
+
+[Workflow #41614057041](https://github.com/liuzhouquan/GoStream/actions/runs/41614057041) repeated the six acceptance rounds and two separate profile fixtures on the same synthetic 2,000-user / 20,000-video dataset with interpolation enabled. It completed 64,134 mixed requests with zero failures, 120 API publishes, and all counter, visibility, outbox, fanout and consistency checks passing. Pool wait and MaxIdleClosed remained zero in all six rounds; maximum Hybrid fanout drain was 0.063394 seconds. The only failed acceptance gate was the required +20% following P95 improvement: SQL-only median P95 was **37.587 ms**, Hybrid was **59.134 ms**, making Hybrid **57.33% slower**. This is not evidence that interpolation caused the difference because runs were neither paired nor randomized.
+
+| Mode / round | Client following P95 | Candidate-query mean | Candidate-query P95 bucket | Interaction-state mean | Interaction-state P95 bucket |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| SQL-only 1 | 38.046 ms | 19.159 ms | (25, 40] ms | 2.695 ms | (5, 10] ms |
+| SQL-only 2 | 37.587 ms | 19.514 ms | (25, 40] ms | 2.806 ms | (5, 10] ms |
+| SQL-only 3 | 37.329 ms | 19.375 ms | (25, 40] ms | 2.647 ms | (5, 10] ms |
+| Hybrid 1 | 59.702 ms | 19.119 ms | (50, 60] ms | 2.854 ms | (5, 10] ms |
+| Hybrid 2 | 58.119 ms | 17.397 ms | (50, 60] ms | 3.162 ms | (5, 10] ms |
+| Hybrid 3 | 59.134 ms | 19.122 ms | (50, 60] ms | 2.895 ms | (5, 10] ms |
+
+The API candidate-stage P95 bucket was (25, 40] ms for SQL-only and (50, 60] ms for Hybrid in every round, while interaction-state buckets matched. This narrows the observed API stage but still combines database execution, result transfer and GORM row/preload work.
+
+Performance Schema digest snapshots were available in five of six rounds. In Hybrid round 3, digest collection failed at stage digest_snapshot_parse with “statement histogram snapshot contains a duplicate bucket”; workload requests and acceptance checks still passed. An implementation-level explanation is an inference: both digest queries converted NULL DIGEST values to the same synthetic __OTHER__ identity, which can merge unrelated histogram rows with equal bucket numbers. MySQL documents NULL digest rows for statements that cannot be retained in the digest table and groups histogram rows by schema, digest and bucket ([statement digests](https://dev.mysql.com/doc/refman/8.4/en/performance-schema-statement-digests.html), [statement histogram summary](https://dev.mysql.com/doc/refman/8.4/en/performance-schema-statement-histogram-summary-tables.html)). The failed raw rows were not retained, so the exact collision is not directly confirmed. The current branch filters NULL digests consistently from both summary and histogram snapshots; this run predates that change. Its regression test verifies the query boundary, and a post-merge A04 run is still required to verify live digest collection.
+
+Even the available following digest histograms have counts 2–7 higher than their statement counts, so their per-digest percentile buckets remain null. The concurrent recommendation ranking statements averaged about 405–426 ms and hot ranking about 205–213 ms, examining roughly 32–34 million rows per digest window. These summaries include warmup plus all mixed routes and do not show how much those operations affect following latency. The separate 60-second CPU profiles parsed with Go 1.27.2: Linux syscall was the largest flat symbol at 18.26% for SQL-only and 16.26% for Hybrid; runtime synchronization, GC scanning and allocation followed. The profiles do not identify a single dominant Go computation or distinguish server execution from socket transfer and result scanning.
+
+The compact [rerun report](benchmarks/feed-a04-interpolate-rerun-2026-11-03.json) contains per-round acceptance, stage, pool and digest evidence without raw request samples or SQL text. Neither this run nor the code-only NULL digest filter establishes the Hybrid latency root cause. Next, merge the diagnostics fix and repeat A04, then use a controlled following-only and mixed workload to collect a valid query plan and per-digest histogram before proposing a production query change.
 
 ### Follow-up diagnosis (exploratory, not a root-cause finding)
 

@@ -140,6 +140,8 @@ class FeedA04StatementDigestTests(unittest.TestCase):
         self.assertEqual(result["snapshot"]["statements"]["D1"]["statement"], sql)
         self.assertIn("WHERE SCHEMA_NAME='gostream_feed_a04_mixed_123_1'", mysql_query.call_args_list[2].args[1])
         self.assertIn("WHERE SCHEMA_NAME='gostream_feed_a04_mixed_123_1'", mysql_query.call_args_list[3].args[1])
+        self.assertIn("DIGEST IS NOT NULL", mysql_query.call_args_list[2].args[1])
+        self.assertIn("DIGEST IS NOT NULL", mysql_query.call_args_list[3].args[1])
 
     @mock.patch.object(feed_a04_mixed, "scalar", return_value=1)
     @mock.patch.object(feed_a04_mixed, "mysql_query")

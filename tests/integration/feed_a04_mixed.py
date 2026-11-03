@@ -634,19 +634,21 @@ def performance_schema_statement_snapshot(container: str, database: str, account
                 digest_diagnostics = {"available": False, "reason": "statement_digest_consumer_disabled"}
             else:
                 digest_stage = "digest_summary_query"
+                # Only retain attributable statement digests. NULL digests have
+                # no per-SQL identity and their histogram rows can share bucket numbers.
                 summary_rows = mysql_query(
                     container,
-                    "SELECT COALESCE(DIGEST,'__OTHER__'), HEX(COALESCE(DIGEST_TEXT,'')), COUNT_STAR, SUM_TIMER_WAIT, "
+                    "SELECT DIGEST, HEX(COALESCE(DIGEST_TEXT,'')), COUNT_STAR, SUM_TIMER_WAIT, "
                     "SUM_LOCK_TIME, SUM_ROWS_SENT, SUM_ROWS_EXAMINED, SUM_NO_INDEX_USED, SUM_NO_GOOD_INDEX_USED "
                     "FROM performance_schema.events_statements_summary_by_digest "
-                    f"WHERE SCHEMA_NAME='{database}' ORDER BY DIGEST;",
+                    f"WHERE SCHEMA_NAME='{database}' AND DIGEST IS NOT NULL ORDER BY DIGEST;",
                 )
                 digest_stage = "digest_histogram_query"
                 histogram_rows = mysql_query(
                     container,
-                    "SELECT COALESCE(DIGEST,'__OTHER__'), BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH, COUNT_BUCKET "
+                    "SELECT DIGEST, BUCKET_NUMBER, BUCKET_TIMER_LOW, BUCKET_TIMER_HIGH, COUNT_BUCKET "
                     "FROM performance_schema.events_statements_histogram_by_digest "
-                    f"WHERE SCHEMA_NAME='{database}' ORDER BY DIGEST, BUCKET_NUMBER;",
+                    f"WHERE SCHEMA_NAME='{database}' AND DIGEST IS NOT NULL ORDER BY DIGEST, BUCKET_NUMBER;",
                 )
                 digest_stage = "digest_snapshot_parse"
                 digest_diagnostics = {
