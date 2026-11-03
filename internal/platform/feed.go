@@ -143,10 +143,26 @@ func (s *Server) feed(c *gin.Context) {
 			s.metrics.feedCache.WithLabelValues("miss").Inc()
 		}
 	}
-	q := s.DB.Model(&Video{}).Preload("Author").Where("videos.status = ?", "published")
+	db := s.DB.WithContext(c.Request.Context())
+	q := db.Model(&Video{}).Preload("Author").Where("videos.status = ?", "published")
 	cursorTime := cur.createdTime()
 	var recommendation *recommendRanking
 	var items []Video
+	if scene == "recommend" {
+		anchor := time.Now().UTC()
+		if cur.Anchor > 0 {
+			anchor = time.Unix(0, cur.Anchor).UTC()
+		}
+		stageStart := time.Now()
+		recommendation, err = newRecommendRanking(db, uid(c), anchor)
+		s.metrics.observeFeedStage(scene, "recommendation_context", stageStart, err)
+		if err != nil {
+			respondError(c, 500, "could not load recommendation preferences")
+			return
+		}
+		q = recommendation.query(q, cur)
+	}
+	candidateStart := time.Now()
 	switch scene {
 	case "timeline":
 		if cur.ID > 0 {
@@ -164,16 +180,6 @@ func (s *Server) feed(c *gin.Context) {
 			q = q.Order("videos.created_at DESC").Order("videos.id DESC")
 		}
 	case "recommend":
-		anchor := time.Now().UTC()
-		if cur.Anchor > 0 {
-			anchor = time.Unix(0, cur.Anchor).UTC()
-		}
-		recommendation, err = newRecommendRanking(s.DB, uid(c), anchor)
-		if err != nil {
-			respondError(c, 500, "could not load recommendation preferences")
-			return
-		}
-		q = recommendation.query(q, cur)
 	case "hot":
 		if cur.ID > 0 {
 			q = q.Where("(videos.like_count * 3 + videos.comment_count * 5 + videos.favorite_count * 4) < ? OR ((videos.like_count * 3 + videos.comment_count * 5 + videos.favorite_count * 4) = ? AND videos.id < ?)", cur.Score, cur.Score, cur.ID)
@@ -186,6 +192,7 @@ func (s *Server) feed(c *gin.Context) {
 	if err == nil && !(scene == "following" && s.fanoutMaxFollowers > 0) {
 		err = q.Limit(limit + 1).Find(&items).Error
 	}
+	s.metrics.observeFeedStage(scene, "candidate_query", candidateStart, err)
 	if err != nil {
 		respondError(c, 500, "could not load feed")
 		return
@@ -194,7 +201,9 @@ func (s *Server) feed(c *gin.Context) {
 	if more {
 		items = items[:limit]
 	}
+	interactionStart := time.Now()
 	entries, err := s.videoCardsForViewer(c.Request.Context(), uid(c), items)
+	s.metrics.observeFeedStage(scene, "interaction_state", interactionStart, err)
 	if err != nil {
 		respondError(c, 500, "could not load interaction state")
 		return
@@ -205,7 +214,9 @@ func (s *Server) feed(c *gin.Context) {
 		score := last.LikeCount*3 + last.CommentCount*5 + last.FavoriteCount*4
 		anchor := int64(0)
 		if recommendation != nil {
-			score, err = recommendation.score(s.DB, last)
+			stageStart := time.Now()
+			score, err = recommendation.score(db, last)
+			s.metrics.observeFeedStage(scene, "recommendation_cursor", stageStart, err)
 			if err != nil {
 				respondError(c, 500, "could not build recommendation cursor")
 				return

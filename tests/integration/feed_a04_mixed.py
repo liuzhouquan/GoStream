@@ -86,6 +86,10 @@ def summarize(reports: list[dict], required_improvement: float) -> dict:
         "sql_only": [report["mixed_load"].get("server_following_latency") for report in sql],
         "hybrid": [report["mixed_load"].get("server_following_latency") for report in hybrid],
     }
+    server_feed_stages = {
+        "sql_only": [report["mixed_load"].get("server_feed_stages", []) for report in sql],
+        "hybrid": [report["mixed_load"].get("server_feed_stages", []) for report in hybrid],
+    }
     improvement = (sql_p95 - hybrid_p95) / sql_p95 if sql_p95 > 0 else 0.0
     all_consistent = all(
         report["verification"]["counter_mismatches"] == 0
@@ -107,6 +111,7 @@ def summarize(reports: list[dict], required_improvement: float) -> dict:
         "sql_only_median_following_p95_ns": sql_p95,
         "hybrid_median_following_p95_ns": hybrid_p95,
         "server_following_latency": server_following_latency,
+        "server_feed_stages": server_feed_stages,
         "following_p95_improvement_percent": round(improvement * 100, 2),
         "required_improvement_percent": required_improvement * 100,
         "publishes_per_run": PUBLISHERS,
@@ -138,6 +143,29 @@ def format_summary(summary: dict) -> str:
             values.append(f"r{round_number} ({lower:.1f}, {upper}] ms (n={bucket['sample_count']})")
         return ", ".join(values)
 
+    def format_stage_buckets(variant: str, stage: str) -> str:
+        runs = summary["server_feed_stages"][variant]
+        values = []
+        for round_number, reports in enumerate(runs, 1):
+            report = next(
+                (
+                    entry
+                    for entry in reports
+                    if entry.get("scene") == "following"
+                    and entry.get("stage") == stage
+                    and entry.get("outcome") == "success"
+                ),
+                None,
+            )
+            if report is None:
+                return "unavailable"
+            latency = report["latency"]
+            lower = latency["p95_bucket_lower_bound_seconds"] * 1000
+            upper_value = latency.get("p95_bucket_upper_bound_seconds")
+            upper = f"{upper_value * 1000:.1f}" if upper_value is not None else "+Inf"
+            values.append(f"r{round_number} ({lower:.1f}, {upper}] ms (n={latency['sample_count']})")
+        return ", ".join(values) if values else "unavailable"
+
     lines = [
         "# A04 mixed Feed acceptance",
         "",
@@ -149,6 +177,8 @@ def format_summary(summary: dict) -> str:
         f"- {summary['publishes_per_run']} real API video publishes per run; maximum Hybrid fanout drain: {max(summary['hybrid_fanout_drain_seconds']):.3f}s",
         f"- Counter, follower Feed visibility, outbox and fanout consistency: {summary['all_runs_consistent']}",
         f"- API-side successful following P95 bucket (approximate): SQL-only {format_server_buckets('sql_only')}; Hybrid {format_server_buckets('hybrid')}",
+        f"- API-side following candidate_query P95 bucket (approximate): SQL-only {format_stage_buckets('sql_only', 'candidate_query')}; Hybrid {format_stage_buckets('hybrid', 'candidate_query')}",
+        f"- API-side following interaction_state P95 bucket (approximate): SQL-only {format_stage_buckets('sql_only', 'interaction_state')}; Hybrid {format_stage_buckets('hybrid', 'interaction_state')}",
         f"- Target met: {summary['target_met']}",
         "- Client-side P95 remains the acceptance gate. Server histogram buckets are diagnostic intervals; raw request latencies, samples, queue state, MySQL status, and API CPU/RSS are in adjacent JSON reports.",
         "",

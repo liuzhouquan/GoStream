@@ -42,6 +42,13 @@
       "datasource": {"type": "prometheus", "uid": "gostream-prometheus"},
       "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
       "targets": [{"expr": "histogram_quantile(0.95, sum by (le, scene) (rate(gostream_feed_request_duration_seconds_bucket{outcome=\"success\"}[5m])))", "legendFormat": "{{scene}}", "refId": "A"}]
+    },
+    {
+      "id": 7, "title": "Successful Feed stage P95 (API elapsed)", "type": "timeseries",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+      "datasource": {"type": "prometheus", "uid": "gostream-prometheus"},
+      "fieldConfig": {"defaults": {"unit": "s"}, "overrides": []},
+      "targets": [{"expr": "histogram_quantile(0.95, sum by (le, scene, stage) (rate(gostream_feed_stage_duration_seconds_bucket{outcome=\"success\"}[5m])))", "legendFormat": "{{scene}} / {{stage}}", "refId": "A"}]
     }
   ]
 }
