@@ -1,0 +1,218 @@
+{
+  "title": "A04 mixed Feed acceptance with server-side route diagnostics",
+  "date": "2026-11-03",
+  "workflow_run_id": 41573060866,
+  "workflow_url": "https://github.com/liuzhouquan/GoStream/actions/runs/41573060866",
+  "pull_request": 31,
+  "source_commit": "0804ca397f6ce35b00d9eba2f2626798192d1ae0",
+  "raw_artifact_url": "https://github.com/liuzhouquan/GoStream/actions/runs/41573060866/artifacts/13202642309",
+  "environment": {
+    "runner": "GitHub Actions ubuntu-24.04",
+    "kernel": "Linux-7.0.0-1017-azure-x86_64-with-glibc2.39",
+    "cpu_count": 4,
+    "cpu_model": "AMD EPYC 7763 64-Core Processor (virtualized runner)",
+    "memory_total": "15 GiB",
+    "go": "1.27.2",
+    "mysql": "8.4.13",
+    "innodb_buffer_pool_size_bytes": 134217728,
+    "transaction_isolation": "REPEATABLE-READ",
+    "redis_enabled": false,
+    "ffmpeg_enabled": false,
+    "fixture": {
+      "users": 2000,
+      "follows": 10999,
+      "videos": 20000,
+      "completed_fanout_jobs": 19800,
+      "feed_inboxes": 1900000,
+      "video_actions": 50000
+    }
+  },
+  "load": {
+    "runs_per_mode": 3,
+    "concurrency": 20,
+    "warmup_seconds": 30,
+    "duration_seconds": 60,
+    "mix_percent": {
+      "feed": 70,
+      "interactions": 20,
+      "social": 10
+    }
+  },
+  "summary": {
+    "sql_only_median_following_client_p95_ms": 54.607,
+    "hybrid_median_following_client_p95_ms": 70.299,
+    "hybrid_client_p95_improvement_percent": -28.74,
+    "required_improvement_percent": 20.0,
+    "performance_gate_passed": false,
+    "all_runs_consistent": true,
+    "total_workload_successes": 45737,
+    "total_workload_failures": 0,
+    "total_publish_successes": 120,
+    "total_publish_failures": 0,
+    "max_hybrid_fanout_drain_seconds": 0.07368226799997046,
+    "note": "API-side histogram intervals are diagnostic bucket bounds, not exact P95 values; client-side successful request P95 remains the gate."
+  },
+  "runs": [
+    {
+      "mode": "sql-only",
+      "round": 1,
+      "workload_successes": 7594,
+      "workload_failures": 0,
+      "following": {
+        "client_successes": 3040,
+        "client_failures": 0,
+        "client_p50_ms": 31.544,
+        "client_p95_ms": 53.649,
+        "client_p99_ms": 63.217,
+        "server_success_sample_count": 3040,
+        "server_mean_ms": 32.139,
+        "server_p95_bucket_ms": [
+          50.0,
+          60.0
+        ]
+      },
+      "api_cpu_average_percent": 32.15,
+      "api_peak_rss_kib": 34728,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "fanout_drain_seconds": 0.07094234400000232,
+      "fanout_jobs_completed": 0,
+      "consistent": true
+    },
+    {
+      "mode": "hybrid",
+      "round": 1,
+      "workload_successes": 7589,
+      "workload_failures": 0,
+      "following": {
+        "client_successes": 3040,
+        "client_failures": 0,
+        "client_p50_ms": 22.547,
+        "client_p95_ms": 70.299,
+        "client_p99_ms": 92.272,
+        "server_success_sample_count": 3040,
+        "server_mean_ms": 28.326,
+        "server_p95_bucket_ms": [
+          60.0,
+          70.0
+        ]
+      },
+      "api_cpu_average_percent": 50.57,
+      "api_peak_rss_kib": 35980,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "fanout_drain_seconds": 0.07368226799997046,
+      "fanout_jobs_completed": 20,
+      "consistent": true
+    },
+    {
+      "mode": "hybrid",
+      "round": 2,
+      "workload_successes": 7608,
+      "workload_failures": 0,
+      "following": {
+        "client_successes": 3048,
+        "client_failures": 0,
+        "client_p50_ms": 23.22,
+        "client_p95_ms": 73.68,
+        "client_p99_ms": 93.1,
+        "server_success_sample_count": 3048,
+        "server_mean_ms": 29.247,
+        "server_p95_bucket_ms": [
+          70.0,
+          80.0
+        ]
+      },
+      "api_cpu_average_percent": 50.97,
+      "api_peak_rss_kib": 36612,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "fanout_drain_seconds": 0.07331768500000635,
+      "fanout_jobs_completed": 20,
+      "consistent": true
+    },
+    {
+      "mode": "sql-only",
+      "round": 2,
+      "workload_successes": 7596,
+      "workload_failures": 0,
+      "following": {
+        "client_successes": 3040,
+        "client_failures": 0,
+        "client_p50_ms": 32.215,
+        "client_p95_ms": 54.607,
+        "client_p99_ms": 64.031,
+        "server_success_sample_count": 3040,
+        "server_mean_ms": 32.749,
+        "server_p95_bucket_ms": [
+          50.0,
+          60.0
+        ]
+      },
+      "api_cpu_average_percent": 32.87,
+      "api_peak_rss_kib": 34944,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "fanout_drain_seconds": 0.0710445020000634,
+      "fanout_jobs_completed": 0,
+      "consistent": true
+    },
+    {
+      "mode": "sql-only",
+      "round": 3,
+      "workload_successes": 7533,
+      "workload_failures": 0,
+      "following": {
+        "client_successes": 3016,
+        "client_failures": 0,
+        "client_p50_ms": 32.044,
+        "client_p95_ms": 54.644,
+        "client_p99_ms": 64.516,
+        "server_success_sample_count": 3016,
+        "server_mean_ms": 32.674,
+        "server_p95_bucket_ms": [
+          50.0,
+          60.0
+        ]
+      },
+      "api_cpu_average_percent": 32.7,
+      "api_peak_rss_kib": 34848,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "fanout_drain_seconds": 0.07061324699998295,
+      "fanout_jobs_completed": 0,
+      "consistent": true
+    },
+    {
+      "mode": "hybrid",
+      "round": 3,
+      "workload_successes": 7817,
+      "workload_failures": 0,
+      "following": {
+        "client_successes": 3128,
+        "client_failures": 0,
+        "client_p50_ms": 17.779,
+        "client_p95_ms": 32.486,
+        "client_p99_ms": 37.99,
+        "server_success_sample_count": 3128,
+        "server_mean_ms": 18.089,
+        "server_p95_bucket_ms": [
+          25.0,
+          40.0
+        ]
+      },
+      "api_cpu_average_percent": 51.2,
+      "api_peak_rss_kib": 36852,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "fanout_drain_seconds": 0.07195337100006327,
+      "fanout_jobs_completed": 20,
+      "consistent": true
+    }
+  ],
+  "limitations": [
+    "API P95 values are histogram bucket intervals, not exact percentile estimates.",
+    "This is one six-round synthetic workload on a shared GitHub Actions runner, not a production capacity measurement.",
+    "MySQL emitted repeated redo-log checkpointer-lag warnings during the run; their performance effect was not isolated."
+  ]
+}
