@@ -1,0 +1,476 @@
+{
+  "run_id": 41639479241,
+  "workflow_url": "https://github.com/liuzhouquan/GoStream/actions/runs/41639479241",
+  "commit": "3f9e0382d995a4ea17eb9847e77fc8cce108ef4c",
+  "mysql_version": "8.4.13",
+  "mysql_interpolate_params": true,
+  "runner": {
+    "os": "ubuntu-24.04",
+    "cpu_model": "AMD EPYC 9V74",
+    "vcpus": 4,
+    "memory_gib": 15,
+    "go_version": "1.27.2"
+  },
+  "workload": {
+    "fixture": {
+      "users": 2000,
+      "authors": 100,
+      "videos": 20000,
+      "follows": 10999,
+      "likes": 50000,
+      "feed_inboxes": 1900000
+    },
+    "concurrency": 20,
+    "warmup_seconds": 30,
+    "measured_seconds_per_round": 60,
+    "rounds_per_variant": 3,
+    "successful_mixed_requests": 62054,
+    "failed_mixed_requests": 0,
+    "successful_following_requests": 24836,
+    "publishes": 120,
+    "publish_failures": 0,
+    "consistency_passed": true,
+    "pool_wait_count_all_rounds_zero": true,
+    "max_idle_closed_all_rounds_zero": true,
+    "max_hybrid_fanout_drain_seconds": 0.06330183299996861
+  },
+  "acceptance": {
+    "sql_only_median_following_p95_ms": 41.125,
+    "hybrid_median_following_p95_ms": 63.362,
+    "hybrid_p95_improvement_percent": -54.07,
+    "required_improvement_percent": 20.0,
+    "target_met": false,
+    "workflow_exit_reason": "required +20% median following P95 improvement not met"
+  },
+  "schedule_seed": 41639479241,
+  "schedule": [
+    {
+      "mode": "sql-only",
+      "round": 1
+    },
+    {
+      "mode": "hybrid",
+      "round": 1
+    },
+    {
+      "mode": "hybrid",
+      "round": 2
+    },
+    {
+      "mode": "sql-only",
+      "round": 2
+    },
+    {
+      "mode": "sql-only",
+      "round": 3
+    },
+    {
+      "mode": "hybrid",
+      "round": 3
+    }
+  ],
+  "performance_schema_histogram_query": {
+    "grouped_by": [
+      "SCHEMA_NAME",
+      "DIGEST",
+      "BUCKET_NUMBER",
+      "BUCKET_TIMER_LOW",
+      "BUCKET_TIMER_HIGH"
+    ],
+    "count_aggregation": "MAX(COUNT_BUCKET)",
+    "reason": "Run #41636132610 observed the same bucket key and bounds with counts 0 and 1 during live load. The underlying reason is not confirmed. Grouping by the bucket identity and retaining MAX(COUNT_BUCKET) yielded parseable snapshots in all six rounds; per-digest histogram P95 remains unavailable where histogram counts differ from statement counts.",
+    "all_six_snapshots_available": true
+  },
+  "rounds": [
+    {
+      "mode": "sql-only",
+      "round": 1,
+      "mixed_requests": {
+        "successes": 10364,
+        "failures": 0
+      },
+      "following": {
+        "successes": 4148,
+        "failures": 0,
+        "client_p95_ms": 41.125,
+        "api_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "stages": {
+          "candidate_query": {
+            "sample_count": 4148,
+            "mean_ms": 20.24,
+            "p95_bucket_ms": [
+              25.0,
+              40.0
+            ]
+          },
+          "interaction_state": {
+            "sample_count": 4148,
+            "mean_ms": 2.81,
+            "p95_bucket_ms": [
+              5.0,
+              10.0
+            ]
+          }
+        }
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "client_p95_ms": 54.821
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_jobs_completed": 0,
+        "fanout_drain_seconds": 0.0637053499999638
+      },
+      "performance_schema": {
+        "available": true,
+        "digest_count": 33,
+        "statement_count": 113091,
+        "top30_histogram_count_mismatch": 10,
+        "top30_p95_unavailable": 10
+      },
+      "api_process": {
+        "average_cpu_percent": 33.54,
+        "peak_rss_kib": 36084
+      }
+    },
+    {
+      "mode": "hybrid",
+      "round": 1,
+      "mixed_requests": {
+        "successes": 10238,
+        "failures": 0
+      },
+      "following": {
+        "successes": 4096,
+        "failures": 0,
+        "client_p95_ms": 63.362,
+        "api_p95_bucket_ms": [
+          60.0,
+          70.0
+        ],
+        "stages": {
+          "candidate_query": {
+            "sample_count": 4096,
+            "mean_ms": 20.124,
+            "p95_bucket_ms": [
+              50.0,
+              60.0
+            ]
+          },
+          "interaction_state": {
+            "sample_count": 4096,
+            "mean_ms": 2.82,
+            "p95_bucket_ms": [
+              5.0,
+              10.0
+            ]
+          }
+        }
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "client_p95_ms": 15.603
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_jobs_completed": 20,
+        "fanout_drain_seconds": 0.06330183299996861
+      },
+      "performance_schema": {
+        "available": true,
+        "digest_count": 33,
+        "statement_count": 184479,
+        "top30_histogram_count_mismatch": 5,
+        "top30_p95_unavailable": 5
+      },
+      "api_process": {
+        "average_cpu_percent": 53.43,
+        "peak_rss_kib": 38272
+      }
+    },
+    {
+      "mode": "hybrid",
+      "round": 2,
+      "mixed_requests": {
+        "successes": 10110,
+        "failures": 0
+      },
+      "following": {
+        "successes": 4048,
+        "failures": 0,
+        "client_p95_ms": 64.547,
+        "api_p95_bucket_ms": [
+          60.0,
+          70.0
+        ],
+        "stages": {
+          "candidate_query": {
+            "sample_count": 4048,
+            "mean_ms": 21.536,
+            "p95_bucket_ms": [
+              50.0,
+              60.0
+            ]
+          },
+          "interaction_state": {
+            "sample_count": 4048,
+            "mean_ms": 2.825,
+            "p95_bucket_ms": [
+              5.0,
+              10.0
+            ]
+          }
+        }
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "client_p95_ms": 13.983
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_jobs_completed": 20,
+        "fanout_drain_seconds": 0.06321172000002662
+      },
+      "performance_schema": {
+        "available": true,
+        "digest_count": 33,
+        "statement_count": 183015,
+        "top30_histogram_count_mismatch": 5,
+        "top30_p95_unavailable": 5
+      },
+      "api_process": {
+        "average_cpu_percent": 54.04,
+        "peak_rss_kib": 38576
+      }
+    },
+    {
+      "mode": "sql-only",
+      "round": 2,
+      "mixed_requests": {
+        "successes": 10417,
+        "failures": 0
+      },
+      "following": {
+        "successes": 4168,
+        "failures": 0,
+        "client_p95_ms": 41.627,
+        "api_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "stages": {
+          "candidate_query": {
+            "sample_count": 4168,
+            "mean_ms": 20.079,
+            "p95_bucket_ms": [
+              25.0,
+              40.0
+            ]
+          },
+          "interaction_state": {
+            "sample_count": 4168,
+            "mean_ms": 2.884,
+            "p95_bucket_ms": [
+              5.0,
+              10.0
+            ]
+          }
+        }
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "client_p95_ms": 48.713
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_jobs_completed": 0,
+        "fanout_drain_seconds": 0.06291805599994404
+      },
+      "performance_schema": {
+        "available": true,
+        "digest_count": 33,
+        "statement_count": 115979,
+        "top30_histogram_count_mismatch": 4,
+        "top30_p95_unavailable": 4
+      },
+      "api_process": {
+        "average_cpu_percent": 33.84,
+        "peak_rss_kib": 35848
+      }
+    },
+    {
+      "mode": "sql-only",
+      "round": 3,
+      "mixed_requests": {
+        "successes": 10434,
+        "failures": 0
+      },
+      "following": {
+        "successes": 4176,
+        "failures": 0,
+        "client_p95_ms": 40.023,
+        "api_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "stages": {
+          "candidate_query": {
+            "sample_count": 4176,
+            "mean_ms": 20.376,
+            "p95_bucket_ms": [
+              25.0,
+              40.0
+            ]
+          },
+          "interaction_state": {
+            "sample_count": 4176,
+            "mean_ms": 2.963,
+            "p95_bucket_ms": [
+              5.0,
+              10.0
+            ]
+          }
+        }
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "client_p95_ms": 9.616
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_jobs_completed": 0,
+        "fanout_drain_seconds": 0.0640950449999309
+      },
+      "performance_schema": {
+        "available": true,
+        "digest_count": 33,
+        "statement_count": 115465,
+        "top30_histogram_count_mismatch": 4,
+        "top30_p95_unavailable": 4
+      },
+      "api_process": {
+        "average_cpu_percent": 34.3,
+        "peak_rss_kib": 35448
+      }
+    },
+    {
+      "mode": "hybrid",
+      "round": 3,
+      "mixed_requests": {
+        "successes": 10491,
+        "failures": 0
+      },
+      "following": {
+        "successes": 4200,
+        "failures": 0,
+        "client_p95_ms": 61.307,
+        "api_p95_bucket_ms": [
+          50.0,
+          60.0
+        ],
+        "stages": {
+          "candidate_query": {
+            "sample_count": 4200,
+            "mean_ms": 19.543,
+            "p95_bucket_ms": [
+              50.0,
+              60.0
+            ]
+          },
+          "interaction_state": {
+            "sample_count": 4200,
+            "mean_ms": 2.849,
+            "p95_bucket_ms": [
+              5.0,
+              10.0
+            ]
+          }
+        }
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0,
+        "client_p95_ms": 19.178
+      },
+      "pool": {
+        "wait_count": 0,
+        "wait_duration_seconds": 0,
+        "max_idle_closed": 0
+      },
+      "consistency": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0,
+        "fanout_jobs_completed": 20,
+        "fanout_drain_seconds": 0.06266929200000959
+      },
+      "performance_schema": {
+        "available": true,
+        "digest_count": 33,
+        "statement_count": 189100,
+        "top30_histogram_count_mismatch": 8,
+        "top30_p95_unavailable": 8
+      },
+      "api_process": {
+        "average_cpu_percent": 53.53,
+        "peak_rss_kib": 38152
+      }
+    }
+  ]
+}

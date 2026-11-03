@@ -481,6 +481,25 @@ Performance Schema digest snapshots parsed in four of six rounds. SQL-only r1 an
 
 The [compact seeded-run report](benchmarks/feed-a04-seeded-order-verification-2026-11-03.json) records the actual seed, order, workload, per-round P95/stage buckets, diagnostic availability and profile summaries without retaining raw request samples. Seeded order reduces fixed time-order bias but these are still independent fixture runs, not same-database pairs.
 
+### Live histogram aggregation verification, 2026-11-03
+
+[Workflow #41639479241](https://github.com/liuzhouquan/GoStream/actions/runs/41639479241) ran commit `3f9e038` with `interpolateParams=true`, Go 1.27.2, MySQL 8.4.13, and an Ubuntu 24.04 runner with 4 vCPUs and 15 GiB RAM. The fixture had 2,000 users, 20,000 videos, 10,999 follows, 50,000 interactions, and 1.9 million inbox rows. It completed **62,054 mixed requests with zero failures**, **120/120 publishes**, and all counter, Feed visibility, outbox, and fanout checks. Pool wait and idle-cap closure counts were zero; maximum Hybrid fanout drain was 0.063 seconds.
+
+The required +20% median following P95 gate still failed: SQL-only median was **41.125 ms** and Hybrid **63.362 ms**, making Hybrid **54.07% slower**. The realized order was SQL-only r1, Hybrid r1, Hybrid r2, SQL-only r2, SQL-only r3, Hybrid r3.
+
+| Mode / round | Client following P95 | API following P95 bucket | Candidate-query mean / P95 bucket | Interaction-state mean / P95 bucket |
+| --- | ---: | ---: | ---: | ---: |
+| SQL-only 1 | 41.125 ms | (25, 40] ms | 20.240 ms / (25, 40] ms | 2.810 ms / (5, 10] ms |
+| Hybrid 1 | 63.362 ms | (50, 60] ms | 20.124 ms / (50, 60] ms | 2.820 ms / (5, 10] ms |
+| Hybrid 2 | 64.547 ms | (50, 60] ms | 21.536 ms / (50, 60] ms | 2.825 ms / (5, 10] ms |
+| SQL-only 2 | 41.627 ms | (25, 40] ms | 20.079 ms / (25, 40] ms | 2.884 ms / (5, 10] ms |
+| SQL-only 3 | 40.023 ms | (25, 40] ms | 20.376 ms / (25, 40] ms | 2.963 ms / (5, 10] ms |
+| Hybrid 3 | 61.307 ms | (50, 60] ms | 19.543 ms / (50, 60] ms | 2.849 ms / (5, 10] ms |
+
+All six Performance Schema digest snapshots parsed after the histogram query grouped by schema, digest, bucket number, and bucket bounds, retaining `MAX(COUNT_BUCKET)`. MySQL documents the histogram grouping key as `(SCHEMA_NAME, DIGEST, BUCKET_NUMBER)` and a unique index on those columns ([statement histogram summary tables](https://dev.mysql.com/doc/refman/8.4/en/performance-schema-statement-histogram-summary-tables.html)). The preceding run observed the same bucket identity and bounds with counts 0 and 1 during live load. The source of those inconsistent observations is unconfirmed; taking the largest observed cumulative count is a diagnostic sampling choice, not proof of a stable snapshot. Some per-digest histogram counts still differ from statement counts, so their per-statement P95 remains unavailable by design. The client P95 gate is independent of these diagnostics.
+
+The API `candidate_query` P95 bucket was higher in all three Hybrid rounds while the `interaction_state` buckets matched; this localizes the observed tail to the candidate stage but does not isolate SQL execution, row transfer, or Go result processing. No production Feed query or DSN change is justified by this run. The compact [histogram aggregation report](benchmarks/feed-a04-histogram-aggregation-verification-2026-11-03.json) records the schedule, round metrics, environment, consistency checks, and digest availability without raw request samples or SQL text. The default remains SQL-only while the +20% Hybrid target is open.
+
 ### Follow-up diagnosis (exploratory, not a root-cause finding)
 
 On a separate disposable MySQL 8.4.11 fixture, refreshing one followed author's `follows.created_at` while keeping its 200 historical inbox rows caused the late-follow branch to find 200 candidate videos, perform 200 unique-key inbox probes, return no rows, and take 0.799 ms in one `EXPLAIN ANALYZE`. A 20-worker direct-query probe measured Hybrid P95 at 6.415 ms before and 10.021 ms after that state change; SQL-only measured 14.490 ms and 14.400 ms. This confirms extra work in the refollow path, but Hybrid remained faster in that isolated SQL probe, so it does not explain the CI end-to-end result by itself.
