@@ -1,0 +1,546 @@
+{
+  "workflow": {
+    "run_id": 41772842953,
+    "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41772842953",
+    "commit": "2a30740173df0f44b8e4a4b897410a0ddac76afe",
+    "artifact_id": 13296930448,
+    "artifact_url": "https://github.com/liuzhouquan/GoStream/actions/runs/41772842953/artifacts/13296930448",
+    "conclusion": "failure: acceptance performance gate only",
+    "interpolate_params": true,
+    "started_at_utc": "2026-11-04T04:22:49Z",
+    "completed_at_utc": "2026-11-04T04:43:21Z",
+    "duration_seconds": 1232
+  },
+  "environment": {
+    "go": "1.27.2",
+    "mysql": "8.4.13",
+    "runner_cpu_count": 4,
+    "fixture": {
+      "users": 2000,
+      "follows": 10999,
+      "videos": 20000,
+      "feed_inboxes": 1900000
+    },
+    "concurrency": 20,
+    "read_only_warmup_seconds": 30,
+    "measured_seconds_per_round": 60,
+    "runs_per_mode": 3,
+    "innodb_buffer_pool_size_bytes": 134217728
+  },
+  "acceptance": {
+    "sql_only_median_following_p95_ms": 35.715072,
+    "hybrid_median_following_p95_ms": 51.647866,
+    "hybrid_p95_improvement_percent": -44.61,
+    "required_improvement_percent": 20.0,
+    "target_met": false,
+    "mixed_requests_succeeded": 66093,
+    "mixed_request_failures": 0,
+    "video_publishes_succeeded": 120,
+    "consistency_checks_passed": true,
+    "db_pool_waits": 0,
+    "maximum_hybrid_fanout_drain_seconds": 0.063096592000079,
+    "schedule_seed": 41772842953,
+    "api_cpu_rss_and_request_histograms_window": "60s measured mixed workload"
+  },
+  "rounds": [
+    {
+      "mode": "hybrid",
+      "round": 1,
+      "following_requests": 4423,
+      "following_failures": 0,
+      "following_client_p95_ms": 51.647866,
+      "following_api_stage_p95_bucket_ms": {
+        "author_preload": [
+          10.0,
+          25.0
+        ],
+        "candidate_query": [
+          40.0,
+          50.0
+        ],
+        "candidate_query_start": [
+          40.0,
+          50.0
+        ],
+        "candidate_row_next": [
+          0,
+          1.0
+        ],
+        "candidate_row_scan": [
+          0,
+          1.0
+        ],
+        "candidate_sql": [
+          40.0,
+          50.0
+        ],
+        "interaction_state": [
+          5.0,
+          10.0
+        ]
+      },
+      "db_pool_wait_count": 0,
+      "db_pool_wait_seconds": 0,
+      "publish_successes": 20,
+      "verification": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0
+      },
+      "mysql_following_candidate_warmup": {
+        "available": true,
+        "window": "30s read-only Following warmup",
+        "count": 47408,
+        "mean_timer_wait_ms": 3.714452,
+        "rows_examined": 3981936,
+        "histogram_count_difference": 3,
+        "strict_p95_bucket_ms": null,
+        "observed_histogram_p95_bucket_ms": [
+          8.709636,
+          9.120108
+        ],
+        "sum_lock_time_ms": 318.736
+      },
+      "mysql_following_candidate_measured": {
+        "available": true,
+        "window": "60s measured mixed workload",
+        "count": 4422,
+        "mean_timer_wait_ms": 11.416719,
+        "rows_examined": 371532,
+        "histogram_count_difference": 1,
+        "strict_p95_bucket_ms": null,
+        "observed_histogram_p95_bucket_ms": [
+          41.686938,
+          43.651583
+        ],
+        "sum_lock_time_ms": 14.981
+      },
+      "mysql_instance_measured_row_lock_waits_delta": 335,
+      "mysql_instance_measured_row_lock_time_ms_delta": 8827
+    },
+    {
+      "mode": "sql-only",
+      "round": 1,
+      "following_requests": 4416,
+      "following_failures": 0,
+      "following_client_p95_ms": 35.649842,
+      "following_api_stage_p95_bucket_ms": {
+        "author_preload": [
+          5.0,
+          10.0
+        ],
+        "candidate_query": [
+          25.0,
+          40.0
+        ],
+        "candidate_query_start": [
+          25.0,
+          40.0
+        ],
+        "candidate_row_next": [
+          0,
+          1.0
+        ],
+        "candidate_row_scan": [
+          0,
+          1.0
+        ],
+        "candidate_sql": [
+          25.0,
+          40.0
+        ],
+        "interaction_state": [
+          5.0,
+          10.0
+        ]
+      },
+      "db_pool_wait_count": 0,
+      "db_pool_wait_seconds": 0,
+      "publish_successes": 20,
+      "verification": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0
+      },
+      "mysql_following_candidate_warmup": {
+        "available": true,
+        "window": "30s read-only Following warmup",
+        "count": 23748,
+        "mean_timer_wait_ms": 16.057341,
+        "rows_examined": 29137569,
+        "histogram_count_difference": 1,
+        "strict_p95_bucket_ms": null,
+        "observed_histogram_p95_bucket_ms": [
+          25.118864,
+          26.30268
+        ],
+        "sum_lock_time_ms": 58.097
+      },
+      "mysql_following_candidate_measured": {
+        "available": true,
+        "window": "60s measured mixed workload",
+        "count": 4416,
+        "mean_timer_wait_ms": 13.999308,
+        "rows_examined": 4951710,
+        "histogram_count_difference": 0,
+        "strict_p95_bucket_ms": [
+          23.988329,
+          25.118864
+        ],
+        "observed_histogram_p95_bucket_ms": [
+          23.988329,
+          25.118864
+        ],
+        "sum_lock_time_ms": 5.813
+      },
+      "mysql_instance_measured_row_lock_waits_delta": 253,
+      "mysql_instance_measured_row_lock_time_ms_delta": 5799
+    },
+    {
+      "mode": "sql-only",
+      "round": 2,
+      "following_requests": 4409,
+      "following_failures": 0,
+      "following_client_p95_ms": 35.715072,
+      "following_api_stage_p95_bucket_ms": {
+        "author_preload": [
+          5.0,
+          10.0
+        ],
+        "candidate_query": [
+          25.0,
+          40.0
+        ],
+        "candidate_query_start": [
+          25.0,
+          40.0
+        ],
+        "candidate_row_next": [
+          0,
+          1.0
+        ],
+        "candidate_row_scan": [
+          0,
+          1.0
+        ],
+        "candidate_sql": [
+          25.0,
+          40.0
+        ],
+        "interaction_state": [
+          5.0,
+          10.0
+        ]
+      },
+      "db_pool_wait_count": 0,
+      "db_pool_wait_seconds": 0,
+      "publish_successes": 20,
+      "verification": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0
+      },
+      "mysql_following_candidate_warmup": {
+        "available": true,
+        "window": "30s read-only Following warmup",
+        "count": 23804,
+        "mean_timer_wait_ms": 16.096184,
+        "rows_examined": 29209962,
+        "histogram_count_difference": 3,
+        "strict_p95_bucket_ms": null,
+        "observed_histogram_p95_bucket_ms": [
+          25.118864,
+          26.30268
+        ],
+        "sum_lock_time_ms": 87.856
+      },
+      "mysql_following_candidate_measured": {
+        "available": true,
+        "window": "60s measured mixed workload",
+        "count": 4409,
+        "mean_timer_wait_ms": 14.102433,
+        "rows_examined": 4967844,
+        "histogram_count_difference": 0,
+        "strict_p95_bucket_ms": [
+          23.988329,
+          25.118864
+        ],
+        "observed_histogram_p95_bucket_ms": [
+          23.988329,
+          25.118864
+        ],
+        "sum_lock_time_ms": 9.32
+      },
+      "mysql_instance_measured_row_lock_waits_delta": 198,
+      "mysql_instance_measured_row_lock_time_ms_delta": 2741
+    },
+    {
+      "mode": "hybrid",
+      "round": 2,
+      "following_requests": 4394,
+      "following_failures": 0,
+      "following_client_p95_ms": 52.334983,
+      "following_api_stage_p95_bucket_ms": {
+        "author_preload": [
+          5.0,
+          10.0
+        ],
+        "candidate_query": [
+          40.0,
+          50.0
+        ],
+        "candidate_query_start": [
+          40.0,
+          50.0
+        ],
+        "candidate_row_next": [
+          0,
+          1.0
+        ],
+        "candidate_row_scan": [
+          0,
+          1.0
+        ],
+        "candidate_sql": [
+          40.0,
+          50.0
+        ],
+        "interaction_state": [
+          5.0,
+          10.0
+        ]
+      },
+      "db_pool_wait_count": 0,
+      "db_pool_wait_seconds": 0,
+      "publish_successes": 20,
+      "verification": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0
+      },
+      "mysql_following_candidate_warmup": {
+        "available": true,
+        "window": "30s read-only Following warmup",
+        "count": 49502,
+        "mean_timer_wait_ms": 3.589241,
+        "rows_examined": 4158924,
+        "histogram_count_difference": 14,
+        "strict_p95_bucket_ms": null,
+        "observed_histogram_p95_bucket_ms": [
+          8.317638,
+          8.709636
+        ],
+        "sum_lock_time_ms": 299.139
+      },
+      "mysql_following_candidate_measured": {
+        "available": true,
+        "window": "60s measured mixed workload",
+        "count": 4394,
+        "mean_timer_wait_ms": 12.517412,
+        "rows_examined": 369012,
+        "histogram_count_difference": 0,
+        "strict_p95_bucket_ms": [
+          41.686938,
+          43.651583
+        ],
+        "observed_histogram_p95_bucket_ms": [
+          41.686938,
+          43.651583
+        ],
+        "sum_lock_time_ms": 12.793
+      },
+      "mysql_instance_measured_row_lock_waits_delta": 307,
+      "mysql_instance_measured_row_lock_time_ms_delta": 7304
+    },
+    {
+      "mode": "sql-only",
+      "round": 3,
+      "following_requests": 4313,
+      "following_failures": 0,
+      "following_client_p95_ms": 37.213355,
+      "following_api_stage_p95_bucket_ms": {
+        "author_preload": [
+          5.0,
+          10.0
+        ],
+        "candidate_query": [
+          25.0,
+          40.0
+        ],
+        "candidate_query_start": [
+          25.0,
+          40.0
+        ],
+        "candidate_row_next": [
+          0,
+          1.0
+        ],
+        "candidate_row_scan": [
+          0,
+          1.0
+        ],
+        "candidate_sql": [
+          25.0,
+          40.0
+        ],
+        "interaction_state": [
+          5.0,
+          10.0
+        ]
+      },
+      "db_pool_wait_count": 0,
+      "db_pool_wait_seconds": 0,
+      "publish_successes": 20,
+      "verification": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0
+      },
+      "mysql_following_candidate_warmup": {
+        "available": true,
+        "window": "30s read-only Following warmup",
+        "count": 23085,
+        "mean_timer_wait_ms": 16.716803,
+        "rows_examined": 28325295,
+        "histogram_count_difference": 2,
+        "strict_p95_bucket_ms": null,
+        "observed_histogram_p95_bucket_ms": [
+          26.30268,
+          27.542287
+        ],
+        "sum_lock_time_ms": 91.627
+      },
+      "mysql_following_candidate_measured": {
+        "available": true,
+        "window": "60s measured mixed workload",
+        "count": 4313,
+        "mean_timer_wait_ms": 14.704468,
+        "rows_examined": 4871760,
+        "histogram_count_difference": 0,
+        "strict_p95_bucket_ms": [
+          25.118864,
+          26.30268
+        ],
+        "observed_histogram_p95_bucket_ms": [
+          25.118864,
+          26.30268
+        ],
+        "sum_lock_time_ms": 6.31
+      },
+      "mysql_instance_measured_row_lock_waits_delta": 184,
+      "mysql_instance_measured_row_lock_time_ms_delta": 1357
+    },
+    {
+      "mode": "hybrid",
+      "round": 3,
+      "following_requests": 4496,
+      "following_failures": 0,
+      "following_client_p95_ms": 22.967788,
+      "following_api_stage_p95_bucket_ms": {
+        "author_preload": [
+          5.0,
+          10.0
+        ],
+        "candidate_query": [
+          10.0,
+          25.0
+        ],
+        "candidate_query_start": [
+          10.0,
+          25.0
+        ],
+        "candidate_row_next": [
+          0,
+          1.0
+        ],
+        "candidate_row_scan": [
+          0,
+          1.0
+        ],
+        "candidate_sql": [
+          10.0,
+          25.0
+        ],
+        "interaction_state": [
+          5.0,
+          10.0
+        ]
+      },
+      "db_pool_wait_count": 0,
+      "db_pool_wait_seconds": 0,
+      "publish_successes": 20,
+      "verification": {
+        "counter_mismatches": 0,
+        "feed_visibility_failures": 0,
+        "outbox_pending": 0,
+        "outbox_dead": 0,
+        "fanout_pending": 0
+      },
+      "mysql_following_candidate_warmup": {
+        "available": true,
+        "window": "30s read-only Following warmup",
+        "count": 48324,
+        "mean_timer_wait_ms": 3.717269,
+        "rows_examined": 4059468,
+        "histogram_count_difference": 11,
+        "strict_p95_bucket_ms": null,
+        "observed_histogram_p95_bucket_ms": [
+          8.709636,
+          9.120108
+        ],
+        "sum_lock_time_ms": 315.436
+      },
+      "mysql_following_candidate_measured": {
+        "available": true,
+        "window": "60s measured mixed workload",
+        "count": 4496,
+        "mean_timer_wait_ms": 4.531189,
+        "rows_examined": 377664,
+        "histogram_count_difference": 0,
+        "strict_p95_bucket_ms": [
+          12.589254,
+          13.182567
+        ],
+        "observed_histogram_p95_bucket_ms": [
+          12.589254,
+          13.182567
+        ],
+        "sum_lock_time_ms": 16.894
+      },
+      "mysql_instance_measured_row_lock_waits_delta": 167,
+      "mysql_instance_measured_row_lock_time_ms_delta": 1615
+    }
+  ],
+  "interpretation": {
+    "measured_phase_digest_matches_api_window": true,
+    "hybrid_candidate_sql_server_tail": "Rounds 1 and 2 measured MySQL candidate digest P95 intervals of 41.687–43.652 ms, overlapping API candidate_query_start buckets of 40–50 ms. Round 1 is observed-only because the histogram count differs by one; round 2 has a strict P95. Round 3 is lower in both at 12.589–13.183 ms (MySQL, strict) and 10–25 ms (API).",
+    "limits": [
+      "Hybrid measured round 1 has a one-observation mismatch between digest statement and histogram counts, so its observed P95 is diagnostic only; strict P95 is available in rounds 2 and 3.",
+      "All warmup digest histograms have statement-count differences, so warmup P95 values are observed-only.",
+      "The API stage histogram is approximate and measures Rows() startup; it does not identify the underlying MySQL wait or prove a single cause.",
+      "Measured InnoDB row-lock counters are instance-level aggregates over all mixed-load statements, not correlated to the Following candidate digest; their correlation with slower Hybrid rounds is diagnostic only.",
+      "This run failed the required client P95 gate; SQL-only remains the default."
+    ]
+  },
+  "diagnostic_profiles": {
+    "sql_only_round_4": {
+      "cpu": "captured",
+      "goroutine": "captured"
+    },
+    "hybrid_round_4": {
+      "cpu": "captured",
+      "goroutine": "captured"
+    },
+    "measurement_note": "Separate diagnostic fixtures; CPU profiles do not measure blocked wall time."
+  }
+}
