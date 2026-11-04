@@ -158,6 +158,7 @@ class FeedA04StatementDigestTests(unittest.TestCase):
                 "reason": "performance_schema_query_failed",
                 "failure_stage": "digest_histogram_query",
                 "error": "AcceptanceError: access denied",
+                "window": "mixed driver lifetime: 30s read-only warmup plus 60s measured workload",
                 "prepared_statement_diagnostics": {
                     "available": False,
                     "reason": "account_event_snapshot_unavailable",
