@@ -1,0 +1,225 @@
+{
+  "workflow": {
+    "run_id": 41803621425,
+    "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41803621425",
+    "artifact_id": 13310081655,
+    "artifact_url": "https://github.com/liuzhouquan/GoStream/actions/runs/41803621425/artifacts/13310081655",
+    "tested_commit": "a6708f096d811b65f061e80951f664841dab8a75",
+    "started_at_utc": "2026-11-04T08:58:27Z",
+    "completed_at_utc": "2026-11-04T09:18:39Z",
+    "duration_seconds": 1212,
+    "conclusion": "success",
+    "interpolate_params": true
+  },
+  "environment": {
+    "go": "1.27.2",
+    "mysql": "8.4.13",
+    "runner": "GitHub Actions ubuntu-24.04",
+    "runner_vcpus": 4,
+    "innodb_buffer_pool_size_bytes": 134217728,
+    "redis": "disabled for this acceptance fixture",
+    "fixture": {
+      "users": 2000,
+      "follows": 10999,
+      "videos": 20000,
+      "fanout_jobs": 19800,
+      "feed_inboxes": 1900000,
+      "video_actions": 50000
+    },
+    "concurrency": 20,
+    "warmup_seconds_per_round": 30,
+    "measured_seconds_per_round": 60,
+    "runs_per_mode": 3,
+    "schedule": [
+      "sql-only r1",
+      "hybrid r1",
+      "hybrid r2",
+      "sql-only r2",
+      "hybrid r3",
+      "sql-only r3"
+    ]
+  },
+  "acceptance": {
+    "sql_only_median_following_p95_ms": 46.051305,
+    "hybrid_median_following_p95_ms": 26.250059,
+    "hybrid_p95_improvement_percent": 43.0,
+    "required_improvement_percent": 20.0,
+    "target_met": true,
+    "mixed_requests_succeeded": 48300,
+    "mixed_request_failures": 0,
+    "video_publishes_succeeded": 120,
+    "publish_failures": 0,
+    "consistency_checks_passed": true,
+    "database_pool_waits": 0,
+    "maximum_hybrid_fanout_drain_seconds": 0.07399646900000789,
+    "api_following_p95_buckets_approximate": {
+      "sql_only": [
+        "(40, 50] ms",
+        "(40, 50] ms",
+        "(40, 50] ms"
+      ],
+      "hybrid": [
+        "(25, 40] ms",
+        "(25, 40] ms",
+        "(10, 25] ms"
+      ]
+    }
+  },
+  "rounds": [
+    {
+      "mode": "sql-only",
+      "round": 1,
+      "mixed_requests_succeeded": 7944,
+      "mixed_request_failures": 0,
+      "following_successes": 3180,
+      "following_failures": 0,
+      "client_following_p95_ms": 45.847,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "counter_mismatches": 0,
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "fanout_pending": 0,
+      "fanout_drain_seconds": 0.069957
+    },
+    {
+      "mode": "hybrid",
+      "round": 1,
+      "mixed_requests_succeeded": 8154,
+      "mixed_request_failures": 0,
+      "following_successes": 3264,
+      "following_failures": 0,
+      "client_following_p95_ms": 26.828,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "counter_mismatches": 0,
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "fanout_pending": 0,
+      "fanout_drain_seconds": 0.073996
+    },
+    {
+      "mode": "hybrid",
+      "round": 2,
+      "mixed_requests_succeeded": 8193,
+      "mixed_request_failures": 0,
+      "following_successes": 3280,
+      "following_failures": 0,
+      "client_following_p95_ms": 26.25,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "counter_mismatches": 0,
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "fanout_pending": 0,
+      "fanout_drain_seconds": 0.072936
+    },
+    {
+      "mode": "sql-only",
+      "round": 2,
+      "mixed_requests_succeeded": 7914,
+      "mixed_request_failures": 0,
+      "following_successes": 3168,
+      "following_failures": 0,
+      "client_following_p95_ms": 46.051,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "counter_mismatches": 0,
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "fanout_pending": 0,
+      "fanout_drain_seconds": 0.069265
+    },
+    {
+      "mode": "hybrid",
+      "round": 3,
+      "mixed_requests_succeeded": 8174,
+      "mixed_request_failures": 0,
+      "following_successes": 3272,
+      "following_failures": 0,
+      "client_following_p95_ms": 25.332,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "counter_mismatches": 0,
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "fanout_pending": 0,
+      "fanout_drain_seconds": 0.071277
+    },
+    {
+      "mode": "sql-only",
+      "round": 3,
+      "mixed_requests_succeeded": 7921,
+      "mixed_request_failures": 0,
+      "following_successes": 3169,
+      "following_failures": 0,
+      "client_following_p95_ms": 46.371,
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "counter_mismatches": 0,
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "fanout_pending": 0,
+      "fanout_drain_seconds": 0.070817
+    }
+  ],
+  "actual_plans": {
+    "capture_window": "One first-page query per mode on separate diagnostic fixtures after all six acceptance rounds; outside measured workload.",
+    "source": "Production followingCandidateQuery; viewer 501; page size 20; limit 21.",
+    "sql_only": {
+      "actual_total_ms": 2.63,
+      "actual_rows_returned": 21,
+      "follow_rows": 5,
+      "videos_index": "idx_video_author",
+      "video_rows_before_order_limit": 1004,
+      "ordering": "Sort videos by created_at and id, return 21 rows."
+    },
+    "hybrid": {
+      "actual_total_ms": 0.647,
+      "actual_rows_returned": 21,
+      "union_rows_before_outer_sort": 42,
+      "push_page": {
+        "actual_ms_including_materialization": 0.132,
+        "join_order": [
+          "feed_inboxes",
+          "videos",
+          "follows"
+        ],
+        "feed_inbox_index": "idx_feed_inbox_user (user_id, created_at DESC, video_id DESC)",
+        "inbox_rows_scanned": 25,
+        "rows_after_limit": 21,
+        "video_primary_key_lookups": 25,
+        "follow_covering_index_lookups": 25,
+        "branch_sort": "none; inbox order supplies page order"
+      },
+      "pull_page_actual_ms": [
+        0.09,
+        0.092
+      ],
+      "late_follow_page_actual_ms": [
+        0.338,
+        0.338
+      ],
+      "comparison_to_previous_plan": {
+        "previous_push_page_actual_ms": 28.6,
+        "previous_inbox_point_lookups": 804,
+        "previous_behavior": "Started from follows/videos, then probed feed_inboxes and sorted candidates."
+      }
+    },
+    "files": {
+      "sql_only": "following-plan-sql-only-diagnostic.json",
+      "hybrid": "following-plan-hybrid-diagnostic.json"
+    }
+  },
+  "limitations": [
+    "The query plans are diagnostic samples from separate post-acceptance fixtures, not per-request operator timings.",
+    "The measured P95 result applies to this fixture, runner and workload; it is not a general production capacity guarantee.",
+    "This acceptance disables Redis and does not measure cache-hit behavior or multi-host load."
+  ]
+}

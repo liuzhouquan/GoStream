@@ -52,7 +52,7 @@ Existing installations upgrading to schema v005 must stop all API replicas and b
 - Frozen SQLite/MySQL `schema_v001` SQL, v002 outbox index, v003 durable Feed fanout/inbox tables, v004 indexed pull/backfill upgrade, and v005 lossless per-device ACK ranges, with MySQL startup locking and existing-database adoption; an isolated MySQL backup/restore and v002 rollback drill is in `tests/integration/mysql_recovery.sh`
 - CI workflow for exact Go version, tests, race checks, vet, build, web syntax, and Compose validation
 - Optional Redis cache for anonymous timeline/recommend/hot pages and each viewer's following first page; database fallback and bounded staleness
-- Following Feed push/pull index with durable 128-follower batches for ordinary authors and direct reads for higher-follower authors; configure `FEED_FANOUT_MAX_FOLLOWERS` (`0` SQL-only default, `1000` to enable the current hybrid strategy). [Design and measured limits](docs/FEED_HYBRID.md)
+- Following Feed push/pull index with durable 128-follower batches for authors up to the configured follower threshold and direct reads for higher-follower authors; `FEED_FANOUT_MAX_FOLLOWERS=1000` is the measured default and `0` selects SQL-only. [Design and measured limits](docs/FEED_HYBRID.md)
 - Explainable recommendation ranking using interactions, freshness, followed authors, and recently interacted authors
 - JWT access tokens and bcrypt password hashing
 - Per-peer registration, login, and view-request budgets with HTTP 429 and `Retry-After`; Redis shares counts across instances and a bounded local counter covers outages. See [API semantics](docs/API.md).
@@ -73,7 +73,7 @@ Existing installations upgrading to schema v005 must stop all API replicas and b
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/API.md](docs/API.md), [docs/DATABASE.md](docs/DATABASE.md), [docs/TECHNICAL_DESIGN.md](docs/TECHNICAL_DESIGN.md), [docs/LEARNING_GUIDE.md](docs/LEARNING_GUIDE.md), and [docs/INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md).
 
-Performance and verification status is recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md). An in-process benchmark, a local HTTP driver with authenticated request support, three-run MySQL/Redis cache comparisons, and an isolated 2,000-user hybrid Feed comparison are included. The hybrid read path regressed against SQL-only for the measured low-follow-count viewer; it remains an optimization target. k6 and multi-host load testing remain pending.
+Performance and verification status is recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md). The full-size A04 mixed read/write acceptance passed its 20% Following P95 gate after an inbox-first MySQL join-order optimization: three-run median P95 improved 43% with zero request failures and all consistency checks passing. k6 and multi-host load testing remain pending.
 
 ## License
 
