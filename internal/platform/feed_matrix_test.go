@@ -271,6 +271,7 @@ func TestFeedRedisCacheFallbackAndRecovery(t *testing.T) {
 
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr(), MaxRetries: 0})
 	defer client.Close()
+	redisAddr := mr.Addr()
 
 	s, h, db := testServer(t)
 	s.UseRedisFeedCache(client)
@@ -327,6 +328,51 @@ func TestFeedRedisCacheFallbackAndRecovery(t *testing.T) {
 	metricsAfterOutage := request(t, h, http.MethodGet, "/metrics", "", nil)
 	if !strings.Contains(metricsAfterOutage.Body.String(), "gostream_feed_cache_total{result=\"error\"}") {
 		t.Fatalf("expected feed cache error in metrics: %s", metricsAfterOutage.Body.String())
+	}
+	if s.cache.allowed() {
+		t.Fatal("feed cache circuit should open after Redis becomes unavailable")
+	}
+
+	// Restart Redis on the same endpoint. Requests should keep using the DB
+	// while the circuit is open, then transparently repopulate and hit cache
+	// again once the five-second cooldown expires.
+	restartedRedis := miniredis.NewMiniRedis()
+	if err := restartedRedis.StartAddr(redisAddr); err != nil {
+		t.Fatal(err)
+	}
+	defer restartedRedis.Close()
+	if s.cache.allowed() {
+		t.Fatal("feed cache should remain bypassed until the failure cooldown expires")
+	}
+
+	fallbackAfterRestart := request(t, h, http.MethodGet, "/api/feed?scene=timeline", "", nil)
+	if fallbackAfterRestart.Code != http.StatusOK || !jsonContainsVideo(fallbackAfterRestart.Body.Bytes(), v.ID) {
+		t.Fatalf("feed during cache circuit cooldown = %d %s", fallbackAfterRestart.Code, fallbackAfterRestart.Body.String())
+	}
+
+	s.cache.mu.Lock()
+	cooldown := time.Until(s.cache.disabledUntil)
+	s.cache.mu.Unlock()
+	if cooldown > 0 {
+		timer := time.NewTimer(cooldown + 10*time.Millisecond)
+		defer timer.Stop()
+		<-timer.C
+	}
+	if !s.cache.allowed() {
+		t.Fatal("feed cache circuit did not close after the failure cooldown")
+	}
+
+	missAfterRecovery := request(t, h, http.MethodGet, "/api/feed?scene=timeline", "", nil)
+	if missAfterRecovery.Code != http.StatusOK || !jsonContainsVideo(missAfterRecovery.Body.Bytes(), v.ID) {
+		t.Fatalf("feed cache recovery miss = %d %s", missAfterRecovery.Code, missAfterRecovery.Body.String())
+	}
+	hitAfterRecovery := request(t, h, http.MethodGet, "/api/feed?scene=timeline", "", nil)
+	if hitAfterRecovery.Code != http.StatusOK || !jsonContainsVideo(hitAfterRecovery.Body.Bytes(), v.ID) {
+		t.Fatalf("feed cache recovery hit = %d %s", hitAfterRecovery.Code, hitAfterRecovery.Body.String())
+	}
+	metricsAfterRecovery := request(t, h, http.MethodGet, "/metrics", "", nil)
+	if !strings.Contains(metricsAfterRecovery.Body.String(), "gostream_feed_cache_total{result=\"hit\"} 2") {
+		t.Fatalf("expected a new cache hit after Redis recovery: %s", metricsAfterRecovery.Body.String())
 	}
 
 	_ = authorToken

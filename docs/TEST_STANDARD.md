@@ -202,3 +202,11 @@ A04 digest 诊断另需在30秒只读Following warmup后、60秒混合实测后�
 ## 2026-11-04 A04 candidate row timing boundary
 
 For each successful following Feed measurement, the A04 report retains `candidate_sql`, `candidate_query_start`, `candidate_row_next`, and `candidate_row_scan`. The new stages split the query call, `sql.Rows.Next()` iteration, and the remainder of GORM's scan loop. They are API-side elapsed measurements: `candidate_query_start` includes pool checkout and the initial response; `candidate_row_next` includes driver decoding and result delivery; `candidate_row_scan` is not pure CPU. They are diagnostic only. The client-side following P95 remains the acceptance gate, and a post-instrumentation full-size MySQL run must compare total `candidate_sql` and client P95 with the previous baseline before any performance conclusion.
+
+## Feed Redis cache outage and recovery
+
+`TestFeedRedisCacheFallbackAndRecovery` uses miniredis to stop and restart the cache server on the same TCP address. Timeline, following, hot, and recommendation requests must continue through the database while Redis is unavailable and while the five-second cache circuit is open. After cooldown, the existing Redis client must reconnect, repopulate the feed entry, and serve a subsequent cache hit. This is an in-process cache recovery test; cross-instance failure and production Redis load remain separate checks.
+
+## 2026-11-04 A04 inbox-first acceptance result
+
+The full-size mixed read/write run [#41803621425](https://github.com/liuzhouquan/GoStream/actions/runs/41803621425) passed the unchanged +20% client Following P95 gate: SQL-only median P95 was 46.051 ms and Hybrid was 26.250 ms (43.00% faster). It completed 48,300 requests and 120 publishes with zero failures, all consistency checks passing and zero database-pool waits. The post-acceptance production `EXPLAIN ANALYZE` fixture confirmed the Hybrid push branch reads the viewer's ordered inbox index and avoids the previous 804 point lookups. This closes the full-size cache-free mixed-load gate for this fixture; warm-Redis performance, cross-instance Feed failure recovery, and multi-host load remain separate criteria. See [`PERFORMANCE.md`](PERFORMANCE.md) and the [machine-readable result](benchmarks/feed-a04-inbox-first-2026-11-04.json).
