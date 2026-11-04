@@ -147,6 +147,10 @@ def summarize(reports: list[dict], required_improvement: float, interpolate_para
         for report in reports
         if report["mixed_load"].get("diagnostic_profiles")
     ]
+    following_query_plan_diagnostics = {
+        "sql_only": [report.get("following_query_plan_diagnostic") for report in sql],
+        "hybrid": [report.get("following_query_plan_diagnostic") for report in hybrid],
+    }
     improvement = (sql_p95 - hybrid_p95) / sql_p95 if sql_p95 > 0 else 0.0
     all_consistent = all(
         report["verification"]["counter_mismatches"] == 0
@@ -178,6 +182,7 @@ def summarize(reports: list[dict], required_improvement: float, interpolate_para
         "database_wait_diagnostics_warmup": database_wait_diagnostics_warmup,
         "database_wait_diagnostics_measured": database_wait_diagnostics_measured,
         "prepared_statement_diagnostics": prepared_statement_diagnostics,
+        "following_query_plan_diagnostics": following_query_plan_diagnostics,
         "diagnostic_profiles": diagnostic_profiles,
         "following_p95_improvement_percent": round(improvement * 100, 2),
         "required_improvement_percent": required_improvement * 100,
@@ -331,6 +336,17 @@ def format_summary(summary: dict) -> str:
             values.append(f"{profile['variant']} r{profile['round']} CPU={cpu}, goroutine={goroutine}")
         return "; ".join(values)
 
+    def format_query_plan_diagnostics(variant: str) -> str:
+        reports = summary.get("following_query_plan_diagnostics", {}).get(variant, [])
+        values = []
+        for round_number, report in enumerate(reports, 1):
+            if not report or not report.get("available"):
+                reason = report.get("reason", "not_scheduled") if report else "not_scheduled"
+                values.append(f"r{round_number} unavailable ({reason})")
+            else:
+                values.append(f"r{round_number} {report['output_file']}")
+        return ", ".join(values) if values else "not captured"
+
     statement_window = next(
         (
             report.get("window")
@@ -374,6 +390,7 @@ def format_summary(summary: dict) -> str:
         f"- Performance Schema account waits (warmup-only): SQL-only {format_wait_event_diagnostics('sql_only', 'database_wait_diagnostics_warmup')}; Hybrid {format_wait_event_diagnostics('hybrid', 'database_wait_diagnostics_warmup')}",
         f"- Performance Schema account waits (measured-only): SQL-only {format_wait_event_diagnostics('sql_only', 'database_wait_diagnostics_measured')}; Hybrid {format_wait_event_diagnostics('hybrid', 'database_wait_diagnostics_measured')}",
         f"- Performance Schema prepared COM_STMT_EXECUTE aggregates (account scoped; command-level, not per-SQL; diagnostic only): SQL-only {format_prepared_statement_diagnostics('sql_only')}; Hybrid {format_prepared_statement_diagnostics('hybrid')}",
+        f"- Production Following EXPLAIN FORMAT=JSON plans (captured after Performance Schema snapshots; diagnostic only): SQL-only {format_query_plan_diagnostics('sql_only')}; Hybrid {format_query_plan_diagnostics('hybrid')}",
         f"- Go pprof diagnostics (separate from the 6-run acceptance gate): {format_diagnostic_profiles()}",
         f"- Target met: {summary['target_met']}",
         "- Client-side P95 remains the acceptance gate. Server histogram buckets are diagnostic intervals; raw request latencies, samples, queue state, MySQL status, and API CPU/RSS are in adjacent JSON reports.",
@@ -1191,6 +1208,67 @@ def capture_pprof_after_delay(
     return capture_pprof_artifact(url, output_path, timeout_seconds)
 
 
+def capture_following_query_plan(
+    go_bin: str,
+    dsn: str,
+    viewer_id: int,
+    mode: str,
+    round_number: int,
+    output_path: pathlib.Path,
+) -> dict:
+    """Capture EXPLAIN JSON from the production GORM query builder outside load windows."""
+    if mode not in {"sql-only", "hybrid"} or viewer_id <= 0 or round_number <= 0:
+        return {"available": False, "reason": "invalid_diagnostic_arguments"}
+    output_path = pathlib.Path(output_path)
+    env = os.environ.copy()
+    env.update(
+        {
+            "GOSTREAM_TEST_MYSQL_DSN": dsn,
+            "GOSTREAM_A04_PLAN_MODE": mode,
+            "GOSTREAM_A04_PLAN_VIEWER_ID": str(viewer_id),
+            "GOSTREAM_A04_PLAN_OUTPUT": str(output_path),
+        }
+    )
+    command = [go_bin, "test", "./internal/platform", "-run", "^TestA04FollowingQueryPlanDiagnostic$", "-count=1"]
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=pathlib.Path(__file__).resolve().parents[2],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=90,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return {
+            "available": False,
+            "reason": "diagnostic_runner_error",
+            "error_type": type(error).__name__,
+        }
+    if completed.returncode != 0:
+        return {
+            "available": False,
+            "reason": "diagnostic_test_failed",
+            "exit_code": completed.returncode,
+        }
+    if not output_path.is_file():
+        return {"available": False, "reason": "diagnostic_output_missing"}
+    try:
+        payload = json.loads(output_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {"available": False, "reason": "diagnostic_output_invalid"}
+    if payload.get("mode") != mode or not isinstance(payload.get("plan"), dict):
+        return {"available": False, "reason": "diagnostic_output_unexpected"}
+    return {
+        "available": True,
+        "source": "production followingCandidateQuery via opt-in MySQL integration diagnostic",
+        "mode": mode,
+        "viewer_id": viewer_id,
+        "output_file": output_path.name,
+    }
+
+
 def run_mixed_driver(
     driver: str,
     base_url: str,
@@ -1558,6 +1636,24 @@ def run_case(args, mode: str, round_number: int, diagnostic_only: bool = False) 
             mysql_wait_after_mix,
             f"{DURATION_SECONDS}s measured mixed workload",
         )
+        following_query_plan_diagnostic = {"available": False, "reason": "not_scheduled"}
+        if not diagnostic_only and round_number == 1:
+            try:
+                plan_viewer_id = id_for(args.mysql_container, database, reader_names[0])
+                following_query_plan_diagnostic = capture_following_query_plan(
+                    args.go_bin,
+                    dsn,
+                    plan_viewer_id,
+                    mode,
+                    round_number,
+                    pathlib.Path(args.report_dir) / f"following-plan-{mode}.json",
+                )
+            except Exception as error:
+                following_query_plan_diagnostic = {
+                    "available": False,
+                    "reason": "diagnostic_setup_failed",
+                    "error_type": type(error).__name__,
+                }
         report_path.write_text(json.dumps(mixed_report, indent=2) + "\n")
         ratios = workload_ratios(mixed_report)
         if not (0.68 <= ratios["feed"] <= 0.72 and 0.18 <= ratios["interaction"] <= 0.22 and 0.08 <= ratios["social"] <= 0.12):
@@ -1664,6 +1760,7 @@ def run_case(args, mode: str, round_number: int, diagnostic_only: bool = False) 
             "database_wait_diagnostics": mysql_wait_diagnostics,
             "database_wait_diagnostics_warmup": mysql_wait_diagnostics_warmup,
             "database_wait_diagnostics_measured": mysql_wait_diagnostics_measured,
+            "following_query_plan_diagnostic": following_query_plan_diagnostic,
             "database_status_before_publish": db_before_publish,
             "database_status_after": db_after,
             "outbox_drain_seconds": outbox_drain_seconds,
