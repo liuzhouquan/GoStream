@@ -538,9 +538,12 @@ func percentile(sorted []time.Duration, numerator int) time.Duration {
 	return sorted[(len(sorted)-1)*numerator/100]
 }
 
-func run(baseURL string, actors []actor, concurrency int, warmup, duration time.Duration, reportPath string) error {
+func run(baseURL string, actors []actor, concurrency int, warmup, duration time.Duration, reportPath string, warmupOnly bool) error {
 	if len(actors) == 0 {
 		return fmt.Errorf("at least one actor is required")
+	}
+	if warmupOnly && warmup <= 0 {
+		return fmt.Errorf("warmup-only mode requires a positive warmup duration")
 	}
 	client := &http.Client{Timeout: 10 * time.Second, Transport: &http.Transport{
 		MaxIdleConns: concurrency, MaxIdleConnsPerHost: concurrency,
@@ -550,6 +553,7 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 		deadline := time.Now().Add(warmup)
 		var wg sync.WaitGroup
 		var warmFailures atomic.Int64
+		var warmSuccesses atomic.Int64
 		for worker := 0; worker < concurrency; worker++ {
 			workerActor := actors[worker%len(actors)]
 			wg.Add(1)
@@ -559,6 +563,8 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 					_, status, err := runRequest(client, baseURL, token, operation{"feed_following", http.MethodGet, "/api/feed?scene=following&limit=20", "", http.StatusOK})
 					if err != nil || status != http.StatusOK {
 						warmFailures.Add(1)
+					} else {
+						warmSuccesses.Add(1)
 					}
 				}
 			}(workerActor.token)
@@ -566,6 +572,10 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 		wg.Wait()
 		if warmFailures.Load() != 0 {
 			return fmt.Errorf("warmup had %d failed requests", warmFailures.Load())
+		}
+		if warmupOnly {
+			fmt.Printf("read-only warmup completed requests=%d duration=%s\n", warmSuccesses.Load(), warmup.Round(time.Millisecond))
+			return nil
 		}
 	}
 	serverHistogramBefore, err := scrapeAPIHistograms(client, baseURL)
@@ -723,10 +733,12 @@ func main() {
 	followeeIDsValue := flag.String("followee-ids", "", "comma-separated followee user IDs; distributed across token lines")
 	concurrency := flag.Int("concurrency", 20, "concurrent workers")
 	warmup := flag.Duration("warmup", 30*time.Second, "read-only Feed warmup")
+	warmupOnly := flag.Bool("warmup-only", false, "run only the read-only warmup and exit before measurement")
 	duration := flag.Duration("duration", time.Minute, "measured mixed workload")
 	reportPath := flag.String("report-file", "", "optional path for raw per-request JSON report (created with mode 0600)")
 	flag.Parse()
-	if !*isolated || *tokenFile == "" || *concurrency < 1 || *concurrency > 1000 || *warmup < 0 || *duration <= 0 ||
+	if !*isolated || *tokenFile == "" || *concurrency < 1 || *concurrency > 1000 || *warmup < 0 ||
+		(!*warmupOnly && *duration <= 0) || (*warmupOnly && *warmup <= 0) ||
 		!strings.HasPrefix(*baseURL, "http://") && !strings.HasPrefix(*baseURL, "https://") {
 		fmt.Fprintln(os.Stderr, "-isolated, token-file, positive duration and concurrency (<=1000), and HTTP(S) base-url are required")
 		os.Exit(2)
@@ -752,7 +764,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	if err := run(strings.TrimRight(*baseURL, "/"), actors, *concurrency, *warmup, *duration, *reportPath); err != nil {
+	if err := run(strings.TrimRight(*baseURL, "/"), actors, *concurrency, *warmup, *duration, *reportPath, *warmupOnly); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}

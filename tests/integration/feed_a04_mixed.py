@@ -108,6 +108,14 @@ def summarize(reports: list[dict], required_improvement: float, interpolate_para
         "sql_only": [report.get("database_statement_diagnostics") for report in sql],
         "hybrid": [report.get("database_statement_diagnostics") for report in hybrid],
     }
+    database_statement_diagnostics_warmup = {
+        "sql_only": [report.get("database_statement_diagnostics_warmup") for report in sql],
+        "hybrid": [report.get("database_statement_diagnostics_warmup") for report in hybrid],
+    }
+    database_statement_diagnostics_measured = {
+        "sql_only": [report.get("database_statement_diagnostics_measured") for report in sql],
+        "hybrid": [report.get("database_statement_diagnostics_measured") for report in hybrid],
+    }
     prepared_statement_diagnostics = {
         "sql_only": [
             report.get("database_statement_diagnostics", {}).get("prepared_statement_diagnostics")
@@ -152,6 +160,8 @@ def summarize(reports: list[dict], required_improvement: float, interpolate_para
         "server_feed_stages": server_feed_stages,
         "database_pool_wait": database_pool_wait,
         "database_statement_diagnostics": database_statement_diagnostics,
+        "database_statement_diagnostics_warmup": database_statement_diagnostics_warmup,
+        "database_statement_diagnostics_measured": database_statement_diagnostics_measured,
         "prepared_statement_diagnostics": prepared_statement_diagnostics,
         "diagnostic_profiles": diagnostic_profiles,
         "following_p95_improvement_percent": round(improvement * 100, 2),
@@ -221,8 +231,8 @@ def format_summary(summary: dict) -> str:
             )
         return ", ".join(values) if values else "unavailable"
 
-    def format_statement_diagnostics(variant: str) -> str:
-        runs = summary.get("database_statement_diagnostics", {}).get(variant, [])
+    def format_statement_diagnostics(variant: str, field: str = "database_statement_diagnostics") -> str:
+        runs = summary.get(field, {}).get(variant, [])
         values = []
         for round_number, report in enumerate(runs, 1):
             if not report or not report.get("available"):
@@ -316,6 +326,8 @@ def format_summary(summary: dict) -> str:
         f"- API-side following interaction_state P95 bucket (approximate): SQL-only {format_stage_buckets('sql_only', 'interaction_state')}; Hybrid {format_stage_buckets('hybrid', 'interaction_state')}",
         f"- DB pool delta during 60s measured window (waits / wait seconds / connections closed by idle cap): SQL-only {format_database_pool_wait('sql_only')}; Hybrid {format_database_pool_wait('hybrid')}",
         f"- Performance Schema statement digests ({statement_window}; available SQL digests only): SQL-only {format_statement_diagnostics('sql_only')}; Hybrid {format_statement_diagnostics('hybrid')}",
+        f"- Performance Schema warmup-only statement digests: SQL-only {format_statement_diagnostics('sql_only', 'database_statement_diagnostics_warmup')}; Hybrid {format_statement_diagnostics('hybrid', 'database_statement_diagnostics_warmup')}",
+        f"- Performance Schema measured-only statement digests: SQL-only {format_statement_diagnostics('sql_only', 'database_statement_diagnostics_measured')}; Hybrid {format_statement_diagnostics('hybrid', 'database_statement_diagnostics_measured')}",
         f"- Performance Schema prepared COM_STMT_EXECUTE aggregates (account scoped; command-level, not per-SQL; diagnostic only): SQL-only {format_prepared_statement_diagnostics('sql_only')}; Hybrid {format_prepared_statement_diagnostics('hybrid')}",
         f"- Go pprof diagnostics (separate from the 6-run acceptance gate): {format_diagnostic_profiles()}",
         f"- Target met: {summary['target_met']}",
@@ -739,7 +751,11 @@ def performance_schema_statement_snapshot(container: str, database: str, account
         }
 
 
-def performance_schema_statement_delta(before: dict, after: dict) -> dict:
+def performance_schema_statement_delta(
+    before: dict,
+    after: dict,
+    window: str = "mixed driver lifetime: 30s read-only warmup plus 60s measured workload",
+) -> dict:
     result = {"available": False, "reason": before.get("reason") or after.get("reason") or "snapshot_unavailable"}
     failed_snapshot = None
     if not before.get("available"):
@@ -786,6 +802,7 @@ def performance_schema_statement_delta(before: dict, after: dict) -> dict:
                 "reason": "performance_schema_account_event_reset_or_invalid_snapshot",
             }
     result["prepared_statement_diagnostics"] = prepared_diagnostics
+    result["window"] = window
     return result
 
 
@@ -1035,6 +1052,9 @@ def run_mixed_driver(
     log_path: pathlib.Path,
     api_pid: int,
     pprof_base_url: str = "",
+    warmup_seconds: int = WARMUP_SECONDS,
+    duration_seconds: int = DURATION_SECONDS,
+    warmup_only: bool = False,
 ) -> tuple[dict, dict]:
     command = [
         driver,
@@ -1050,16 +1070,20 @@ def run_mixed_driver(
         "-concurrency",
         str(CONCURRENCY),
         "-warmup",
-        f"{WARMUP_SECONDS}s",
+        f"{warmup_seconds}s",
         "-duration",
-        f"{DURATION_SECONDS}s",
-        "-report-file",
-        str(report_path),
+        f"{duration_seconds}s",
     ]
+    if warmup_only:
+        command.append("-warmup-only")
+    else:
+        command.extend(("-report-file", str(report_path)))
     samples: list[tuple[float, int, int]] = []
     stop = threading.Event()
-    sampler = threading.Thread(target=collect_api_samples, args=(api_pid, stop, samples), daemon=True)
-    sampler.start()
+    sampler = None
+    if not warmup_only:
+        sampler = threading.Thread(target=collect_api_samples, args=(api_pid, stop, samples), daemon=True)
+        sampler.start()
     profile_results: dict[str, dict] = {}
     profile_threads = []
     if pprof_base_url:
@@ -1068,14 +1092,14 @@ def run_mixed_driver(
         profile_targets = (
             (
                 "cpu",
-                WARMUP_SECONDS + 0.25,
-                f"{pprof_base_url}/debug/pprof/profile?seconds={DURATION_SECONDS}",
+                warmup_seconds + 0.25,
+                f"{pprof_base_url}/debug/pprof/profile?seconds={duration_seconds}",
                 cpu_path,
-                DURATION_SECONDS + 20,
+                duration_seconds + 20,
             ),
             (
                 "goroutine",
-                WARMUP_SECONDS + DURATION_SECONDS / 2,
+                warmup_seconds + duration_seconds / 2,
                 f"{pprof_base_url}/debug/pprof/goroutine?debug=2",
                 goroutine_path,
                 10,
@@ -1094,7 +1118,7 @@ def run_mixed_driver(
             command,
             capture_output=True,
             text=True,
-            timeout=WARMUP_SECONDS + DURATION_SECONDS + 60,
+            timeout=warmup_seconds + (0 if warmup_only else duration_seconds) + 60,
             check=False,
         )
     except subprocess.TimeoutExpired as error:
@@ -1102,10 +1126,21 @@ def run_mixed_driver(
         raise AcceptanceError("mixed load driver exceeded warmup + measurement timeout") from error
     finally:
         stop.set()
-        sampler.join(timeout=5)
+        if sampler is not None:
+            sampler.join(timeout=5)
         for thread in profile_threads:
-            thread.join(timeout=DURATION_SECONDS + 25)
+            thread.join(timeout=duration_seconds + 25)
     log_path.write_text(result.stdout + result.stderr)
+    if warmup_only:
+        if result.returncode != 0:
+            raise AcceptanceError(f"read-only Following warmup failed; see {log_path}")
+        match = re.search(r"read-only warmup completed requests=(\d+)", result.stdout)
+        if not match or int(match.group(1)) <= 0:
+            raise AcceptanceError(f"read-only Following warmup reported no successful requests; see {log_path}")
+        return {"successes": int(match.group(1)), "duration_seconds": warmup_seconds}, {
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+        }
     if not report_path.exists():
         raise AcceptanceError(f"mixed load driver wrote no report; see {log_path}")
     report = json.loads(report_path.read_text())
@@ -1115,9 +1150,10 @@ def run_mixed_driver(
     if report["successes"] == 0 or report["failures"] != 0:
         raise AcceptanceError(f"mixed load returned no successes or had failures; see {log_path}")
     report["api_process"] = process_metrics(samples)
+    report["api_process"]["window"] = f"{duration_seconds}s measured mixed workload"
     if pprof_base_url:
         report["diagnostic_profiles"] = {
-            "capture_window": "Separate diagnostic-only fixture: CPU profile is scheduled 250ms after the 30s warmup for 60s; goroutine dump is scheduled halfway through the measured load.",
+            "capture_window": "Separate diagnostic-only fixture: CPU profile starts 250ms into the measured mixed workload for 60s; goroutine dump is scheduled halfway through that window.",
             "cpu": profile_results.get("cpu", {"captured": False, "error": "capture thread did not finish"}),
             "goroutine": profile_results.get("goroutine", {"captured": False, "error": "capture thread did not finish"}),
         }
@@ -1293,9 +1329,27 @@ def run_case(args, mode: str, round_number: int, diagnostic_only: bool = False) 
             token_file.write("\n".join(reader_tokens) + "\n")
         report_path = pathlib.Path(args.report_dir) / f"mixed-{mode}-round-{round_number}.json"
         driver_log = pathlib.Path(args.report_dir) / f"mixed-{mode}-round-{round_number}.log"
+        warmup_log = pathlib.Path(args.report_dir) / f"warmup-{mode}-round-{round_number}.log"
         account_user = dsn_account_user(args.dsn_prefix)
         mysql_digest_before = performance_schema_statement_snapshot(args.mysql_container, database, account_user)
         db_before = status_snapshot(args.mysql_container)
+        warmup_report, _ = run_mixed_driver(
+            args.mixed_driver,
+            base_url,
+            token_path,
+            video_ids,
+            followee_ids,
+            report_path.with_name(f"warmup-{mode}-round-{round_number}.json"),
+            warmup_log,
+            api.pid,
+            warmup_seconds=WARMUP_SECONDS,
+            duration_seconds=0,
+            warmup_only=True,
+        )
+        mysql_digest_after_warmup = performance_schema_statement_snapshot(
+            args.mysql_container, database, account_user
+        )
+        db_after_warmup = status_snapshot(args.mysql_container)
         mixed_report, _ = run_mixed_driver(
             args.mixed_driver,
             base_url,
@@ -1310,11 +1364,34 @@ def run_case(args, mode: str, round_number: int, diagnostic_only: bool = False) 
                 if should_capture_pprof(mode, diagnostic_only)
                 else ""
             ),
+            warmup_seconds=0,
+            duration_seconds=DURATION_SECONDS,
         )
-        report_path.write_text(json.dumps(mixed_report, indent=2) + "\n")
+        mixed_report["warmup_ns"] = int(WARMUP_SECONDS * 1_000_000_000)
+        mixed_report["warmup_phase"] = {
+            "mode": "read-only following",
+            "duration_seconds": WARMUP_SECONDS,
+            "successful_requests": warmup_report["successes"],
+            "report_path": warmup_log.name,
+        }
         db_after_mix = status_snapshot(args.mysql_container)
         mysql_digest_after = performance_schema_statement_snapshot(args.mysql_container, database, account_user)
-        mysql_statement_diagnostics = performance_schema_statement_delta(mysql_digest_before, mysql_digest_after)
+        mysql_statement_diagnostics = performance_schema_statement_delta(
+            mysql_digest_before,
+            mysql_digest_after,
+            f"{WARMUP_SECONDS}s read-only warmup plus {DURATION_SECONDS}s measured mixed workload",
+        )
+        mysql_statement_diagnostics_warmup = performance_schema_statement_delta(
+            mysql_digest_before,
+            mysql_digest_after_warmup,
+            f"{WARMUP_SECONDS}s read-only Following warmup",
+        )
+        mysql_statement_diagnostics_measured = performance_schema_statement_delta(
+            mysql_digest_after_warmup,
+            mysql_digest_after,
+            f"{DURATION_SECONDS}s measured mixed workload",
+        )
+        report_path.write_text(json.dumps(mixed_report, indent=2) + "\n")
         ratios = workload_ratios(mixed_report)
         if not (0.68 <= ratios["feed"] <= 0.72 and 0.18 <= ratios["interaction"] <= 0.22 and 0.08 <= ratios["social"] <= 0.12):
             raise AcceptanceError(f"mixed driver operation ratio outside 70/20/10 tolerances: {ratios}")
@@ -1403,11 +1480,19 @@ def run_case(args, mode: str, round_number: int, diagnostic_only: bool = False) 
             "mixed_load": mixed_report,
             "workload_ratios": ratios,
             "database_status_before": db_before,
+            "database_status_after_warmup": db_after_warmup,
             "database_status_after_mixed": db_after_mix,
             "database_statement_diagnostics": {
                 "source": "performance_schema.events_statements_summary_by_digest",
-                "window": "mixed driver lifetime: 30s read-only warmup plus 60s measured workload",
                 **mysql_statement_diagnostics,
+            },
+            "database_statement_diagnostics_warmup": {
+                "source": "performance_schema.events_statements_summary_by_digest",
+                **mysql_statement_diagnostics_warmup,
+            },
+            "database_statement_diagnostics_measured": {
+                "source": "performance_schema.events_statements_summary_by_digest",
+                **mysql_statement_diagnostics_measured,
             },
             "database_status_before_publish": db_before_publish,
             "database_status_after": db_after,

@@ -1,0 +1,614 @@
+{
+  "run_id": 41764641949,
+  "workflow_url": "https://github.com/liuzhouquan/GoStream/actions/runs/41764641949",
+  "artifact_url": "https://github.com/liuzhouquan/GoStream/actions/runs/41764641949/artifacts/13292264553",
+  "artifact_id": 13292264553,
+  "tested_commit": "302a04f2dc3b0fc1149491df5f277f662dc8af7b",
+  "workflow_conclusion": "failure",
+  "failure_reason": "The +20% client-side following P95 improvement gate was not met; build, workload, publication, and consistency checks succeeded.",
+  "acceptance": {
+    "sql_only_median_following_p95_ms": 45.552,
+    "hybrid_median_following_p95_ms": 60.869,
+    "hybrid_p95_improvement_percent": -33.62,
+    "required_improvement_percent": 20.0,
+    "target_met": false
+  },
+  "workload": {
+    "fixture": {
+      "users": 2000,
+      "authors": 100,
+      "videos": 20000,
+      "follows": 10999,
+      "video_actions": 50000,
+      "feed_fanout_jobs": 19800,
+      "feed_inboxes": 1900000
+    },
+    "concurrency": 20,
+    "warmup_seconds": 30,
+    "measured_seconds_per_round": 60,
+    "rounds_per_mode": 3,
+    "mysql_interpolate_params": true,
+    "mixed_request_successes": 47946,
+    "mixed_request_failures": 0,
+    "publishes": 120,
+    "publish_failures": 0,
+    "consistency_passed": true,
+    "pool_wait_count_all_rounds_zero": true,
+    "max_hybrid_fanout_drain_seconds": 0.0711
+  },
+  "environment": {
+    "runner_os": "Ubuntu 24.04",
+    "cpu_model": "AMD EPYC 7763 64-Core Processor",
+    "vcpus": 4,
+    "memory_gib": 15,
+    "go_version": "1.27.2",
+    "mysql_version": "8.4.13",
+    "innodb_buffer_pool_mib": 128
+  },
+  "schedule": [
+    {
+      "mode": "sql-only",
+      "round": 1
+    },
+    {
+      "mode": "hybrid",
+      "round": 1
+    },
+    {
+      "mode": "sql-only",
+      "round": 2
+    },
+    {
+      "mode": "hybrid",
+      "round": 2
+    },
+    {
+      "mode": "hybrid",
+      "round": 3
+    },
+    {
+      "mode": "sql-only",
+      "round": 3
+    }
+  ],
+  "rounds": [
+    {
+      "mode": "sql-only",
+      "round": 1,
+      "mixed_requests": {
+        "successes": 7976,
+        "failures": 0
+      },
+      "following_requests": 3192,
+      "client_following_p95_ms": 45.552,
+      "api_following_stages": {
+        "author_preload": {
+          "samples": 3192,
+          "mean_ms": 4.464,
+          "p95_bucket_ms": [
+            10.0,
+            25.0
+          ]
+        },
+        "candidate_query": {
+          "samples": 3192,
+          "mean_ms": 23.967,
+          "p95_bucket_ms": [
+            40.0,
+            50.0
+          ]
+        },
+        "candidate_query_start": {
+          "samples": 3192,
+          "mean_ms": 19.268,
+          "p95_bucket_ms": [
+            25.0,
+            40.0
+          ]
+        },
+        "candidate_row_next": {
+          "samples": 3192,
+          "mean_ms": 0.049,
+          "p95_bucket_ms": [
+            0,
+            1.0
+          ]
+        },
+        "candidate_row_scan": {
+          "samples": 3192,
+          "mean_ms": 0.171,
+          "p95_bucket_ms": [
+            0,
+            1.0
+          ]
+        },
+        "candidate_sql": {
+          "samples": 3192,
+          "mean_ms": 19.497,
+          "p95_bucket_ms": [
+            25.0,
+            40.0
+          ]
+        },
+        "interaction_state": {
+          "samples": 3192,
+          "mean_ms": 2.966,
+          "p95_bucket_ms": [
+            5.0,
+            10.0
+          ]
+        }
+      },
+      "mysql_candidate_statement_digest": {
+        "identified_by_query_shape": true,
+        "statement_count": 19853,
+        "mean_ms": 24.218,
+        "rows_examined": 24028362,
+        "rows_sent": 416913,
+        "strict_p95_bucket_ms": null,
+        "observed_histogram_p95_bucket_ms": [
+          38.01894,
+          39.810717
+        ],
+        "histogram_count_difference": 1
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0
+      },
+      "fanout_jobs_completed": 0,
+      "fanout_drain_seconds": 0.0728,
+      "consistency_passed": true
+    },
+    {
+      "mode": "hybrid",
+      "round": 1,
+      "mixed_requests": {
+        "successes": 8006,
+        "failures": 0
+      },
+      "following_requests": 3206,
+      "client_following_p95_ms": 60.869,
+      "api_following_stages": {
+        "author_preload": {
+          "samples": 3206,
+          "mean_ms": 4.519,
+          "p95_bucket_ms": [
+            10.0,
+            25.0
+          ]
+        },
+        "candidate_query": {
+          "samples": 3206,
+          "mean_ms": 19.339,
+          "p95_bucket_ms": [
+            50.0,
+            60.0
+          ]
+        },
+        "candidate_query_start": {
+          "samples": 3206,
+          "mean_ms": 14.586,
+          "p95_bucket_ms": [
+            50.0,
+            60.0
+          ]
+        },
+        "candidate_row_next": {
+          "samples": 3206,
+          "mean_ms": 0.047,
+          "p95_bucket_ms": [
+            0,
+            1.0
+          ]
+        },
+        "candidate_row_scan": {
+          "samples": 3206,
+          "mean_ms": 0.167,
+          "p95_bucket_ms": [
+            0,
+            1.0
+          ]
+        },
+        "candidate_sql": {
+          "samples": 3206,
+          "mean_ms": 14.808,
+          "p95_bucket_ms": [
+            50.0,
+            60.0
+          ]
+        },
+        "interaction_state": {
+          "samples": 3206,
+          "mean_ms": 2.544,
+          "p95_bucket_ms": [
+            5.0,
+            10.0
+          ]
+        }
+      },
+      "mysql_candidate_statement_digest": {
+        "identified_by_query_shape": true,
+        "statement_count": 38410,
+        "mean_ms": 6.587,
+        "rows_examined": 3226524,
+        "rows_sent": 806694,
+        "strict_p95_bucket_ms": null,
+        "observed_histogram_p95_bucket_ms": [
+          14.454398,
+          15.135612
+        ],
+        "histogram_count_difference": 5
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0
+      },
+      "fanout_jobs_completed": 20,
+      "fanout_drain_seconds": 0.0711,
+      "consistency_passed": true
+    },
+    {
+      "mode": "sql-only",
+      "round": 2,
+      "mixed_requests": {
+        "successes": 7901,
+        "failures": 0
+      },
+      "following_requests": 3161,
+      "client_following_p95_ms": 45.577,
+      "api_following_stages": {
+        "author_preload": {
+          "samples": 3161,
+          "mean_ms": 4.499,
+          "p95_bucket_ms": [
+            10.0,
+            25.0
+          ]
+        },
+        "candidate_query": {
+          "samples": 3161,
+          "mean_ms": 24.305,
+          "p95_bucket_ms": [
+            40.0,
+            50.0
+          ]
+        },
+        "candidate_query_start": {
+          "samples": 3161,
+          "mean_ms": 19.573,
+          "p95_bucket_ms": [
+            25.0,
+            40.0
+          ]
+        },
+        "candidate_row_next": {
+          "samples": 3161,
+          "mean_ms": 0.046,
+          "p95_bucket_ms": [
+            0,
+            1.0
+          ]
+        },
+        "candidate_row_scan": {
+          "samples": 3161,
+          "mean_ms": 0.17,
+          "p95_bucket_ms": [
+            0,
+            1.0
+          ]
+        },
+        "candidate_sql": {
+          "samples": 3161,
+          "mean_ms": 19.8,
+          "p95_bucket_ms": [
+            25.0,
+            40.0
+          ]
+        },
+        "interaction_state": {
+          "samples": 3161,
+          "mean_ms": 2.864,
+          "p95_bucket_ms": [
+            5.0,
+            10.0
+          ]
+        }
+      },
+      "mysql_candidate_statement_digest": {
+        "identified_by_query_shape": true,
+        "statement_count": 20225,
+        "mean_ms": 23.607,
+        "rows_examined": 24482817,
+        "rows_sent": 424725,
+        "strict_p95_bucket_ms": [
+          38.01894,
+          39.810717
+        ],
+        "observed_histogram_p95_bucket_ms": [
+          38.01894,
+          39.810717
+        ],
+        "histogram_count_difference": 0
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0
+      },
+      "fanout_jobs_completed": 0,
+      "fanout_drain_seconds": 0.0694,
+      "consistency_passed": true
+    },
+    {
+      "mode": "hybrid",
+      "round": 2,
+      "mixed_requests": {
+        "successes": 8077,
+        "failures": 0
+      },
+      "following_requests": 3232,
+      "client_following_p95_ms": 60.087,
+      "api_following_stages": {
+        "author_preload": {
+          "samples": 3232,
+          "mean_ms": 4.476,
+          "p95_bucket_ms": [
+            10.0,
+            25.0
+          ]
+        },
+        "candidate_query": {
+          "samples": 3232,
+          "mean_ms": 20.351,
+          "p95_bucket_ms": [
+            50.0,
+            60.0
+          ]
+        },
+        "candidate_query_start": {
+          "samples": 3232,
+          "mean_ms": 15.634,
+          "p95_bucket_ms": [
+            50.0,
+            60.0
+          ]
+        },
+        "candidate_row_next": {
+          "samples": 3232,
+          "mean_ms": 0.049,
+          "p95_bucket_ms": [
+            0,
+            1.0
+          ]
+        },
+        "candidate_row_scan": {
+          "samples": 3232,
+          "mean_ms": 0.171,
+          "p95_bucket_ms": [
+            0,
+            1.0
+          ]
+        },
+        "candidate_sql": {
+          "samples": 3232,
+          "mean_ms": 15.864,
+          "p95_bucket_ms": [
+            50.0,
+            60.0
+          ]
+        },
+        "interaction_state": {
+          "samples": 3232,
+          "mean_ms": 2.485,
+          "p95_bucket_ms": [
+            5.0,
+            10.0
+          ]
+        }
+      },
+      "mysql_candidate_statement_digest": {
+        "identified_by_query_shape": true,
+        "statement_count": 38347,
+        "mean_ms": 6.607,
+        "rows_examined": 3221232,
+        "rows_sent": 805350,
+        "strict_p95_bucket_ms": null,
+        "observed_histogram_p95_bucket_ms": [
+          14.454398,
+          15.135612
+        ],
+        "histogram_count_difference": 8
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0
+      },
+      "fanout_jobs_completed": 20,
+      "fanout_drain_seconds": 0.0697,
+      "consistency_passed": true
+    },
+    {
+      "mode": "hybrid",
+      "round": 3,
+      "mixed_requests": {
+        "successes": 8018,
+        "failures": 0
+      },
+      "following_requests": 3208,
+      "client_following_p95_ms": 62.488,
+      "api_following_stages": {
+        "author_preload": {
+          "samples": 3208,
+          "mean_ms": 4.525,
+          "p95_bucket_ms": [
+            10.0,
+            25.0
+          ]
+        },
+        "candidate_query": {
+          "samples": 3208,
+          "mean_ms": 20.551,
+          "p95_bucket_ms": [
+            50.0,
+            60.0
+          ]
+        },
+        "candidate_query_start": {
+          "samples": 3208,
+          "mean_ms": 15.792,
+          "p95_bucket_ms": [
+            50.0,
+            60.0
+          ]
+        },
+        "candidate_row_next": {
+          "samples": 3208,
+          "mean_ms": 0.046,
+          "p95_bucket_ms": [
+            0,
+            1.0
+          ]
+        },
+        "candidate_row_scan": {
+          "samples": 3208,
+          "mean_ms": 0.166,
+          "p95_bucket_ms": [
+            0,
+            1.0
+          ]
+        },
+        "candidate_sql": {
+          "samples": 3208,
+          "mean_ms": 16.013,
+          "p95_bucket_ms": [
+            50.0,
+            60.0
+          ]
+        },
+        "interaction_state": {
+          "samples": 3208,
+          "mean_ms": 2.449,
+          "p95_bucket_ms": [
+            5.0,
+            10.0
+          ]
+        }
+      },
+      "mysql_candidate_statement_digest": {
+        "identified_by_query_shape": true,
+        "statement_count": 38490,
+        "mean_ms": 6.711,
+        "rows_examined": 3232488,
+        "rows_sent": 808122,
+        "strict_p95_bucket_ms": null,
+        "observed_histogram_p95_bucket_ms": [
+          14.454398,
+          15.135612
+        ],
+        "histogram_count_difference": 6
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0
+      },
+      "fanout_jobs_completed": 20,
+      "fanout_drain_seconds": 0.069,
+      "consistency_passed": true
+    },
+    {
+      "mode": "sql-only",
+      "round": 3,
+      "mixed_requests": {
+        "successes": 7968,
+        "failures": 0
+      },
+      "following_requests": 3192,
+      "client_following_p95_ms": 45.535,
+      "api_following_stages": {
+        "author_preload": {
+          "samples": 3192,
+          "mean_ms": 4.555,
+          "p95_bucket_ms": [
+            10.0,
+            25.0
+          ]
+        },
+        "candidate_query": {
+          "samples": 3192,
+          "mean_ms": 24.185,
+          "p95_bucket_ms": [
+            40.0,
+            50.0
+          ]
+        },
+        "candidate_query_start": {
+          "samples": 3192,
+          "mean_ms": 19.395,
+          "p95_bucket_ms": [
+            25.0,
+            40.0
+          ]
+        },
+        "candidate_row_next": {
+          "samples": 3192,
+          "mean_ms": 0.045,
+          "p95_bucket_ms": [
+            0,
+            1.0
+          ]
+        },
+        "candidate_row_scan": {
+          "samples": 3192,
+          "mean_ms": 0.178,
+          "p95_bucket_ms": [
+            0,
+            1.0
+          ]
+        },
+        "candidate_sql": {
+          "samples": 3192,
+          "mean_ms": 19.625,
+          "p95_bucket_ms": [
+            25.0,
+            40.0
+          ]
+        },
+        "interaction_state": {
+          "samples": 3192,
+          "mean_ms": 2.91,
+          "p95_bucket_ms": [
+            5.0,
+            10.0
+          ]
+        }
+      },
+      "mysql_candidate_statement_digest": {
+        "identified_by_query_shape": true,
+        "statement_count": 20230,
+        "mean_ms": 23.67,
+        "rows_examined": 24496230,
+        "rows_sent": 424872,
+        "strict_p95_bucket_ms": null,
+        "observed_histogram_p95_bucket_ms": [
+          38.01894,
+          39.810717
+        ],
+        "histogram_count_difference": 2
+      },
+      "publish": {
+        "successes": 20,
+        "failures": 0
+      },
+      "fanout_jobs_completed": 0,
+      "fanout_drain_seconds": 0.072,
+      "consistency_passed": true
+    }
+  ],
+  "diagnostic_limits": {
+    "mysql_statement_window": "30-second read-only following warmup plus 60-second measured mixed workload",
+    "api_stage_window": "60-second measured mixed workload only",
+    "histogram_counts_match_statement_count": "SQL-only round 2 only; SQL-only differences by round: 1, 0, 2; Hybrid: 5, 8, 6",
+    "p95_interpretation": "observed_histogram_p95_bucket_ms is diagnostic; strict_p95_bucket_ms is null whenever histogram and statement counts differ",
+    "conclusion": "MySQL observed candidate-statement means and histogram P95 buckets were lower for Hybrid, while measured API candidate_query_start and candidate_sql P95 buckets were higher. Since the MySQL digest window includes the read-only warmup, this does not isolate the measured mixed-load tail or establish a network/driver cause."
+  }
+}
