@@ -116,6 +116,18 @@ def summarize(reports: list[dict], required_improvement: float, interpolate_para
         "sql_only": [report.get("database_statement_diagnostics_measured") for report in sql],
         "hybrid": [report.get("database_statement_diagnostics_measured") for report in hybrid],
     }
+    database_wait_diagnostics = {
+        "sql_only": [report.get("database_wait_diagnostics") for report in sql],
+        "hybrid": [report.get("database_wait_diagnostics") for report in hybrid],
+    }
+    database_wait_diagnostics_warmup = {
+        "sql_only": [report.get("database_wait_diagnostics_warmup") for report in sql],
+        "hybrid": [report.get("database_wait_diagnostics_warmup") for report in hybrid],
+    }
+    database_wait_diagnostics_measured = {
+        "sql_only": [report.get("database_wait_diagnostics_measured") for report in sql],
+        "hybrid": [report.get("database_wait_diagnostics_measured") for report in hybrid],
+    }
     prepared_statement_diagnostics = {
         "sql_only": [
             report.get("database_statement_diagnostics", {}).get("prepared_statement_diagnostics")
@@ -162,6 +174,9 @@ def summarize(reports: list[dict], required_improvement: float, interpolate_para
         "database_statement_diagnostics": database_statement_diagnostics,
         "database_statement_diagnostics_warmup": database_statement_diagnostics_warmup,
         "database_statement_diagnostics_measured": database_statement_diagnostics_measured,
+        "database_wait_diagnostics": database_wait_diagnostics,
+        "database_wait_diagnostics_warmup": database_wait_diagnostics_warmup,
+        "database_wait_diagnostics_measured": database_wait_diagnostics_measured,
         "prepared_statement_diagnostics": prepared_statement_diagnostics,
         "diagnostic_profiles": diagnostic_profiles,
         "following_p95_improvement_percent": round(improvement * 100, 2),
@@ -256,6 +271,29 @@ def format_summary(summary: dict) -> str:
             values.append(f"r{round_number} " + "; ".join(statements))
         return ", ".join(values) if values else "unavailable"
 
+    def format_wait_event_diagnostics(variant: str, field: str = "database_wait_diagnostics") -> str:
+        runs = summary.get(field, {}).get(variant, [])
+        values = []
+        for round_number, report in enumerate(runs, 1):
+            if not report or not report.get("available"):
+                reason = report.get("reason", "snapshot_unavailable") if report else "snapshot_unavailable"
+                failure_stage = report.get("failure_stage") if report else None
+                detail = f"; stage={failure_stage}" if failure_stage else ""
+                values.append(f"r{round_number} unavailable ({reason}{detail})")
+                continue
+            events = report.get("events", [])[:3]
+            if not events:
+                values.append(f"r{round_number} no instrumented waits captured")
+                continue
+            rendered = []
+            for event in events:
+                name = event["event_name"].replace("|", "\\|")
+                if len(name) > 84:
+                    name = name[:81] + "..."
+                rendered.append(f"{name} (n={event['count']}, wait={event['sum_timer_wait_ms']:.3f}ms)")
+            values.append(f"r{round_number} " + "; ".join(rendered))
+        return ", ".join(values) if values else "unavailable"
+
     def format_prepared_statement_diagnostics(variant: str) -> str:
         runs = summary.get("prepared_statement_diagnostics", {}).get(variant, [])
         values = []
@@ -328,6 +366,9 @@ def format_summary(summary: dict) -> str:
         f"- Performance Schema statement digests ({statement_window}; available SQL digests only): SQL-only {format_statement_diagnostics('sql_only')}; Hybrid {format_statement_diagnostics('hybrid')}",
         f"- Performance Schema warmup-only statement digests: SQL-only {format_statement_diagnostics('sql_only', 'database_statement_diagnostics_warmup')}; Hybrid {format_statement_diagnostics('hybrid', 'database_statement_diagnostics_warmup')}",
         f"- Performance Schema measured-only statement digests: SQL-only {format_statement_diagnostics('sql_only', 'database_statement_diagnostics_measured')}; Hybrid {format_statement_diagnostics('hybrid', 'database_statement_diagnostics_measured')}",
+        f"- Performance Schema account waits (total window): SQL-only {format_wait_event_diagnostics('sql_only')}; Hybrid {format_wait_event_diagnostics('hybrid')}",
+        f"- Performance Schema account waits (warmup-only): SQL-only {format_wait_event_diagnostics('sql_only', 'database_wait_diagnostics_warmup')}; Hybrid {format_wait_event_diagnostics('hybrid', 'database_wait_diagnostics_warmup')}",
+        f"- Performance Schema account waits (measured-only): SQL-only {format_wait_event_diagnostics('sql_only', 'database_wait_diagnostics_measured')}; Hybrid {format_wait_event_diagnostics('hybrid', 'database_wait_diagnostics_measured')}",
         f"- Performance Schema prepared COM_STMT_EXECUTE aggregates (account scoped; command-level, not per-SQL; diagnostic only): SQL-only {format_prepared_statement_diagnostics('sql_only')}; Hybrid {format_prepared_statement_diagnostics('hybrid')}",
         f"- Go pprof diagnostics (separate from the 6-run acceptance gate): {format_diagnostic_profiles()}",
         f"- Target met: {summary['target_met']}",
@@ -527,6 +568,105 @@ def parse_account_statement_event_snapshot(rows: list[list[str]]) -> dict[str, d
             raise AcceptanceError("account statement event counters must be non-negative")
         events[event_name] = dict(zip(ACCOUNT_STATEMENT_EVENT_COUNTERS, counters))
     return events
+
+
+def parse_account_wait_event_snapshot(rows: list[list[str]]) -> dict[str, dict[str, int]]:
+    events = {}
+    for row in rows:
+        if len(row) != 3:
+            raise AcceptanceError(f"unexpected account wait event row with {len(row)} columns")
+        event_name = row[0]
+        if not event_name or event_name in events:
+            raise AcceptanceError("duplicate account wait event name")
+        if not event_name.startswith("wait/"):
+            raise AcceptanceError("unexpected account wait event class")
+        try:
+            count_star, sum_timer_wait_ps = map(int, row[1:])
+        except ValueError as error:
+            raise AcceptanceError(f"invalid account wait event counter: {error}") from error
+        if count_star < 0 or sum_timer_wait_ps < 0:
+            raise AcceptanceError("account wait event counters must be non-negative")
+        events[event_name] = {
+            "count_star": count_star,
+            "sum_timer_wait_ps": sum_timer_wait_ps,
+        }
+    return events
+
+
+def account_wait_event_delta(before: dict, after: dict, account_user: str) -> dict:
+    for event_name, old in before.items():
+        if event_name not in after and any(old.get(field, 0) for field in ("count_star", "sum_timer_wait_ps")):
+            raise AcceptanceError("Performance Schema account wait event counter reset")
+
+    deltas = []
+    for event_name, current in after.items():
+        old = before.get(event_name, {})
+        count = current.get("count_star", 0) - old.get("count_star", 0)
+        timer_wait_ps = current.get("sum_timer_wait_ps", 0) - old.get("sum_timer_wait_ps", 0)
+        if count < 0 or timer_wait_ps < 0:
+            raise AcceptanceError("Performance Schema account wait event counter reset")
+        if count == 0 and timer_wait_ps == 0:
+            continue
+        deltas.append({
+            "event_name": event_name,
+            "count": count,
+            "sum_timer_wait_ms": timer_wait_ps / 1_000_000_000,
+            "mean_timer_wait_ms": timer_wait_ps / count / 1_000_000_000 if count else None,
+        })
+    deltas.sort(key=lambda item: (-item["sum_timer_wait_ms"], -item["count"], item["event_name"]))
+    return {
+        "available": True,
+        "source": "performance_schema.events_waits_summary_by_account_by_event_name",
+        "scope": "account user aggregated across all instrumented wait events on the MySQL server",
+        "account_user": account_user,
+        "event_count_total": sum(item["count"] for item in deltas),
+        "sum_timer_wait_ms": sum(item["sum_timer_wait_ms"] for item in deltas),
+        "events": deltas[:50],
+    }
+
+
+def performance_schema_wait_event_snapshot(container: str, account_user: str) -> dict:
+    if not re.fullmatch(r"[A-Za-z0-9_]+", account_user):
+        raise AcceptanceError("refusing Performance Schema wait query with an invalid username")
+    try:
+        if scalar(container, "SELECT @@performance_schema;") != 1:
+            return {"available": False, "reason": "performance_schema_disabled"}
+        rows = mysql_query(
+            container,
+            "SELECT EVENT_NAME, COALESCE(SUM(COUNT_STAR), 0), COALESCE(SUM(SUM_TIMER_WAIT), 0) "
+            "FROM performance_schema.events_waits_summary_by_account_by_event_name "
+            f"WHERE USER='{account_user}' GROUP BY EVENT_NAME ORDER BY EVENT_NAME;",
+        )
+        return {
+            "available": True,
+            "account_user": account_user,
+            "snapshot": parse_account_wait_event_snapshot(rows),
+        }
+    except Exception as error:
+        return diagnostic_failure("performance_schema_wait_query_failed", "wait_event_query", error)
+
+
+def performance_schema_wait_event_delta(before: dict, after: dict, window: str) -> dict:
+    result = {
+        "available": False,
+        "reason": before.get("reason") or after.get("reason") or "snapshot_unavailable",
+    }
+    failed_snapshot = before if not before.get("available") else after if not after.get("available") else None
+    if failed_snapshot:
+        for field in ("failure_stage", "error"):
+            if failed_snapshot.get(field):
+                result[field] = failed_snapshot[field]
+    else:
+        try:
+            if before.get("account_user") != after.get("account_user"):
+                raise AcceptanceError("Performance Schema wait account user changed between snapshots")
+            result = account_wait_event_delta(before["snapshot"], after["snapshot"], after["account_user"])
+        except (AcceptanceError, KeyError) as error:
+            result = diagnostic_failure(
+                "performance_schema_wait_counter_reset_or_invalid_snapshot", "wait_event_delta", error
+            )
+    result["window"] = window
+    return result
 
 
 def prepared_statement_event_delta(before: dict, after: dict, account_user: str) -> dict:
@@ -1332,6 +1472,7 @@ def run_case(args, mode: str, round_number: int, diagnostic_only: bool = False) 
         warmup_log = pathlib.Path(args.report_dir) / f"warmup-{mode}-round-{round_number}.log"
         account_user = dsn_account_user(args.dsn_prefix)
         mysql_digest_before = performance_schema_statement_snapshot(args.mysql_container, database, account_user)
+        mysql_wait_before = performance_schema_wait_event_snapshot(args.mysql_container, account_user)
         db_before = status_snapshot(args.mysql_container)
         warmup_report, _ = run_mixed_driver(
             args.mixed_driver,
@@ -1349,6 +1490,7 @@ def run_case(args, mode: str, round_number: int, diagnostic_only: bool = False) 
         mysql_digest_after_warmup = performance_schema_statement_snapshot(
             args.mysql_container, database, account_user
         )
+        mysql_wait_after_warmup = performance_schema_wait_event_snapshot(args.mysql_container, account_user)
         db_after_warmup = status_snapshot(args.mysql_container)
         mixed_report, _ = run_mixed_driver(
             args.mixed_driver,
@@ -1376,6 +1518,7 @@ def run_case(args, mode: str, round_number: int, diagnostic_only: bool = False) 
         }
         db_after_mix = status_snapshot(args.mysql_container)
         mysql_digest_after = performance_schema_statement_snapshot(args.mysql_container, database, account_user)
+        mysql_wait_after_mix = performance_schema_wait_event_snapshot(args.mysql_container, account_user)
         mysql_statement_diagnostics = performance_schema_statement_delta(
             mysql_digest_before,
             mysql_digest_after,
@@ -1389,6 +1532,21 @@ def run_case(args, mode: str, round_number: int, diagnostic_only: bool = False) 
         mysql_statement_diagnostics_measured = performance_schema_statement_delta(
             mysql_digest_after_warmup,
             mysql_digest_after,
+            f"{DURATION_SECONDS}s measured mixed workload",
+        )
+        mysql_wait_diagnostics = performance_schema_wait_event_delta(
+            mysql_wait_before,
+            mysql_wait_after_mix,
+            f"{WARMUP_SECONDS}s read-only warmup plus {DURATION_SECONDS}s measured mixed workload",
+        )
+        mysql_wait_diagnostics_warmup = performance_schema_wait_event_delta(
+            mysql_wait_before,
+            mysql_wait_after_warmup,
+            f"{WARMUP_SECONDS}s read-only Following warmup",
+        )
+        mysql_wait_diagnostics_measured = performance_schema_wait_event_delta(
+            mysql_wait_after_warmup,
+            mysql_wait_after_mix,
             f"{DURATION_SECONDS}s measured mixed workload",
         )
         report_path.write_text(json.dumps(mixed_report, indent=2) + "\n")
@@ -1494,6 +1652,9 @@ def run_case(args, mode: str, round_number: int, diagnostic_only: bool = False) 
                 "source": "performance_schema.events_statements_summary_by_digest",
                 **mysql_statement_diagnostics_measured,
             },
+            "database_wait_diagnostics": mysql_wait_diagnostics,
+            "database_wait_diagnostics_warmup": mysql_wait_diagnostics_warmup,
+            "database_wait_diagnostics_measured": mysql_wait_diagnostics_measured,
             "database_status_before_publish": db_before_publish,
             "database_status_after": db_after,
             "outbox_drain_seconds": outbox_drain_seconds,

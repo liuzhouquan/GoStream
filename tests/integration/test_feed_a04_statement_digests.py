@@ -5,6 +5,99 @@ import feed_a04_mixed
 
 
 class FeedA04StatementDigestTests(unittest.TestCase):
+    def test_wait_event_snapshot_parses_account_wait_counters(self):
+        snapshot = feed_a04_mixed.parse_account_wait_event_snapshot(
+            [
+                ["wait/io/file/innodb/innodb_data_file", "3", "4000000000"],
+                ["wait/synch/mutex/innodb/buf_pool_mutex", "2", "500000000"],
+            ]
+        )
+
+        self.assertEqual(
+            snapshot,
+            {
+                "wait/io/file/innodb/innodb_data_file": {"count_star": 3, "sum_timer_wait_ps": 4_000_000_000},
+                "wait/synch/mutex/innodb/buf_pool_mutex": {"count_star": 2, "sum_timer_wait_ps": 500_000_000},
+            },
+        )
+
+    def test_wait_event_snapshot_rejects_duplicate_names_invalid_classes_and_counters(self):
+        with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "duplicate account wait event"):
+            feed_a04_mixed.parse_account_wait_event_snapshot(
+                [["wait/io/file/innodb/data", "1", "1"], ["wait/io/file/innodb/data", "2", "2"]]
+            )
+        with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "unexpected account wait event class"):
+            feed_a04_mixed.parse_account_wait_event_snapshot([["statement/sql/select", "1", "1"]])
+        with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "non-negative"):
+            feed_a04_mixed.parse_account_wait_event_snapshot([["wait/io/file/innodb/data", "-1", "0"]])
+
+    def test_wait_event_delta_reports_sorted_phase_waits_and_rejects_counter_reset(self):
+        before = {
+            "wait/io/file/innodb/data": {"count_star": 2, "sum_timer_wait_ps": 100_000_000},
+            "wait/synch/mutex/innodb/buf_pool": {"count_star": 1, "sum_timer_wait_ps": 200_000_000},
+        }
+        after = {
+            "wait/io/file/innodb/data": {"count_star": 5, "sum_timer_wait_ps": 2_100_000_000},
+            "wait/synch/mutex/innodb/buf_pool": {"count_star": 3, "sum_timer_wait_ps": 700_000_000},
+        }
+
+        report = feed_a04_mixed.account_wait_event_delta(before, after, "gostream")
+
+        self.assertEqual(report["event_count_total"], 5)
+        self.assertEqual(report["sum_timer_wait_ms"], 2.5)
+        self.assertEqual(report["events"][0], {
+            "event_name": "wait/io/file/innodb/data",
+            "count": 3,
+            "sum_timer_wait_ms": 2.0,
+            "mean_timer_wait_ms": 2.0 / 3,
+        })
+        with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "counter reset"):
+            feed_a04_mixed.account_wait_event_delta(after, before, "gostream")
+
+    @mock.patch.object(feed_a04_mixed, "scalar", return_value=1)
+    @mock.patch.object(feed_a04_mixed, "mysql_query")
+    def test_wait_event_snapshot_scopes_by_valid_account_and_records_source(self, mysql_query, _scalar):
+        mysql_query.return_value = [["wait/io/file/innodb/data", "4", "2500000000"]]
+
+        report = feed_a04_mixed.performance_schema_wait_event_snapshot("mysql-a04", "gostream")
+
+        self.assertTrue(report["available"])
+        self.assertEqual(report["account_user"], "gostream")
+        self.assertEqual(report["snapshot"]["wait/io/file/innodb/data"]["count_star"], 4)
+        query = mysql_query.call_args.args[1]
+        self.assertIn("events_waits_summary_by_account_by_event_name", query)
+        self.assertIn("COALESCE(SUM(SUM_TIMER_WAIT), 0)", query)
+        self.assertIn("WHERE USER='gostream'", query)
+        with self.assertRaisesRegex(feed_a04_mixed.AcceptanceError, "invalid username"):
+            feed_a04_mixed.performance_schema_wait_event_snapshot("mysql-a04", "root'; DROP DATABASE gostream")
+
+    @mock.patch.object(feed_a04_mixed, "scalar", return_value=0)
+    @mock.patch.object(feed_a04_mixed, "mysql_query")
+    def test_wait_event_snapshot_reports_disabled_or_failed_without_breaking_acceptance(self, mysql_query, _scalar):
+        disabled = feed_a04_mixed.performance_schema_wait_event_snapshot("mysql-a04", "gostream")
+        self.assertEqual(disabled, {"available": False, "reason": "performance_schema_disabled"})
+        mysql_query.assert_not_called()
+
+        with mock.patch.object(feed_a04_mixed, "scalar", return_value=1), mock.patch.object(
+            feed_a04_mixed, "mysql_query", side_effect=feed_a04_mixed.AcceptanceError("password=fixture-secret wait query failed")
+        ):
+            failed = feed_a04_mixed.performance_schema_wait_event_snapshot("mysql-a04", "gostream")
+        self.assertFalse(failed["available"])
+        self.assertEqual(failed["failure_stage"], "wait_event_query")
+        self.assertNotIn("fixture-secret", failed["error"])
+
+    def test_wait_event_delta_preserves_unavailable_and_reports_phase_window(self):
+        report = feed_a04_mixed.performance_schema_wait_event_delta(
+            {"available": False, "reason": "wait_event_query_failed", "failure_stage": "wait_event_query"},
+            {"available": False, "reason": "snapshot_unavailable"},
+            "60s measured mixed workload",
+        )
+
+        self.assertFalse(report["available"])
+        self.assertEqual(report["reason"], "wait_event_query_failed")
+        self.assertEqual(report["failure_stage"], "wait_event_query")
+        self.assertEqual(report["window"], "60s measured mixed workload")
+
     def test_digest_delta_scopes_reused_digest_to_schema(self):
         digest_text_hex = b"SELECT * FROM videos WHERE id = ?".hex().upper()
         before = feed_a04_mixed.parse_statement_digest_snapshot(
