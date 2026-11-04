@@ -410,7 +410,7 @@ func TestRunUsesActorPoolAndWritesRequestReport(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(t.TempDir(), "load.json")
-	if err := run(server.URL, actors, 2, 0, 100*time.Millisecond, path); err != nil {
+	if err := run(server.URL, actors, 2, 0, 100*time.Millisecond, path, false); err != nil {
 		t.Fatal(err)
 	}
 	mu.Lock()
@@ -455,5 +455,40 @@ func TestRunUsesActorPoolAndWritesRequestReport(t *testing.T) {
 		if operation.Statuses[wantStatus] != operation.Successes {
 			t.Errorf("operation %q successful statuses = %v, want %d responses with HTTP %d", name, operation.Statuses, operation.Successes, wantStatus)
 		}
+	}
+}
+
+func TestRunWarmupOnlySkipsMeasuredWorkloadAndMetricsScrape(t *testing.T) {
+	feedCalls := 0
+	metricsCalls := 0
+	writeCalls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/feed":
+			feedCalls++
+			if r.URL.Query().Get("scene") != "following" {
+				t.Errorf("warmup requested unexpected scene: %s", r.URL.RawQuery)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"items":[]}`))
+		case "/metrics":
+			metricsCalls++
+		case "/api/videos/1/like", "/api/videos/1/comments", "/api/users/me/following/3":
+			writeCalls++
+		default:
+			t.Errorf("unexpected warmup request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	actors, err := buildActors([]string{"reader-token"}, []uint{1}, []uint{3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run(server.URL, actors, 1, 40*time.Millisecond, time.Millisecond, "", true); err != nil {
+		t.Fatal(err)
+	}
+	if feedCalls == 0 || metricsCalls != 0 || writeCalls != 0 {
+		t.Fatalf("warmup-only did not stop at the phase boundary: feed=%d metrics=%d writes=%d", feedCalls, metricsCalls, writeCalls)
 	}
 }

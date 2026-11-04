@@ -552,7 +552,41 @@ Separate 60-second round-4 CPU profiles had similar top flat symbols: Linux sysc
 
 The handler now keeps the same candidate SQL and uses the existing GORM scan routine through an explicit `sql.Rows` loop so it can time three parts independently. `candidate_query_start` measures `Rows()` until the row stream is returned; `candidate_row_next` sums the wall time spent in each `Rows.Next()` call; `candidate_row_scan` subtracts that time from the full GORM scan loop. The latter two are diagnostic approximations: `Next()` includes MySQL driver work and result delivery, while the remainder includes GORM metadata, type conversion, and field mapping. They do not isolate server execution, pure network time, or pure CPU.
 
-The public SQLite Feed path and metric outcomes have been regression-tested, and the A04 parser/report now requires and retains these following-stage samples. No post-change full-size MySQL run has been performed yet; local `GOSTREAM_TEST_MYSQL_DSN` is unset and no Compose database is running. The change also makes the GORM scan loop explicit, so the next A04 run must compare total `candidate_sql` and client P95 with the previous baseline before attributing any difference to the new breakdown. No performance improvement or cause is claimed; the SQL-only default and +20% Hybrid gate remain unchanged.
+The public SQLite Feed path and metric outcomes have been regression-tested, and the A04 parser/report now requires and retains these following-stage samples. The first full-size mixed run with this instrumentation is [workflow #41761034278](https://github.com/liuzhouquan/GoStream/actions/runs/41761034278), testing commit `302a04f` with Go 1.27.2 and MySQL 8.4.13. It used the 2,000-user/20,000-video fixture, 20 workers, 30 seconds warmup, 60 seconds measured per round, and `interpolateParams=false`.
+
+All **45,013 mixed requests succeeded**, all **120 video publishes succeeded**, the counter/visibility/outbox/fanout checks passed, and pool wait counters remained zero. The maximum Hybrid fanout drain was 0.074 seconds. The workflow failed only because the required +20% client-P95 improvement was not met: SQL-only median following P95 was **53.590 ms**, Hybrid was **77.341 ms** (**44.32% slower**).
+
+| Mode / round | Client following P95 | `candidate_query_start` mean / P95 bucket | `candidate_sql` mean / P95 bucket | `candidate_query` mean / P95 bucket |
+| --- | ---: | ---: | ---: | ---: |
+| SQL-only 1 | 52.097 ms | 20.655 ms / (25, 40] ms | 20.900 ms / (25, 40] ms | 27.588 ms / (40, 50] ms |
+| Hybrid 1 | 77.341 ms | 18.543 ms / (60, 70] ms | 18.807 ms / (60, 70] ms | 25.300 ms / (70, 80] ms |
+| SQL-only 2 | 54.626 ms | 21.907 ms / (25, 40] ms | 22.161 ms / (25, 40] ms | 28.894 ms / (40, 50] ms |
+| Hybrid 2 | 76.022 ms | 19.377 ms / (60, 70] ms | 19.632 ms / (60, 70] ms | 26.151 ms / (70, 80] ms |
+| Hybrid 3 | 77.426 ms | 19.907 ms / (60, 70] ms | 20.177 ms / (60, 70] ms | 26.873 ms / (70, 80] ms |
+| SQL-only 3 | 53.590 ms | 21.317 ms / (25, 40] ms | 21.563 ms / (25, 40] ms | 28.341 ms / (40, 50] ms |
+
+The Hybrid candidate-query means were lower, but their P95 buckets were consistently higher. `candidate_query_start` and `candidate_sql` had P95 buckets of (60, 70] ms for Hybrid versus (25, 40] ms for SQL-only. In both modes, `candidate_row_next` and `candidate_row_scan` stayed in (0, 1] ms; Author preload stayed in (10, 25] ms and interaction-state in (5, 10] ms. This points to a repeatable tail in the `Rows()`-startup portion of the candidate load, but does not establish whether connection acquisition, MySQL execution/metadata response, or another driver-level wait is responsible. MySQL Performance Schema did not identify the candidate query digest in these reports; account-level prepared-execute totals aggregate many different statements. The CPU profiles were captured in separate diagnostic rounds and cannot measure blocked wall time.
+
+The compact [row-timing report](benchmarks/feed-a04-row-timing-2026-11-04.json) records all six rounds and measurement limits; the full raw samples and profiles remain in [artifact 13290574711](https://github.com/liuzhouquan/GoStream/actions/runs/41761034278/artifacts/13290574711). Keep SQL-only as the default. The +20% Hybrid gate remains open, and this result does not justify changing query semantics. The next experiment should identify the candidate statement's server-side wait/plan under this same workload before attempting another query change.
+
+### Candidate SQL digest comparison with parameter interpolation, 2026-11-04
+
+[Workflow #41764641949](https://github.com/liuzhouquan/GoStream/actions/runs/41764641949) repeated the same six-round fixture with `interpolateParams=true`, which exposed the Following query as a Performance Schema digest. It completed **47,946 mixed requests with zero failures**, **120/120 publishes**, all consistency checks, and zero pool waits. SQL-only median following client P95 was **45.552 ms**; Hybrid was **60.869 ms** (**33.62% slower**), so the +20% gate remained unmet.
+
+| Mode / round | Client following P95 | API `candidate_query_start` P95 bucket | API `candidate_sql` P95 bucket | MySQL candidate mean / observed P95 bucket | Rows examined | Digest histogram count difference |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| SQL-only 1 | 45.552 ms | (25, 40] ms | (25, 40] ms | 24.218 ms / (38.019, 39.811] ms | 24,028,362 | +1 |
+| SQL-only 2 | 45.577 ms | (25, 40] ms | (25, 40] ms | 23.607 ms / (38.019, 39.811] ms | 24,482,817 | 0 |
+| SQL-only 3 | 45.535 ms | (25, 40] ms | (25, 40] ms | 23.670 ms / (38.019, 39.811] ms | 24,496,230 | +2 |
+| Hybrid 1 | 60.869 ms | (50, 60] ms | (50, 60] ms | 6.587 ms / (14.454, 15.136] ms | 3,226,524 | +5 |
+| Hybrid 2 | 60.087 ms | (50, 60] ms | (50, 60] ms | 6.607 ms / (14.454, 15.136] ms | 3,221,232 | +8 |
+| Hybrid 3 | 62.488 ms | (50, 60] ms | (50, 60] ms | 6.711 ms / (14.454, 15.136] ms | 3,232,488 | +6 |
+
+The matched Hybrid candidate digest examined roughly 3.22 million rows per round, compared with 24.0–24.5 million for SQL-only, and its server timer mean was lower. The API candidate-start P95 bucket was still higher for Hybrid; `candidate_row_next` and `candidate_row_scan` remained in (0, 1] ms for both modes. This separates the SQL statement identity and its aggregate server time from the API-side tail, but the database snapshot covers the **30-second read-only Following warmup plus the 60-second mixed measurement**. The API histogram covers only the measured 60 seconds. In addition, MySQL histogram counts differed from statement counts by 1/0/2 for SQL-only and 5/8/6 for Hybrid; the observed histogram P95 is diagnostic, and strict per-statement P95 is available only for SQL-only round 2. These windows and count gaps prevent attributing the mixed-load API tail to a specific network or driver delay.
+
+The compact [interpolated row-timing report](benchmarks/feed-a04-row-timing-interpolated-2026-11-04.json) retains all six rounds and these limitations; raw logs and profiles remain in [artifact 13292264553](https://github.com/liuzhouquan/GoStream/actions/runs/41764641949/artifacts/13292264553). The two A04 runs used different interpolation settings and schedules, so compare each mode pair within its run; their absolute P95 values are not a controlled before/after comparison. Keep SQL-only as the default.
+
+The A04 runner now executes the 30-second read-only warmup as a separate phase, snapshots Performance Schema after warmup, then snapshots again after the 60-second mixed load. The report retains combined, warmup-only, and measured-only digest deltas; API CPU/RSS and request histograms now cover the measured phase. Go tests, all 27 A04 helper tests, `go vet ./...`, Python compilation, and JSON/diff checks pass locally. The next full-size run must confirm the phase boundaries and whether the measured-only candidate digest explains the API tail; no new MySQL validation has been run for this runner change yet.
 
 ## Remaining measurements
 

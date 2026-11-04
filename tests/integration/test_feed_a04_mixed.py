@@ -6,6 +6,7 @@ import sys
 import tempfile
 import threading
 import unittest
+from unittest import mock
 
 import feed_a04_mixed
 
@@ -355,6 +356,72 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
         self.assertIn("performance_schema_query_failed; stage=digest_histogram_query", rendered)
         self.assertIn("SELECT * FROM videos WHERE id = ?", rendered)
 
+    def test_summary_retains_warmup_and_measured_digest_windows(self):
+        reports = []
+        for variant, values in (("sql-only", (1000, 1100, 900)), ("hybrid", (750, 800, 700))):
+            for round_number, value in enumerate(values, 1):
+                report = run(variant, round_number, value)
+                report["database_statement_diagnostics_warmup"] = {
+                    "available": True,
+                    "window": "30s following warmup",
+                    "statement_count": 11,
+                }
+                report["database_statement_diagnostics_measured"] = {
+                    "available": True,
+                    "window": "60s mixed workload",
+                    "statement_count": 7,
+                }
+                reports.append(report)
+
+        summary = feed_a04_mixed.summarize(reports, 0.20)
+
+        self.assertEqual(
+            summary["database_statement_diagnostics_warmup"]["sql_only"][0]["statement_count"],
+            11,
+        )
+        self.assertEqual(
+            summary["database_statement_diagnostics_measured"]["hybrid"][2]["window"],
+            "60s mixed workload",
+        )
+        rendered = feed_a04_mixed.format_summary(summary)
+        self.assertIn("Performance Schema warmup-only statement digests", rendered)
+        self.assertIn("Performance Schema measured-only statement digests", rendered)
+        self.assertTrue(summary["target_met"], "phase diagnostics must not alter the P95 acceptance gate")
+
+    def test_warmup_driver_runs_without_measurement_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            log_path = root / "warmup.log"
+            report_path = root / "warmup.json"
+            completed = subprocess.CompletedProcess(
+                args=[],
+                returncode=0,
+                stdout="read-only warmup completed requests=123 duration=30s\n",
+                stderr="",
+            )
+            with mock.patch.object(feed_a04_mixed.subprocess, "run", return_value=completed) as run_process:
+                report, _ = feed_a04_mixed.run_mixed_driver(
+                    "mixed-driver",
+                    "http://127.0.0.1:8080",
+                    root / "tokens.txt",
+                    [1],
+                    [2],
+                    report_path,
+                    log_path,
+                    0,
+                    warmup_seconds=30,
+                    duration_seconds=0,
+                    warmup_only=True,
+                )
+
+            command = run_process.call_args.args[0]
+            self.assertIn("-warmup-only", command)
+            self.assertNotIn("-report-file", command)
+            self.assertEqual(command[command.index("-duration") + 1], "0s")
+            self.assertEqual(report, {"successes": 123, "duration_seconds": 30})
+            self.assertFalse(report_path.exists())
+            self.assertIn("requests=123", log_path.read_text())
+
     def test_prepared_statement_event_snapshot_and_delta_include_execute_command(self):
         before = feed_a04_mixed.parse_account_statement_event_snapshot([
             ["statement/com/Execute", "5", "1000000000", "0", "0", "0", "0", "0"],
@@ -422,12 +489,15 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
             },
         }
 
-        report = feed_a04_mixed.performance_schema_statement_delta(before, after)
+        report = feed_a04_mixed.performance_schema_statement_delta(
+            before, after, "60s measured mixed workload"
+        )
 
         self.assertFalse(report["available"])
         self.assertEqual(report["reason"], "statement_digest_consumer_disabled")
         self.assertTrue(report["prepared_statement_diagnostics"]["available"])
         self.assertEqual(report["prepared_statement_diagnostics"]["prepared_execute_count"], 2)
+        self.assertEqual(report["window"], "60s measured mixed workload")
 
     def test_summary_retains_prepared_statement_diagnostics_without_changing_acceptance_gate(self):
         reports = []
