@@ -5,6 +5,11 @@ import feed_a04_mixed
 
 
 class FeedA04StatementDigestTests(unittest.TestCase):
+    def test_wait_event_snapshot_accepts_mysql_idle_event(self):
+        snapshot = feed_a04_mixed.parse_account_wait_event_snapshot([["idle", "3", "0"]])
+
+        self.assertEqual(snapshot["idle"], {"count_star": 3, "sum_timer_wait_ps": 0})
+
     def test_wait_event_snapshot_parses_account_wait_counters(self):
         snapshot = feed_a04_mixed.parse_account_wait_event_snapshot(
             [
@@ -35,16 +40,22 @@ class FeedA04StatementDigestTests(unittest.TestCase):
         before = {
             "wait/io/file/innodb/data": {"count_star": 2, "sum_timer_wait_ps": 100_000_000},
             "wait/synch/mutex/innodb/buf_pool": {"count_star": 1, "sum_timer_wait_ps": 200_000_000},
+            "idle": {"count_star": 2, "sum_timer_wait_ps": 10_000_000_000},
         }
         after = {
             "wait/io/file/innodb/data": {"count_star": 5, "sum_timer_wait_ps": 2_100_000_000},
             "wait/synch/mutex/innodb/buf_pool": {"count_star": 3, "sum_timer_wait_ps": 700_000_000},
+            "idle": {"count_star": 5, "sum_timer_wait_ps": 510_000_000_000},
         }
 
         report = feed_a04_mixed.account_wait_event_delta(before, after, "gostream")
 
         self.assertEqual(report["event_count_total"], 5)
         self.assertEqual(report["sum_timer_wait_ms"], 2.5)
+        self.assertEqual(report["all_event_count_total"], 8)
+        self.assertEqual(report["all_sum_timer_wait_ms"], 502.5)
+        self.assertEqual(report["idle_connection_event"]["count"], 3)
+        self.assertEqual(report["idle_connection_event"]["sum_timer_wait_ms"], 500.0)
         self.assertEqual(report["events"][0], {
             "event_name": "wait/io/file/innodb/data",
             "count": 3,

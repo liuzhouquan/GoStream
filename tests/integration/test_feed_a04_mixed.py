@@ -375,6 +375,7 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
                     "available": True,
                     "window": "60s measured mixed workload",
                     "event_count_total": 9,
+                    "all_event_count_total": 12,
                     "events": [
                         {
                             "event_name": "wait/io/file/innodb/innodb_data_file",
@@ -383,6 +384,12 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
                             "mean_timer_wait_ms": 12.5 / 9,
                         }
                     ],
+                    "idle_connection_event": {
+                        "event_name": "idle",
+                        "count": 3,
+                        "sum_timer_wait_ms": 500.0,
+                        "mean_timer_wait_ms": 500.0 / 3,
+                    },
                 }
                 reports.append(report)
 
@@ -405,6 +412,7 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
         self.assertIn("Performance Schema measured-only statement digests", rendered)
         self.assertIn("Performance Schema account waits (measured-only)", rendered)
         self.assertIn("wait/io/file/innodb/innodb_data_file", rendered)
+        self.assertIn("idle connection (separate; excluded from ranked waits)", rendered)
         self.assertTrue(summary["target_met"], "phase diagnostics must not alter the P95 acceptance gate")
 
     def test_warmup_driver_runs_without_measurement_report(self):
