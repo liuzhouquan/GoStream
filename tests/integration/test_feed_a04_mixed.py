@@ -1,4 +1,5 @@
 import http.server
+import json
 import pathlib
 import signal
 import subprocess
@@ -84,6 +85,178 @@ def run(variant, round_number, following_p95_ns, publish_p95_ns=3_000_000, fanou
 
 
 class FeedA04MixedHelpersTest(unittest.TestCase):
+    def test_following_query_plan_capture_records_optional_plan_without_gating(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "following-plan-hybrid.json"
+
+            def capture_plan(command, **kwargs):
+                self.assertIn("^TestA04FollowingQueryPlanDiagnostic$", command)
+                self.assertEqual(kwargs["timeout"], 90)
+                pathlib.Path(kwargs["env"]["GOSTREAM_A04_PLAN_OUTPUT"]).write_text(
+                    '{"mode":"hybrid","plan":{"query_block":{}}}'
+                )
+                return subprocess.CompletedProcess(command, 0, stdout="PASS\n", stderr="")
+
+            with mock.patch.object(feed_a04_mixed.subprocess, "run", side_effect=capture_plan):
+                result = feed_a04_mixed.capture_following_query_plan(
+                    go_bin="/usr/local/go/bin/go",
+                    dsn="gostream:secret@tcp(127.0.0.1:3306)/fixture",
+                    viewer_id=500,
+                    mode="hybrid",
+                    round_number=1,
+                    output_path=output,
+                )
+
+            self.assertTrue(result["available"])
+            self.assertEqual(result["mode"], "hybrid")
+            self.assertEqual(result["output_file"], output.name)
+            self.assertEqual(result["viewer_id"], 500)
+
+    def test_following_query_plan_capture_can_include_execution_analysis(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "following-plan-hybrid-diagnostic.json"
+
+            def capture_plan(command, **kwargs):
+                self.assertEqual(kwargs["env"]["GOSTREAM_A04_PLAN_ANALYZE"], "true")
+                pathlib.Path(kwargs["env"]["GOSTREAM_A04_PLAN_OUTPUT"]).write_text(
+                    json.dumps(
+                        {
+                            "mode": "hybrid",
+                            "plan": {"query_block": {}},
+                            "analyze_tree": "-> Limit: 21 row(s) (actual time=0.10..0.20 rows=20 loops=1)",
+                        }
+                    )
+                )
+                return subprocess.CompletedProcess(command, 0, stdout="PASS\\n", stderr="")
+
+            with mock.patch.object(feed_a04_mixed.subprocess, "run", side_effect=capture_plan):
+                result = feed_a04_mixed.capture_following_query_plan(
+                    go_bin="/usr/local/go/bin/go",
+                    dsn="gostream:secret@tcp(127.0.0.1:3306)/fixture",
+                    viewer_id=500,
+                    mode="hybrid",
+                    round_number=4,
+                    output_path=output,
+                    analyze=True,
+                )
+
+            self.assertTrue(result["available"])
+            self.assertTrue(result["analyze_available"])
+            self.assertEqual(result["analyze_output_file"], output.name)
+
+    def test_following_query_analysis_failure_does_not_hide_estimated_plan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "following-plan-sql-only-diagnostic.json"
+
+            def capture_plan(command, **kwargs):
+                pathlib.Path(kwargs["env"]["GOSTREAM_A04_PLAN_OUTPUT"]).write_text(
+                    json.dumps(
+                        {
+                            "mode": "sql-only",
+                            "plan": {"query_block": {}},
+                            "analyze_error": "EXPLAIN ANALYZE unavailable",
+                        }
+                    )
+                )
+                return subprocess.CompletedProcess(command, 0, stdout="PASS\\n", stderr="")
+
+            with mock.patch.object(feed_a04_mixed.subprocess, "run", side_effect=capture_plan):
+                result = feed_a04_mixed.capture_following_query_plan(
+                    go_bin="go",
+                    dsn="gostream:secret@tcp(127.0.0.1:3306)/fixture",
+                    viewer_id=500,
+                    mode="sql-only",
+                    round_number=4,
+                    output_path=output,
+                    analyze=True,
+                )
+
+            self.assertTrue(result["available"])
+            self.assertFalse(result["analyze_available"])
+            self.assertEqual(result["analyze_reason"], "EXPLAIN ANALYZE unavailable")
+
+    def test_following_query_plan_capture_failure_is_best_effort(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "following-plan-sql-only.json"
+            completed = subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr="query plan failed")
+            with mock.patch.object(feed_a04_mixed.subprocess, "run", return_value=completed):
+                result = feed_a04_mixed.capture_following_query_plan(
+                    go_bin="go",
+                    dsn="gostream:secret@tcp(127.0.0.1:3306)/fixture",
+                    viewer_id=500,
+                    mode="sql-only",
+                    round_number=1,
+                    output_path=output,
+                )
+
+            self.assertFalse(result["available"])
+            self.assertEqual(result["reason"], "diagnostic_test_failed")
+            self.assertFalse(output.exists())
+
+    def test_query_plan_diagnostics_do_not_change_acceptance_result(self):
+        reports = []
+        for round_number in range(1, 4):
+            sql_report = run("sql-only", round_number, 100_000_000)
+            hybrid_report = run("hybrid", round_number, 70_000_000)
+            if round_number == 1:
+                sql_report["following_query_plan_diagnostic"] = {
+                    "available": True,
+                    "mode": "sql-only",
+                    "output_file": "following-plan-sql-only.json",
+                }
+                hybrid_report["following_query_plan_diagnostic"] = {
+                    "available": True,
+                    "mode": "hybrid",
+                    "output_file": "following-plan-hybrid.json",
+                }
+            reports.extend((sql_report, hybrid_report))
+
+        summary = feed_a04_mixed.summarize(reports, 0.20)
+        rendered = feed_a04_mixed.format_summary(summary)
+
+        self.assertTrue(summary["target_met"])
+        self.assertTrue(summary["following_query_plan_diagnostics"]["hybrid"][0]["available"])
+        self.assertIn("following-plan-hybrid.json", rendered)
+
+    def test_query_analyze_diagnostics_are_reported_without_changing_acceptance_gate(self):
+        reports = []
+        for round_number in range(1, 4):
+            reports.extend(
+                (
+                    run("sql-only", round_number, 100_000_000),
+                    run("hybrid", round_number, 70_000_000),
+                )
+            )
+        summary = feed_a04_mixed.summarize(reports, 0.20)
+        summary["following_query_analyze_diagnostics"] = {
+            "sql-only": [
+                {
+                    "round": 4,
+                    "diagnostic": {
+                        "available": True,
+                        "analyze_available": True,
+                        "output_file": "following-plan-sql-only-diagnostic.json",
+                    },
+                }
+            ],
+            "hybrid": [
+                {
+                    "round": 4,
+                    "diagnostic": {
+                        "available": True,
+                        "analyze_available": False,
+                        "analyze_reason": "explain analyze rejected",
+                    },
+                }
+            ],
+        }
+
+        rendered = feed_a04_mixed.format_summary(summary)
+
+        self.assertTrue(summary["target_met"])
+        self.assertIn("SQL-only r4 following-plan-sql-only-diagnostic.json", rendered)
+        self.assertIn("Hybrid r4 unavailable (explain analyze rejected)", rendered)
+
     def test_mysql_dsn_interpolation_is_opt_in(self):
         prefix = "gostream:gostream-ci-only@tcp(127.0.0.1:3306)/"
         self.assertEqual(

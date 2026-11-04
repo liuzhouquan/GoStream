@@ -44,7 +44,7 @@
     "api_latency_histogram_window": "60s measured mixed workload"
   },
   "wait_diagnostics": {
-    "full_size_run_available": false,
+    "full_size_run_available": true,
     "parser_error": "unexpected account wait event class",
     "cause": "The MySQL 8.4.13 account wait summary includes the special EVENT_NAME idle, which the initial parser incorrectly rejected because it required a wait/ prefix.",
     "fix": "The parser now accepts idle and reports its connection-idle count and timer separately from ranked wait events.",
@@ -54,8 +54,220 @@
       "idle_event_count_observed": 3,
       "ranked_wait_event_count_observed": 0
     },
-    "full_size_post_fix_validation": "pending",
-    "p95_root_cause": "unconfirmed"
+    "full_size_post_fix_validation": {
+      "workflow_run_id": 41784966658,
+      "workflow_url": "https://github.com/liuzhouquan/GoStream/actions/runs/41784966658",
+      "artifact_id": 13301891599,
+      "commit": "e6d58912d8698a6e5e204b6b8f3b78af9e6dd893",
+      "duration_seconds": 1110,
+      "wait_snapshots_available": "6/6",
+      "acceptance": {
+        "sql_only_median_following_p95_ms": 27.114985,
+        "hybrid_median_following_p95_ms": 39.578409,
+        "hybrid_p95_improvement_percent": -45.97,
+        "required_improvement_percent": 20.0,
+        "target_met": false,
+        "mixed_requests_succeeded": 89229,
+        "mixed_request_failures": 0,
+        "video_publishes_succeeded": 120,
+        "consistency_checks_passed": true,
+        "db_pool_waits": 0,
+        "maximum_hybrid_fanout_drain_seconds": 0.05
+      },
+      "schedule": [
+        {
+          "mode": "sql-only",
+          "round": 1
+        },
+        {
+          "mode": "hybrid",
+          "round": 1
+        },
+        {
+          "mode": "hybrid",
+          "round": 2
+        },
+        {
+          "mode": "sql-only",
+          "round": 2
+        },
+        {
+          "mode": "hybrid",
+          "round": 3
+        },
+        {
+          "mode": "sql-only",
+          "round": 3
+        }
+      ],
+      "rounds": [
+        {
+          "mode": "sql-only",
+          "round": 1,
+          "mixed_requests_succeeded": 14395,
+          "mixed_request_failures": 0,
+          "client_following_p95_ms": 28.134119,
+          "api_candidate_sql_p95_bucket_ms": [
+            10.0,
+            25.0
+          ],
+          "mysql_candidate_mean_ms": 9.917441,
+          "mysql_candidate_observed_p95_bucket_ms": [
+            19.054607,
+            19.952623
+          ],
+          "mysql_histogram_count_difference": 1,
+          "wait_snapshot_available": true,
+          "idle_connection_event": {
+            "count": 66519,
+            "wait_ms": 228061.037
+          },
+          "top_wait_events_ms": {
+            "wait/io/table/sql/handler": 1260893.816,
+            "wait/io/file/sql/io_cache": 8121.297,
+            "wait/io/file/sql/binlog": 3861.191
+          }
+        },
+        {
+          "mode": "sql-only",
+          "round": 2,
+          "mixed_requests_succeeded": 15085,
+          "mixed_request_failures": 0,
+          "client_following_p95_ms": 27.114985,
+          "api_candidate_sql_p95_bucket_ms": [
+            10.0,
+            25.0
+          ],
+          "mysql_candidate_mean_ms": 9.068089,
+          "mysql_candidate_observed_p95_bucket_ms": [
+            18.197009,
+            19.054607
+          ],
+          "mysql_histogram_count_difference": 0,
+          "wait_snapshot_available": true,
+          "idle_connection_event": {
+            "count": 69719,
+            "wait_ms": 228968.618
+          },
+          "top_wait_events_ms": {
+            "wait/io/table/sql/handler": 1262315.869,
+            "wait/io/file/sql/io_cache": 8149.825,
+            "wait/io/file/sql/binlog": 4022.929
+          }
+        },
+        {
+          "mode": "sql-only",
+          "round": 3,
+          "mixed_requests_succeeded": 15200,
+          "mixed_request_failures": 0,
+          "client_following_p95_ms": 27.003592,
+          "api_candidate_sql_p95_bucket_ms": [
+            10.0,
+            25.0
+          ],
+          "mysql_candidate_mean_ms": 8.850244,
+          "mysql_candidate_observed_p95_bucket_ms": [
+            18.197009,
+            19.054607
+          ],
+          "mysql_histogram_count_difference": 0,
+          "wait_snapshot_available": true,
+          "idle_connection_event": {
+            "count": 70301,
+            "wait_ms": 228409.211
+          },
+          "top_wait_events_ms": {
+            "wait/io/table/sql/handler": 1269865.332,
+            "wait/io/file/sql/io_cache": 7763.064,
+            "wait/io/file/sql/binlog": 4058.295
+          }
+        },
+        {
+          "mode": "hybrid",
+          "round": 1,
+          "mixed_requests_succeeded": 14248,
+          "mixed_request_failures": 0,
+          "client_following_p95_ms": 42.165141,
+          "api_candidate_sql_p95_bucket_ms": [
+            25.0,
+            40.0
+          ],
+          "mysql_candidate_mean_ms": 9.164966,
+          "mysql_candidate_observed_p95_bucket_ms": [
+            31.622777,
+            33.113112
+          ],
+          "mysql_histogram_count_difference": 1,
+          "wait_snapshot_available": true,
+          "idle_connection_event": {
+            "count": 65905,
+            "wait_ms": 226355.946
+          },
+          "top_wait_events_ms": {
+            "wait/io/table/sql/handler": 1262896.742,
+            "wait/io/file/sql/io_cache": 8216.899,
+            "wait/io/file/sql/binlog": 4098.434
+          }
+        },
+        {
+          "mode": "hybrid",
+          "round": 2,
+          "mixed_requests_succeeded": 15228,
+          "mixed_request_failures": 0,
+          "client_following_p95_ms": 36.572095,
+          "api_candidate_sql_p95_bucket_ms": [
+            25.0,
+            40.0
+          ],
+          "mysql_candidate_mean_ms": 7.436403,
+          "mysql_candidate_observed_p95_bucket_ms": [
+            27.542287,
+            28.840315
+          ],
+          "mysql_histogram_count_difference": 0,
+          "wait_snapshot_available": true,
+          "idle_connection_event": {
+            "count": 70417,
+            "wait_ms": 231224.957
+          },
+          "top_wait_events_ms": {
+            "wait/io/table/sql/handler": 1270560.684,
+            "wait/io/file/sql/io_cache": 7928.249,
+            "wait/io/file/sql/binlog": 4052.325
+          }
+        },
+        {
+          "mode": "hybrid",
+          "round": 3,
+          "mixed_requests_succeeded": 15073,
+          "mixed_request_failures": 0,
+          "client_following_p95_ms": 39.578409,
+          "api_candidate_sql_p95_bucket_ms": [
+            25.0,
+            40.0
+          ],
+          "mysql_candidate_mean_ms": 8.025216,
+          "mysql_candidate_observed_p95_bucket_ms": [
+            30.199517,
+            31.622777
+          ],
+          "mysql_histogram_count_difference": 0,
+          "wait_snapshot_available": true,
+          "idle_connection_event": {
+            "count": 69735,
+            "wait_ms": 233612.845
+          },
+          "top_wait_events_ms": {
+            "wait/io/table/sql/handler": 1265640.448,
+            "wait/io/file/sql/io_cache": 8312.49,
+            "wait/io/file/sql/binlog": 4169.391
+          }
+        }
+      ],
+      "wait_scope_limit": "Account/user aggregate across all MySQL statements; not correlated to a SQL digest.",
+      "p95_root_cause": "unconfirmed; measured candidate-digest P95 is higher for Hybrid in all three rounds, but the branch-level query plan has not yet been captured."
+    },
+    "p95_root_cause": "unconfirmed; the measured candidate-statement histogram points to higher Hybrid server-side tail latency, while branch-level plan evidence is pending."
   },
   "rounds": [
     {
@@ -190,5 +402,198 @@
         "error": "AcceptanceError: unexpected account wait event class"
       }
     }
-  ]
+  ],
+  "post_fix_run": {
+    "workflow_run_id": 41784966658,
+    "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41784966658",
+    "artifact_id": 13301891599,
+    "commit": "e6d58912d8698a6e5e204b6b8f3b78af9e6dd893",
+    "conclusion": "failed: client-P95 performance gate only; all functional consistency checks passed",
+    "duration_seconds": 1110,
+    "measured_wait_diagnostics_available": true,
+    "acceptance": {
+      "sql_only_median_following_p95_ms": 27.114985,
+      "hybrid_median_following_p95_ms": 39.578409,
+      "hybrid_p95_improvement_percent": -45.97,
+      "required_improvement_percent": 20.0,
+      "target_met": false,
+      "mixed_requests_succeeded": 89229,
+      "mixed_request_failures": 0,
+      "video_publishes_succeeded": 120,
+      "consistency_checks_passed": true,
+      "db_pool_waits": 0,
+      "maximum_hybrid_fanout_drain_seconds": 0.05
+    },
+    "rounds": [
+      {
+        "mode": "sql-only",
+        "round": 1,
+        "mixed_requests_succeeded": 14395,
+        "mixed_request_failures": 0,
+        "client_following_p95_ms": 28.134119,
+        "api_candidate_sql_p95_bucket_ms": [
+          10.0,
+          25.0
+        ],
+        "mysql_candidate_mean_ms": 9.917441,
+        "mysql_histogram_count_difference": 1,
+        "wait_snapshot_available": true,
+        "idle_connection_event": {
+          "count": 66519,
+          "wait_ms": 228061.037
+        },
+        "top_wait_events_ms": {
+          "wait/io/table/sql/handler": 1260893.816,
+          "wait/io/file/sql/io_cache": 8121.297,
+          "wait/io/file/sql/binlog": 3861.191
+        },
+        "mysql_candidate_p95_bucket_ms": [
+          19.054607,
+          19.952623
+        ],
+        "mysql_candidate_p95_strict": false
+      },
+      {
+        "mode": "sql-only",
+        "round": 2,
+        "mixed_requests_succeeded": 15085,
+        "mixed_request_failures": 0,
+        "client_following_p95_ms": 27.114985,
+        "api_candidate_sql_p95_bucket_ms": [
+          10.0,
+          25.0
+        ],
+        "mysql_candidate_mean_ms": 9.068089,
+        "mysql_histogram_count_difference": 0,
+        "wait_snapshot_available": true,
+        "idle_connection_event": {
+          "count": 69719,
+          "wait_ms": 228968.618
+        },
+        "top_wait_events_ms": {
+          "wait/io/table/sql/handler": 1262315.869,
+          "wait/io/file/sql/io_cache": 8149.825,
+          "wait/io/file/sql/binlog": 4022.929
+        },
+        "mysql_candidate_p95_bucket_ms": [
+          18.197009,
+          19.054607
+        ],
+        "mysql_candidate_p95_strict": true
+      },
+      {
+        "mode": "sql-only",
+        "round": 3,
+        "mixed_requests_succeeded": 15200,
+        "mixed_request_failures": 0,
+        "client_following_p95_ms": 27.003592,
+        "api_candidate_sql_p95_bucket_ms": [
+          10.0,
+          25.0
+        ],
+        "mysql_candidate_mean_ms": 8.850244,
+        "mysql_histogram_count_difference": 0,
+        "wait_snapshot_available": true,
+        "idle_connection_event": {
+          "count": 70301,
+          "wait_ms": 228409.211
+        },
+        "top_wait_events_ms": {
+          "wait/io/table/sql/handler": 1269865.332,
+          "wait/io/file/sql/io_cache": 7763.064,
+          "wait/io/file/sql/binlog": 4058.295
+        },
+        "mysql_candidate_p95_bucket_ms": [
+          18.197009,
+          19.054607
+        ],
+        "mysql_candidate_p95_strict": true
+      },
+      {
+        "mode": "hybrid",
+        "round": 1,
+        "mixed_requests_succeeded": 14248,
+        "mixed_request_failures": 0,
+        "client_following_p95_ms": 42.165141,
+        "api_candidate_sql_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "mysql_candidate_mean_ms": 9.164966,
+        "mysql_histogram_count_difference": 1,
+        "wait_snapshot_available": true,
+        "idle_connection_event": {
+          "count": 65905,
+          "wait_ms": 226355.946
+        },
+        "top_wait_events_ms": {
+          "wait/io/table/sql/handler": 1262896.742,
+          "wait/io/file/sql/io_cache": 8216.899,
+          "wait/io/file/sql/binlog": 4098.434
+        },
+        "mysql_candidate_p95_bucket_ms": [
+          31.622777,
+          33.113112
+        ],
+        "mysql_candidate_p95_strict": false
+      },
+      {
+        "mode": "hybrid",
+        "round": 2,
+        "mixed_requests_succeeded": 15228,
+        "mixed_request_failures": 0,
+        "client_following_p95_ms": 36.572095,
+        "api_candidate_sql_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "mysql_candidate_mean_ms": 7.436403,
+        "mysql_histogram_count_difference": 0,
+        "wait_snapshot_available": true,
+        "idle_connection_event": {
+          "count": 70417,
+          "wait_ms": 231224.957
+        },
+        "top_wait_events_ms": {
+          "wait/io/table/sql/handler": 1270560.684,
+          "wait/io/file/sql/io_cache": 7928.249,
+          "wait/io/file/sql/binlog": 4052.325
+        },
+        "mysql_candidate_p95_bucket_ms": [
+          27.542287,
+          28.840315
+        ],
+        "mysql_candidate_p95_strict": true
+      },
+      {
+        "mode": "hybrid",
+        "round": 3,
+        "mixed_requests_succeeded": 15073,
+        "mixed_request_failures": 0,
+        "client_following_p95_ms": 39.578409,
+        "api_candidate_sql_p95_bucket_ms": [
+          25.0,
+          40.0
+        ],
+        "mysql_candidate_mean_ms": 8.025216,
+        "mysql_histogram_count_difference": 0,
+        "wait_snapshot_available": true,
+        "idle_connection_event": {
+          "count": 69735,
+          "wait_ms": 233612.845
+        },
+        "top_wait_events_ms": {
+          "wait/io/table/sql/handler": 1265640.448,
+          "wait/io/file/sql/io_cache": 8312.49,
+          "wait/io/file/sql/binlog": 4169.391
+        },
+        "mysql_candidate_p95_bucket_ms": [
+          30.199517,
+          31.622777
+        ],
+        "mysql_candidate_p95_strict": true
+      }
+    ],
+    "plan_capture": "not yet run; an opt-in capture from the production GORM query builder is being added to the next A04 run."
+  }
 }
