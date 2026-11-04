@@ -1187,6 +1187,9 @@ func TestFeedStageMetricsExposeBoundedStagesAndErrors(t *testing.T) {
 	for _, marker := range []string{
 		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="candidate_query"} 1`,
 		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="candidate_sql"} 1`,
+		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="candidate_query_start"} 1`,
+		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="candidate_row_next"} 1`,
+		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="candidate_row_scan"} 1`,
 		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="author_preload"} 1`,
 		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="following",stage="interaction_state"} 1`,
 		`gostream_feed_stage_duration_seconds_count{outcome="success",scene="recommend",stage="recommendation_context"} 1`,
@@ -1224,6 +1227,9 @@ func TestFeedStageMetricsExposeBoundedStagesAndErrors(t *testing.T) {
 	}
 	if !strings.Contains(metrics.Body.String(), `gostream_feed_stage_duration_seconds_count{outcome="error",scene="following",stage="candidate_sql"} 1`) {
 		t.Fatalf("Feed candidate SQL error stage was not recorded: %s", metrics.Body.String())
+	}
+	if !strings.Contains(metrics.Body.String(), `gostream_feed_stage_duration_seconds_count{outcome="error",scene="following",stage="candidate_query_start"} 1`) {
+		t.Fatalf("Feed candidate query-start error stage was not recorded: %s", metrics.Body.String())
 	}
 }
 

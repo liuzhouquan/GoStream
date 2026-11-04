@@ -3,13 +3,23 @@ package platform
 import (
 	"context"
 	"strings"
-	"time"
+
+	"gorm.io/gorm"
 )
 
 // Each branch is capped at one page before the UNION. Completed fanout jobs
 // leave the ordinary pull index, while a separate indexed range keeps videos
 // visible to followers who joined after publication.
-func (s *Server) followingVideos(ctx context.Context, viewerID uint, cursor feedCursor, limit int) ([]Video, error) {
+func followingCandidateQuery(db *gorm.DB, viewerID uint, cursor feedCursor, limit int, hybrid bool) *gorm.DB {
+	if !hybrid {
+		if cursor.ID > 0 {
+			cursorTime := cursor.createdTime()
+			db = db.Where("videos.created_at < ? OR (videos.created_at = ? AND videos.id < ?)", cursorTime, cursorTime, cursor.ID)
+		}
+		return db.Joins("JOIN follows ON follows.followee_id = videos.author_id AND follows.follower_id = ?", viewerID).
+			Order("videos.created_at DESC, videos.id DESC")
+	}
+
 	cursorTime := cursor.createdTime()
 	// Keep the three candidate sources disjoint: unfinished fanout stays in
 	// pull, completed fanout uses inbox rows, and late follows only fill gaps.
@@ -61,19 +71,7 @@ SELECT id, created_at FROM (
 ) AS push_page
 ) AS feed_page ON feed_page.id = videos.id`)
 	args = append(args, limit+1)
-	var videos []Video
-	queryStart := time.Now()
-	err := s.DB.WithContext(ctx).Model(&Video{}).
-		Joins(sql.String(), args...).Where("videos.status = ?", "published").
-		Order("feed_page.created_at DESC, feed_page.id DESC").Limit(limit + 1).Find(&videos).Error
-	s.metrics.observeFeedStage("following", "candidate_sql", queryStart, err)
-	if err != nil {
-		return nil, err
-	}
-	if videos == nil {
-		videos = []Video{}
-	}
-	return videos, nil
+	return db.Joins(sql.String(), args...).Order("feed_page.created_at DESC, feed_page.id DESC")
 }
 
 func (s *Server) preloadVideoAuthors(ctx context.Context, videos []Video) error {

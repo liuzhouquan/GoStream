@@ -380,7 +380,10 @@ func TestRunUsesActorPoolAndWritesRequestReport(t *testing.T) {
 			fmt.Fprintln(w, "# TYPE gostream_database_pool_max_idle_closed_total counter")
 			fmt.Fprintf(w, "gostream_database_pool_max_idle_closed_total %d\n", count/2)
 			fmt.Fprintln(w, "# TYPE gostream_feed_stage_duration_seconds histogram")
-			for _, stage := range []string{"candidate_query", "candidate_sql", "author_preload", "interaction_state"} {
+			for _, stage := range []string{
+				"candidate_query", "candidate_sql", "candidate_query_start", "candidate_row_next", "candidate_row_scan",
+				"author_preload", "interaction_state",
+			} {
 				fmt.Fprintf(w, "gostream_feed_stage_duration_seconds_bucket{scene=\"following\",stage=\"%s\",outcome=\"success\",le=\"0.05\"} %d\n", stage, count)
 				fmt.Fprintf(w, "gostream_feed_stage_duration_seconds_bucket{scene=\"following\",stage=\"%s\",outcome=\"success\",le=\"+Inf\"} %d\n", stage, count)
 				fmt.Fprintf(w, "gostream_feed_stage_duration_seconds_sum{scene=\"following\",stage=\"%s\",outcome=\"success\"} %.3f\n", stage, float64(count)*0.01)
@@ -429,8 +432,11 @@ func TestRunUsesActorPoolAndWritesRequestReport(t *testing.T) {
 	if report.ServerFollowing == nil || report.ServerFollowing.SampleCount == 0 || report.ServerFollowing.P95BucketUpperBoundSeconds == nil {
 		t.Fatalf("following server histogram missing from report: %+v", report.ServerFollowing)
 	}
-	if len(report.ServerFeedStages) != 4 || !hasFeedStageSamples(report.ServerFeedStages, "following", "candidate_query", "success") ||
+	if len(report.ServerFeedStages) != 7 || !hasFeedStageSamples(report.ServerFeedStages, "following", "candidate_query", "success") ||
 		!hasFeedStageSamples(report.ServerFeedStages, "following", "candidate_sql", "success") ||
+		!hasFeedStageSamples(report.ServerFeedStages, "following", "candidate_query_start", "success") ||
+		!hasFeedStageSamples(report.ServerFeedStages, "following", "candidate_row_next", "success") ||
+		!hasFeedStageSamples(report.ServerFeedStages, "following", "candidate_row_scan", "success") ||
 		!hasFeedStageSamples(report.ServerFeedStages, "following", "author_preload", "success") ||
 		!hasFeedStageSamples(report.ServerFeedStages, "following", "interaction_state", "success") {
 		t.Fatalf("following Feed stage histograms missing from report: %+v", report.ServerFeedStages)
