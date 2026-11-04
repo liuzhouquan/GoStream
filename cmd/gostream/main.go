@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -84,9 +83,9 @@ func main() {
 		}
 		defer server.CloseRabbitMQ()
 	}
-	fanoutMaxFollowers, err := strconv.Atoi(env("FEED_FANOUT_MAX_FOLLOWERS", "0"))
-	if err != nil || fanoutMaxFollowers < 0 || fanoutMaxFollowers > 100000 {
-		log.Fatal("FEED_FANOUT_MAX_FOLLOWERS must be an integer from 0 to 100000")
+	fanoutMaxFollowers, err := feedFanoutMaxFollowersFromEnv(os.Getenv)
+	if err != nil {
+		log.Fatal(err)
 	}
 	server.UseFeedFanout(fanoutMaxFollowers)
 	switch mediaStore := env("MEDIA_STORE", "local"); mediaStore {
