@@ -371,6 +371,19 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
                     "window": "60s mixed workload",
                     "statement_count": 7,
                 }
+                report["database_wait_diagnostics_measured"] = {
+                    "available": True,
+                    "window": "60s measured mixed workload",
+                    "event_count_total": 9,
+                    "events": [
+                        {
+                            "event_name": "wait/io/file/innodb/innodb_data_file",
+                            "count": 9,
+                            "sum_timer_wait_ms": 12.5,
+                            "mean_timer_wait_ms": 12.5 / 9,
+                        }
+                    ],
+                }
                 reports.append(report)
 
         summary = feed_a04_mixed.summarize(reports, 0.20)
@@ -383,9 +396,15 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
             summary["database_statement_diagnostics_measured"]["hybrid"][2]["window"],
             "60s mixed workload",
         )
+        self.assertEqual(
+            summary["database_wait_diagnostics_measured"]["hybrid"][2]["events"][0]["count"],
+            9,
+        )
         rendered = feed_a04_mixed.format_summary(summary)
         self.assertIn("Performance Schema warmup-only statement digests", rendered)
         self.assertIn("Performance Schema measured-only statement digests", rendered)
+        self.assertIn("Performance Schema account waits (measured-only)", rendered)
+        self.assertIn("wait/io/file/innodb/innodb_data_file", rendered)
         self.assertTrue(summary["target_met"], "phase diagnostics must not alter the P95 acceptance gate")
 
     def test_warmup_driver_runs_without_measurement_report(self):
