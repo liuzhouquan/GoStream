@@ -1,0 +1,194 @@
+{
+  "workflow": {
+    "run_id": 41779977239,
+    "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41779977239",
+    "commit": "ce7ebcfffa210244bfe16d05bd35b3c93fcb0d36",
+    "artifact_id": 13298974008,
+    "artifact_url": "https://github.com/liuzhouquan/GoStream/actions/runs/41779977239/artifacts/13298974008",
+    "conclusion": "failed: client-P95 performance gate only; consistency passed",
+    "started_at_utc": "2026-11-04T05:33:30Z",
+    "completed_at_utc": "2026-11-04T05:53:27Z",
+    "duration_seconds": 1197,
+    "interpolate_params": true
+  },
+  "environment": {
+    "go": "1.27.2",
+    "mysql": "8.4.13",
+    "runner_cpu_count": 4,
+    "innodb_buffer_pool_size_bytes": 134217728,
+    "fixture": {
+      "users": 2000,
+      "follows": 10999,
+      "videos": 20000,
+      "feed_inboxes": 1900000
+    },
+    "concurrency": 20,
+    "read_only_warmup_seconds": 30,
+    "measured_seconds_per_round": 60,
+    "runs_per_mode": 3
+  },
+  "acceptance": {
+    "sql_only_median_following_p95_ms": 46.361904,
+    "hybrid_median_following_p95_ms": 60.860424,
+    "hybrid_p95_improvement_percent": -31.27,
+    "required_improvement_percent": 20.0,
+    "target_met": false,
+    "mixed_requests_succeeded": 47459,
+    "mixed_request_failures": 0,
+    "video_publishes_succeeded": 120,
+    "publish_failures": 0,
+    "consistency_checks_passed": true,
+    "db_pool_waits": 0,
+    "maximum_hybrid_fanout_drain_seconds": 0.07350791399994705,
+    "schedule_seed": 41779977239,
+    "api_latency_histogram_window": "60s measured mixed workload"
+  },
+  "wait_diagnostics": {
+    "full_size_run_available": false,
+    "parser_error": "unexpected account wait event class",
+    "cause": "The MySQL 8.4.13 account wait summary includes the special EVENT_NAME idle, which the initial parser incorrectly rejected because it required a wait/ prefix.",
+    "fix": "The parser now accepts idle and reports its connection-idle count and timer separately from ranked wait events.",
+    "local_mysql_8_4_reproduction_after_fix": {
+      "account_user": "gostream",
+      "snapshot_available": true,
+      "idle_event_count_observed": 3,
+      "ranked_wait_event_count_observed": 0
+    },
+    "full_size_post_fix_validation": "pending",
+    "p95_root_cause": "unconfirmed"
+  },
+  "rounds": [
+    {
+      "mode": "hybrid",
+      "round": 1,
+      "following_requests": 3208,
+      "following_failures": 0,
+      "following_client_p95_ms": 60.860424,
+      "api_candidate_sql_p95_bucket_ms": [
+        50.0,
+        60.0
+      ],
+      "api_candidate_query_start_p95_bucket_ms": [
+        50.0,
+        60.0
+      ],
+      "publish_successes": 20,
+      "consistency_checks_passed": true,
+      "wait_diagnostic": {
+        "available": false,
+        "reason": "performance_schema_wait_query_failed",
+        "error": "AcceptanceError: unexpected account wait event class"
+      }
+    },
+    {
+      "mode": "sql-only",
+      "round": 1,
+      "following_requests": 3152,
+      "following_failures": 0,
+      "following_client_p95_ms": 46.361904,
+      "api_candidate_sql_p95_bucket_ms": [
+        25.0,
+        40.0
+      ],
+      "api_candidate_query_start_p95_bucket_ms": [
+        25.0,
+        40.0
+      ],
+      "publish_successes": 20,
+      "consistency_checks_passed": true,
+      "wait_diagnostic": {
+        "available": false,
+        "reason": "performance_schema_wait_query_failed",
+        "error": "AcceptanceError: unexpected account wait event class"
+      }
+    },
+    {
+      "mode": "hybrid",
+      "round": 2,
+      "following_requests": 3264,
+      "following_failures": 0,
+      "following_client_p95_ms": 26.086482,
+      "api_candidate_sql_p95_bucket_ms": [
+        10.0,
+        25.0
+      ],
+      "api_candidate_query_start_p95_bucket_ms": [
+        10.0,
+        25.0
+      ],
+      "publish_successes": 20,
+      "consistency_checks_passed": true,
+      "wait_diagnostic": {
+        "available": false,
+        "reason": "performance_schema_wait_query_failed",
+        "error": "AcceptanceError: unexpected account wait event class"
+      }
+    },
+    {
+      "mode": "sql-only",
+      "round": 2,
+      "following_requests": 3160,
+      "following_failures": 0,
+      "following_client_p95_ms": 45.964005,
+      "api_candidate_sql_p95_bucket_ms": [
+        25.0,
+        40.0
+      ],
+      "api_candidate_query_start_p95_bucket_ms": [
+        25.0,
+        40.0
+      ],
+      "publish_successes": 20,
+      "consistency_checks_passed": true,
+      "wait_diagnostic": {
+        "available": false,
+        "reason": "performance_schema_wait_query_failed",
+        "error": "AcceptanceError: unexpected account wait event class"
+      }
+    },
+    {
+      "mode": "sql-only",
+      "round": 3,
+      "following_requests": 3088,
+      "following_failures": 0,
+      "following_client_p95_ms": 48.52788,
+      "api_candidate_sql_p95_bucket_ms": [
+        25.0,
+        40.0
+      ],
+      "api_candidate_query_start_p95_bucket_ms": [
+        25.0,
+        40.0
+      ],
+      "publish_successes": 20,
+      "consistency_checks_passed": true,
+      "wait_diagnostic": {
+        "available": false,
+        "reason": "performance_schema_wait_query_failed",
+        "error": "AcceptanceError: unexpected account wait event class"
+      }
+    },
+    {
+      "mode": "hybrid",
+      "round": 3,
+      "following_requests": 3124,
+      "following_failures": 0,
+      "following_client_p95_ms": 73.604472,
+      "api_candidate_sql_p95_bucket_ms": [
+        60.0,
+        70.0
+      ],
+      "api_candidate_query_start_p95_bucket_ms": [
+        60.0,
+        70.0
+      ],
+      "publish_successes": 20,
+      "consistency_checks_passed": true,
+      "wait_diagnostic": {
+        "available": false,
+        "reason": "performance_schema_wait_query_failed",
+        "error": "AcceptanceError: unexpected account wait event class"
+      }
+    }
+  ]
+}

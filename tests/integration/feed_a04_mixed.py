@@ -281,16 +281,20 @@ def format_summary(summary: dict) -> str:
                 detail = f"; stage={failure_stage}" if failure_stage else ""
                 values.append(f"r{round_number} unavailable ({reason}{detail})")
                 continue
-            events = report.get("events", [])[:3]
-            if not events:
-                values.append(f"r{round_number} no instrumented waits captured")
-                continue
             rendered = []
-            for event in events:
+            for event in report.get("events", [])[:3]:
                 name = event["event_name"].replace("|", "\\|")
                 if len(name) > 84:
                     name = name[:81] + "..."
                 rendered.append(f"{name} (n={event['count']}, wait={event['sum_timer_wait_ms']:.3f}ms)")
+            if not rendered:
+                rendered.append("no instrumented wait events captured")
+            idle_event = report.get("idle_connection_event")
+            if idle_event:
+                rendered.append(
+                    "idle connection (separate; excluded from ranked waits) "
+                    f"(n={idle_event['count']}, wait={idle_event['sum_timer_wait_ms']:.3f}ms)"
+                )
             values.append(f"r{round_number} " + "; ".join(rendered))
         return ", ".join(values) if values else "unavailable"
 
@@ -578,7 +582,7 @@ def parse_account_wait_event_snapshot(rows: list[list[str]]) -> dict[str, dict[s
         event_name = row[0]
         if not event_name or event_name in events:
             raise AcceptanceError("duplicate account wait event name")
-        if not event_name.startswith("wait/"):
+        if event_name != "idle" and not event_name.startswith("wait/"):
             raise AcceptanceError("unexpected account wait event class")
         try:
             count_star, sum_timer_wait_ps = map(int, row[1:])
@@ -614,14 +618,19 @@ def account_wait_event_delta(before: dict, after: dict, account_user: str) -> di
             "mean_timer_wait_ms": timer_wait_ps / count / 1_000_000_000 if count else None,
         })
     deltas.sort(key=lambda item: (-item["sum_timer_wait_ms"], -item["count"], item["event_name"]))
+    idle_connection_event = next((item for item in deltas if item["event_name"] == "idle"), None)
+    wait_events = [item for item in deltas if item["event_name"] != "idle"]
     return {
         "available": True,
         "source": "performance_schema.events_waits_summary_by_account_by_event_name",
-        "scope": "account user aggregated across all instrumented wait events on the MySQL server",
+        "scope": "account user aggregated across all hosts; idle connection time is separate from ranked waits",
         "account_user": account_user,
-        "event_count_total": sum(item["count"] for item in deltas),
-        "sum_timer_wait_ms": sum(item["sum_timer_wait_ms"] for item in deltas),
-        "events": deltas[:50],
+        "event_count_total": sum(item["count"] for item in wait_events),
+        "sum_timer_wait_ms": sum(item["sum_timer_wait_ms"] for item in wait_events),
+        "all_event_count_total": sum(item["count"] for item in deltas),
+        "all_sum_timer_wait_ms": sum(item["sum_timer_wait_ms"] for item in deltas),
+        "idle_connection_event": idle_connection_event,
+        "events": wait_events[:50],
     }
 
 
