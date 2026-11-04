@@ -1,0 +1,165 @@
+{
+  "workflow": {
+    "run_id": 41796786318,
+    "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41796786318",
+    "commit": "528d233aa6123d52f2ddcab18c2e890837e42f80",
+    "artifact_id": 13306278469,
+    "artifact_url": "https://github.com/liuzhouquan/GoStream/actions/runs/41796786318/artifacts/13306278469",
+    "started_at_utc": "2026-11-04T08:05:05Z",
+    "completed_at_utc": "2026-11-04T08:25:08Z",
+    "duration_seconds": 1203,
+    "conclusion": "failed: client Following P95 target only; load and consistency checks passed",
+    "interpolate_params": true
+  },
+  "environment": {
+    "go": "1.27.2",
+    "mysql": "8.4.13",
+    "runner_cpu_count": 4,
+    "innodb_buffer_pool_size_bytes": 134217728,
+    "fixture": {
+      "users": 2000,
+      "follows": 10999,
+      "videos": 20000,
+      "feed_inboxes": 1900000
+    },
+    "concurrency": 20,
+    "read_only_warmup_seconds": 30,
+    "measured_seconds_per_round": 60,
+    "runs_per_mode": 3
+  },
+  "acceptance": {
+    "sql_only_median_following_p95_ms": 44.294695,
+    "hybrid_median_following_p95_ms": 64.295552,
+    "hybrid_p95_improvement_percent": -45.15,
+    "required_improvement_percent": 20.0,
+    "target_met": false,
+    "mixed_requests_succeeded": 50713,
+    "mixed_request_failures": 0,
+    "video_publishes_succeeded": 120,
+    "publish_failures": 0,
+    "consistency_checks_passed": true,
+    "db_pool_waits": 0,
+    "maximum_hybrid_fanout_drain_seconds": 0.074377155,
+    "api_latency_histogram_window": "60s measured mixed workload"
+  },
+  "rounds": [
+    {
+      "mode": "sql-only",
+      "round": 1,
+      "client_following_p95_ms": 43.854,
+      "api_candidate_query_start_p95_bucket_ms": [25.0, 40.0],
+      "mysql_candidate_mean_ms": 18.687,
+      "mysql_candidate_observed_p95_bucket_ms": [30.199517, 31.622777],
+      "mysql_candidate_statement_count": 3372,
+      "mysql_candidate_histogram_count_difference": 0,
+      "mysql_candidate_rows_examined": 3791523
+    },
+    {
+      "mode": "hybrid",
+      "round": 1,
+      "client_following_p95_ms": 64.296,
+      "api_candidate_query_start_p95_bucket_ms": [50.0, 60.0],
+      "mysql_candidate_mean_ms": 14.939,
+      "mysql_candidate_observed_p95_bucket_ms": [52.480746, 54.954087],
+      "mysql_candidate_statement_count": 3424,
+      "mysql_candidate_histogram_count_difference": 0,
+      "mysql_candidate_rows_examined": 287448
+    },
+    {
+      "mode": "hybrid",
+      "round": 2,
+      "client_following_p95_ms": 61.192,
+      "api_candidate_query_start_p95_bucket_ms": [50.0, 60.0],
+      "mysql_candidate_mean_ms": 15.004,
+      "mysql_candidate_observed_p95_bucket_ms": [50.118723, 52.480746],
+      "mysql_candidate_statement_count": 3432,
+      "mysql_candidate_histogram_count_difference": 0,
+      "mysql_candidate_rows_examined": 288288
+    },
+    {
+      "mode": "sql-only",
+      "round": 2,
+      "client_following_p95_ms": 45.210,
+      "api_candidate_query_start_p95_bucket_ms": [25.0, 40.0],
+      "mysql_candidate_mean_ms": 19.436,
+      "mysql_candidate_observed_p95_bucket_ms": [31.622777, 33.113112],
+      "mysql_candidate_statement_count": 3322,
+      "mysql_candidate_histogram_count_difference": 0,
+      "mysql_candidate_rows_examined": 3731178
+    },
+    {
+      "mode": "sql-only",
+      "round": 3,
+      "client_following_p95_ms": 44.295,
+      "api_candidate_query_start_p95_bucket_ms": [25.0, 40.0],
+      "mysql_candidate_mean_ms": 18.657,
+      "mysql_candidate_observed_p95_bucket_ms": [31.622777, 33.113112],
+      "mysql_candidate_statement_count": 3360,
+      "mysql_candidate_histogram_count_difference": 0,
+      "mysql_candidate_rows_examined": 3759714
+    },
+    {
+      "mode": "hybrid",
+      "round": 3,
+      "client_following_p95_ms": 65.772,
+      "api_candidate_query_start_p95_bucket_ms": [50.0, 60.0],
+      "mysql_candidate_mean_ms": 16.233,
+      "mysql_candidate_observed_p95_bucket_ms": [52.480746, 54.954087],
+      "mysql_candidate_statement_count": 3391,
+      "mysql_candidate_histogram_count_difference": 0,
+      "mysql_candidate_rows_examined": 284844
+    }
+  ],
+  "actual_plans": {
+    "capture_window": "One query per mode in separate round-4 profile fixtures after all six acceptance rounds, measured windows, publish verification, and consistency checks",
+    "source": "Production followingCandidateQuery; first page; limit 20 plus one row; viewer 501",
+    "sql_only": {
+      "actual_total_ms": 2.94,
+      "actual_rows_returned": 21,
+      "following_authors_actual_rows": 6,
+      "videos_index": "idx_video_author",
+      "videos_actual_rows_per_loop": 201,
+      "videos_loops": 6,
+      "videos_rows_before_order_limit": 1205,
+      "ordering": "Sort to 21 rows",
+      "captured_tree_file": "following-plan-sql-only-diagnostic.json"
+    },
+    "hybrid": {
+      "actual_total_ms": 29.2,
+      "actual_rows_returned": 21,
+      "union_actual_rows_before_outer_order": 42,
+      "branches": {
+        "pull_page": {
+          "actual_time_ms": [0.103, 0.105],
+          "actual_rows": 21,
+          "videos_index": "idx_video_feed_pull"
+        },
+        "late_follow_page": {
+          "actual_time_ms": [0.369, 0.371],
+          "actual_rows": 0
+        },
+        "push_page": {
+          "actual_time_ms": [28.6, 28.6],
+          "actual_rows_after_limit": 21,
+          "join_order": ["follows", "videos", "feed_inboxes"],
+          "follow_rows": 5,
+          "videos_index": "idx_video_author",
+          "videos_actual_rows_per_loop": 201,
+          "videos_loops": 5,
+          "video_rows_after_status_and_pull_filter": 804,
+          "feed_inbox_index": "ux_feed_inbox",
+          "feed_inbox_point_lookup_loops": 804,
+          "operation": "Sort inbox candidates to 21 rows"
+        }
+      },
+      "captured_tree_file": "following-plan-hybrid-diagnostic.json"
+    },
+    "candidate_push_index": ["user_id", "created_at DESC", "video_id DESC"],
+    "limits": [
+      "Actual plan times come from one out-of-band query per mode on separate full-size profile fixtures, not from each acceptance request.",
+      "The mixed-load candidate digest P95 and API stage buckets consistently place the acceptance tail in the candidate statement, but this diagnostic does not prove every request has identical operator timings.",
+      "No production query change has yet been made."
+    ]
+  },
+  "next_experiment": "Use the existing viewer-ordered feed_inboxes index as the Hybrid push_page driver while preserving status, current-follow, feed_pull, cursor, ordering, and limit semantics; validate correctness and rerun the unchanged full-size A04 gate."
+}
