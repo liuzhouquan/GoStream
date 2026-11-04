@@ -113,11 +113,15 @@ func newServerMetrics(db *sql.DB) *serverMetrics {
 }
 
 func (m *serverMetrics) observeFeedStage(scene, stage string, start time.Time, err error) {
+	m.observeFeedStageDuration(scene, stage, time.Since(start), err)
+}
+
+func (m *serverMetrics) observeFeedStageDuration(scene, stage string, duration time.Duration, err error) {
 	outcome := "success"
 	if err != nil {
 		outcome = "error"
 	}
-	m.feedStageDuration.WithLabelValues(scene, stage, outcome).Observe(time.Since(start).Seconds())
+	m.feedStageDuration.WithLabelValues(scene, stage, outcome).Observe(duration.Seconds())
 }
 
 func (m *serverMetrics) middleware() gin.HandlerFunc {

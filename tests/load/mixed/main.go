@@ -243,6 +243,7 @@ func parseFeedStageHistograms(exposition string) (map[feedStageHistogramKey]feed
 	validScenes := map[string]bool{"timeline": true, "following": true, "recommend": true, "hot": true}
 	validStages := map[string]bool{
 		"candidate_query": true, "candidate_sql": true, "author_preload": true,
+		"candidate_query_start": true, "candidate_row_next": true, "candidate_row_scan": true,
 		"interaction_state": true, "recommendation_context": true, "recommendation_cursor": true,
 	}
 	validOutcomes := map[string]bool{"success": true, "error": true}
@@ -624,6 +625,9 @@ func run(baseURL string, actors []actor, concurrency int, warmup, duration time.
 	}
 	if !hasFeedStageSamples(serverFeedStages, "following", "candidate_query", "success") ||
 		!hasFeedStageSamples(serverFeedStages, "following", "candidate_sql", "success") ||
+		!hasFeedStageSamples(serverFeedStages, "following", "candidate_query_start", "success") ||
+		!hasFeedStageSamples(serverFeedStages, "following", "candidate_row_next", "success") ||
+		!hasFeedStageSamples(serverFeedStages, "following", "candidate_row_scan", "success") ||
 		!hasFeedStageSamples(serverFeedStages, "following", "author_preload", "success") ||
 		!hasFeedStageSamples(serverFeedStages, "following", "interaction_state", "success") {
 		return fmt.Errorf("measurement did not contain successful following Feed candidate, author preload and interaction stages")

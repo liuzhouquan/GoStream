@@ -35,7 +35,15 @@ def run(variant, round_number, following_p95_ns, publish_p95_ns=3_000_000, fanou
                         "p95_bucket_upper_bound_seconds": 0.025,
                     },
                 }
-                for stage in ("candidate_query", "candidate_sql", "author_preload", "interaction_state")
+                for stage in (
+                    "candidate_query",
+                    "candidate_sql",
+                    "candidate_query_start",
+                    "candidate_row_next",
+                    "candidate_row_scan",
+                    "author_preload",
+                    "interaction_state",
+                )
             ],
             "operations": {
                 "feed_following": {"successes": 400, "failures": 0, "p95_ns": following_p95_ns},
@@ -310,6 +318,9 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
         rendered = feed_a04_mixed.format_summary(summary)
         self.assertIn("following candidate_query P95 bucket", rendered)
         self.assertIn("following candidate_sql P95 bucket", rendered)
+        self.assertIn("following candidate_query_start P95 bucket", rendered)
+        self.assertIn("following candidate_row_next P95 bucket", rendered)
+        self.assertIn("following candidate_row_scan P95 bucket", rendered)
         self.assertIn("following author_preload P95 bucket", rendered)
         self.assertIn("following interaction_state P95 bucket", rendered)
 
