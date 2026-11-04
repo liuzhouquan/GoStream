@@ -75,6 +75,8 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/API.md](docs/API.md), [d
 
 Performance and verification status is recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md). The full-size A04 mixed read/write acceptance passed its 20% Following P95 gate after an inbox-first MySQL join-order optimization: three-run median P95 improved 43% with zero request failures and all consistency checks passing. k6 and multi-host load testing remain pending.
 
+Long validation commands can use the [development timing monitor](docs/DEVELOPMENT_TIMING.md) to report active tests, command deadlines, and GitHub Actions step durations.
+
 ## License
 
 GoStream is licensed under the MIT License; see [LICENSE](LICENSE).

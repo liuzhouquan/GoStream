@@ -31,6 +31,9 @@ jobs:
           echo "required=$required actual=$actual"
           test "$actual" = "$required"
 
+      - name: Test development timing helpers
+        run: python3 -m unittest discover -s tests/diagnostics -p 'test_*.py' -v
+
       - name: Go tests
         run: go test ./...
 

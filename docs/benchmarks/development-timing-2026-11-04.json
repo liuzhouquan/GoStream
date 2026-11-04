@@ -1,0 +1,829 @@
+{
+  "date": "2026-11-04",
+  "scope": "GoStream development workflow latency; not application API performance",
+  "baseline_commit": "87b1f598b23e8d54a498fda017640300ffb0b441",
+  "previous_task": {
+    "started_at_utc": "2026-11-04T01:49:28.985Z",
+    "completed_at_utc": "2026-11-04T10:21:56.632Z",
+    "elapsed_seconds": 30747.647,
+    "recorded_tool_categories": {
+      "exec": {
+        "count": 509,
+        "sum_seconds": 2818.92,
+        "max_seconds": 31.01
+      },
+      "go_test": {
+        "count": 69,
+        "sum_seconds": 600.15,
+        "max_seconds": 30.92
+      },
+      "process_poll": {
+        "count": 134,
+        "sum_seconds": 1982.8,
+        "max_seconds": 30.16
+      },
+      "git_push": {
+        "count": 9,
+        "sum_seconds": 86.56,
+        "max_seconds": 20.79
+      },
+      "github_run_list": {
+        "count": 20,
+        "sum_seconds": 175.28,
+        "max_seconds": 22.29
+      },
+      "github_run_poll": {
+        "count": 153,
+        "sum_seconds": 1161.26,
+        "max_seconds": 30.95
+      },
+      "sleep": {
+        "count": 189,
+        "sum_seconds": 8026.2,
+        "max_seconds": 59.99
+      },
+      "workflow_dispatch": {
+        "count": 7,
+        "sum_seconds": 55.42,
+        "max_seconds": 11.3
+      },
+      "wait": {
+        "count": 16,
+        "sum_seconds": 234.09,
+        "max_seconds": 31.01
+      },
+      "github_checks": {
+        "count": 54,
+        "sum_seconds": 383.96,
+        "max_seconds": 16.66
+      },
+      "pr_create": {
+        "count": 1,
+        "sum_seconds": 16.52,
+        "max_seconds": 16.52
+      }
+    },
+    "exec_wrappers_printing_only_stdout": 641
+  },
+  "a04_runs": {
+    "count": 9,
+    "sum_seconds_to_last_updates": 9585.0,
+    "runs": [
+      {
+        "run_id": 41803621425,
+        "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41803621425",
+        "started_at": "2026-11-04T08:58:24Z",
+        "seconds_to_last_update": 1215.0,
+        "conclusion": "success"
+      },
+      {
+        "run_id": 41796786318,
+        "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41796786318",
+        "started_at": "2026-11-04T08:05:05Z",
+        "seconds_to_last_update": 1203.0,
+        "conclusion": "failure"
+      },
+      {
+        "run_id": 41791236803,
+        "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41791236803",
+        "started_at": "2026-11-04T07:17:30Z",
+        "seconds_to_last_update": 1137.0,
+        "conclusion": "failure"
+      },
+      {
+        "run_id": 41784966658,
+        "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41784966658",
+        "started_at": "2026-11-04T06:21:24Z",
+        "seconds_to_last_update": 1113.0,
+        "conclusion": "failure"
+      },
+      {
+        "run_id": 41779977239,
+        "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41779977239",
+        "started_at": "2026-11-04T05:33:30Z",
+        "seconds_to_last_update": 1197.0,
+        "conclusion": "failure"
+      },
+      {
+        "run_id": 41772842953,
+        "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41772842953",
+        "started_at": "2026-11-04T04:22:49Z",
+        "seconds_to_last_update": 1233.0,
+        "conclusion": "failure"
+      },
+      {
+        "run_id": 41771365565,
+        "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41771365565",
+        "started_at": "2026-11-04T04:08:24Z",
+        "seconds_to_last_update": 56.0,
+        "conclusion": "failure"
+      },
+      {
+        "run_id": 41764641949,
+        "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41764641949",
+        "started_at": "2026-11-04T03:03:12Z",
+        "seconds_to_last_update": 1196.0,
+        "conclusion": "failure"
+      },
+      {
+        "run_id": 41761034278,
+        "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41761034278",
+        "started_at": "2026-11-04T02:29:02Z",
+        "seconds_to_last_update": 1235.0,
+        "conclusion": "failure"
+      }
+    ]
+  },
+  "actual_ci_timelines": [
+    {
+      "run_id": 41803621425,
+      "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41803621425",
+      "status": "completed",
+      "conclusion": "success",
+      "job_span_seconds": 1212.0,
+      "jobs": [
+        {
+          "name": "full-size-mysql-mixed-load",
+          "seconds": 1212.0,
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "slowest_steps": [
+        {
+          "job": "full-size-mysql-mixed-load",
+          "step": "Run six acceptance comparisons and two diagnostic fixtures",
+          "seconds": 1159.0
+        },
+        {
+          "job": "full-size-mysql-mixed-load",
+          "step": "Initialize containers",
+          "seconds": 28.0
+        },
+        {
+          "job": "full-size-mysql-mixed-load",
+          "step": "Install declared Go version",
+          "seconds": 11.0
+        },
+        {
+          "job": "full-size-mysql-mixed-load",
+          "step": "Build API and mixed workload driver",
+          "seconds": 5.0
+        },
+        {
+          "job": "full-size-mysql-mixed-load",
+          "step": "Run acceptance helper tests",
+          "seconds": 2.0
+        },
+        {
+          "job": "full-size-mysql-mixed-load",
+          "step": "Set up job",
+          "seconds": 1.0
+        },
+        {
+          "job": "full-size-mysql-mixed-load",
+          "step": "Check out source",
+          "seconds": 1.0
+        },
+        {
+          "job": "full-size-mysql-mixed-load",
+          "step": "Retain raw mixed-load reports",
+          "seconds": 1.0
+        },
+        {
+          "job": "full-size-mysql-mixed-load",
+          "step": "Post Check out source",
+          "seconds": 1.0
+        },
+        {
+          "job": "full-size-mysql-mixed-load",
+          "step": "Define isolated database namespace",
+          "seconds": 0.0
+        },
+        {
+          "job": "full-size-mysql-mixed-load",
+          "step": "Remove any remaining prefixed fixture schemas",
+          "seconds": 0.0
+        },
+        {
+          "job": "full-size-mysql-mixed-load",
+          "step": "Post Install declared Go version",
+          "seconds": 0.0
+        },
+        {
+          "job": "full-size-mysql-mixed-load",
+          "step": "Stop containers",
+          "seconds": 0.0
+        },
+        {
+          "job": "full-size-mysql-mixed-load",
+          "step": "Complete job",
+          "seconds": 0.0
+        }
+      ],
+      "note": "Jobs overlap; their durations must not be added to obtain elapsed run time."
+    },
+    {
+      "run_id": 41809615602,
+      "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41809615602",
+      "status": "completed",
+      "conclusion": "success",
+      "job_span_seconds": 393.0,
+      "jobs": [
+        {
+          "name": "rabbitmq-integration",
+          "seconds": 218.0,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "quality",
+          "seconds": 351.0,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "minio-integration",
+          "seconds": 263.0,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "video-recovery-integration",
+          "seconds": 44.0,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "mysql-integration",
+          "seconds": 184.0,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "im-integration",
+          "seconds": 393.0,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "browser-workflow",
+          "seconds": 149.0,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "redis-integration",
+          "seconds": 39.0,
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "slowest_steps": [
+        {
+          "job": "quality",
+          "step": "Go race tests",
+          "seconds": 288.0
+        },
+        {
+          "job": "rabbitmq-integration",
+          "step": "Exercise broker confirms, redelivery, DLQ replay, restart and API workers",
+          "seconds": 167.0
+        },
+        {
+          "job": "im-integration",
+          "step": "Exercise real API process kills, Redis outage, device ACKs and replay",
+          "seconds": 167.0
+        },
+        {
+          "job": "minio-integration",
+          "step": "Build pinned MinIO source and start an isolated server",
+          "seconds": 123.0
+        },
+        {
+          "job": "browser-workflow",
+          "step": "Run browser regression and real SQLite FFmpeg workflow",
+          "seconds": 97.0
+        },
+        {
+          "job": "im-integration",
+          "step": "Measure 20-client cross-instance IM traffic and offline recovery",
+          "seconds": 95.0
+        },
+        {
+          "job": "minio-integration",
+          "step": "Test completion leases and cleanup across MySQL and MinIO instances",
+          "seconds": 71.0
+        },
+        {
+          "job": "im-integration",
+          "step": "Check concurrent IM load with the race detector",
+          "seconds": 70.0
+        },
+        {
+          "job": "mysql-integration",
+          "step": "Verify group ordering and device receipt transactions",
+          "seconds": 67.0
+        },
+        {
+          "job": "mysql-integration",
+          "step": "Profile sparse device receipts and deep unread cursors",
+          "seconds": 58.0
+        },
+        {
+          "job": "quality",
+          "step": "Go tests",
+          "seconds": 33.0
+        },
+        {
+          "job": "browser-workflow",
+          "step": "Install real FFmpeg and browser dependencies",
+          "seconds": 33.0
+        },
+        {
+          "job": "rabbitmq-integration",
+          "step": "Initialize containers",
+          "seconds": 32.0
+        },
+        {
+          "job": "minio-integration",
+          "step": "Initialize containers",
+          "seconds": 28.0
+        },
+        {
+          "job": "im-integration",
+          "step": "Initialize containers",
+          "seconds": 27.0
+        },
+        {
+          "job": "video-recovery-integration",
+          "step": "Ensure FFmpeg and ffprobe are available",
+          "seconds": 20.0
+        },
+        {
+          "job": "mysql-integration",
+          "step": "Initialize containers",
+          "seconds": 18.0
+        },
+        {
+          "job": "im-integration",
+          "step": "Verify cleanup when the Go test times out after API startup",
+          "seconds": 16.0
+        },
+        {
+          "job": "redis-integration",
+          "step": "Install the declared Go version",
+          "seconds": 14.0
+        },
+        {
+          "job": "mysql-integration",
+          "step": "Install the declared Go version",
+          "seconds": 12.0
+        }
+      ],
+      "note": "Jobs overlap; their durations must not be added to obtain elapsed run time."
+    },
+    {
+      "run_id": 41812517048,
+      "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41812517048",
+      "status": "completed",
+      "conclusion": "success",
+      "job_span_seconds": 399.0,
+      "jobs": [
+        {
+          "name": "redis-integration",
+          "seconds": 38.0,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "video-recovery-integration",
+          "seconds": 128.0,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "im-integration",
+          "seconds": 399.0,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "mysql-integration",
+          "seconds": 234.0,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "browser-workflow",
+          "seconds": 172.0,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "quality",
+          "seconds": 294.0,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "rabbitmq-integration",
+          "seconds": 212.0,
+          "status": "completed",
+          "conclusion": "success"
+        },
+        {
+          "name": "minio-integration",
+          "seconds": 303.0,
+          "status": "completed",
+          "conclusion": "success"
+        }
+      ],
+      "slowest_steps": [
+        {
+          "job": "quality",
+          "step": "Go race tests",
+          "seconds": 231.0
+        },
+        {
+          "job": "rabbitmq-integration",
+          "step": "Exercise broker confirms, redelivery, DLQ replay, restart and API workers",
+          "seconds": 174.0
+        },
+        {
+          "job": "im-integration",
+          "step": "Exercise real API process kills, Redis outage, device ACKs and replay",
+          "seconds": 168.0
+        },
+        {
+          "job": "minio-integration",
+          "step": "Build pinned MinIO source and start an isolated server",
+          "seconds": 140.0
+        },
+        {
+          "job": "video-recovery-integration",
+          "step": "Ensure FFmpeg and ffprobe are available",
+          "seconds": 96.0
+        },
+        {
+          "job": "im-integration",
+          "step": "Measure 20-client cross-instance IM traffic and offline recovery",
+          "seconds": 96.0
+        },
+        {
+          "job": "mysql-integration",
+          "step": "Verify group ordering and device receipt transactions",
+          "seconds": 91.0
+        },
+        {
+          "job": "minio-integration",
+          "step": "Test completion leases and cleanup across MySQL and MinIO instances",
+          "seconds": 91.0
+        },
+        {
+          "job": "browser-workflow",
+          "step": "Run browser regression and real SQLite FFmpeg workflow",
+          "seconds": 87.0
+        },
+        {
+          "job": "mysql-integration",
+          "step": "Profile sparse device receipts and deep unread cursors",
+          "seconds": 74.0
+        },
+        {
+          "job": "im-integration",
+          "step": "Check concurrent IM load with the race detector",
+          "seconds": 71.0
+        },
+        {
+          "job": "browser-workflow",
+          "step": "Install real FFmpeg and browser dependencies",
+          "seconds": 63.0
+        },
+        {
+          "job": "quality",
+          "step": "Go tests",
+          "seconds": 34.0
+        },
+        {
+          "job": "im-integration",
+          "step": "Initialize containers",
+          "seconds": 28.0
+        },
+        {
+          "job": "mysql-integration",
+          "step": "Initialize containers",
+          "seconds": 27.0
+        },
+        {
+          "job": "minio-integration",
+          "step": "Initialize containers",
+          "seconds": 27.0
+        },
+        {
+          "job": "rabbitmq-integration",
+          "step": "Initialize containers",
+          "seconds": 25.0
+        },
+        {
+          "job": "im-integration",
+          "step": "Verify cleanup when the Go test times out after API startup",
+          "seconds": 15.0
+        },
+        {
+          "job": "video-recovery-integration",
+          "step": "Install the declared Go version",
+          "seconds": 14.0
+        },
+        {
+          "job": "im-integration",
+          "step": "Install the declared Go version",
+          "seconds": 13.0
+        }
+      ],
+      "note": "Jobs overlap; their durations must not be added to obtain elapsed run time."
+    }
+  ],
+  "local_race": {
+    "command": "/usr/local/go/bin/go test -race -json -count=1 -timeout=6m ./...",
+    "exit_code": 0,
+    "wall_seconds": 238.47,
+    "user_cpu_seconds": 252.99,
+    "system_cpu_seconds": 21.82,
+    "max_rss_kib": 504512,
+    "swaps": 0,
+    "packages": [
+      {
+        "package": "github.com/liuzhouquan/GoStream/cmd/gostream-media",
+        "seconds": 0,
+        "action": "skip"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/cmd/gostream-events",
+        "seconds": 1.338,
+        "action": "pass"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/tests/integration/im",
+        "seconds": 1.232,
+        "action": "pass"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/tests/load/http",
+        "seconds": 1.327,
+        "action": "pass"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/tests/load/mixed",
+        "seconds": 1.38,
+        "action": "pass"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/cmd/gostream",
+        "seconds": 6.263,
+        "action": "pass"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/tests/load/seed",
+        "seconds": 6.437,
+        "action": "pass"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/internal/migrations",
+        "seconds": 9.665,
+        "action": "pass"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/internal/platform",
+        "seconds": 238.339,
+        "action": "pass"
+      }
+    ],
+    "slowest_tests": [
+      {
+        "package": "github.com/liuzhouquan/GoStream/internal/platform",
+        "seconds": 39.29,
+        "action": "pass",
+        "test": "TestPublicRouteBudgetsUsePeerAddress"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/internal/platform",
+        "seconds": 7.24,
+        "action": "pass",
+        "test": "TestConcurrentMultiUserMultiVideoInteractionsAndCounters"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/internal/platform",
+        "seconds": 7.13,
+        "action": "pass",
+        "test": "TestFeedRedisCacheFallbackAndRecovery"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/internal/platform",
+        "seconds": 5.72,
+        "action": "pass",
+        "test": "TestHybridFeedEdgeCases"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/tests/load/seed",
+        "seconds": 5.28,
+        "action": "pass",
+        "test": "TestHybridFixtureExercisesBothFeedBranches"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/internal/platform",
+        "seconds": 5.28,
+        "action": "pass",
+        "test": "TestAccountStorageErrorResponses"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/internal/platform",
+        "seconds": 5.1,
+        "action": "pass",
+        "test": "TestHybridFollowingPublicationAndRelationshipChanges"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/internal/platform",
+        "seconds": 4.38,
+        "action": "pass",
+        "test": "TestChatAndGroupSecurityBoundaries"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/internal/platform",
+        "seconds": 4.12,
+        "action": "pass",
+        "test": "TestHybridFollowingMergesOverlappingSourcesOnce"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/internal/platform",
+        "seconds": 3.77,
+        "action": "pass",
+        "test": "TestFollowingFeedCacheIsolatedAndInvalidated"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/internal/platform",
+        "seconds": 3.67,
+        "action": "pass",
+        "test": "TestRecommendationUsesPreferencesAndCursor"
+      },
+      {
+        "package": "github.com/liuzhouquan/GoStream/cmd/gostream",
+        "seconds": 3.49,
+        "action": "pass",
+        "test": "TestServerProcessRestartPersistenceLifecycle"
+      }
+    ],
+    "successful_registration_handlers": 199,
+    "sum_registration_handler_wall_seconds": 181.932
+  },
+  "focused_cpu_profile": {
+    "test": "TestPublicRouteBudgetsUsePeerAddress",
+    "go_test_seconds": 36.415,
+    "profile_duration_seconds": 35.27,
+    "total_sample_seconds": 34.53,
+    "flat_percent": {
+      "racecall": 36.08,
+      "runtime._ExternalCode": 34.98,
+      "blowfish.encryptBlock": 15.67,
+      "runtime.raceread": 8.11,
+      "racecalladdr": 3.68
+    }
+  },
+  "empty_shell_probes": [
+    {
+      "tool_round_trip_ms": 4489,
+      "command_wait_seconds": 2.6674e-05
+    },
+    {
+      "tool_round_trip_ms": 4014,
+      "command_wait_seconds": 3.4739e-05
+    },
+    {
+      "tool_round_trip_ms": 3587,
+      "command_wait_seconds": 2.9143e-05
+    }
+  ],
+  "pending_process_reproduction": {
+    "command": "Python process sleeps two seconds and prints once",
+    "initial_stdout": "",
+    "initial_exit_code": null,
+    "initial_session_id_present": true,
+    "command_wait_seconds": 1.002686049,
+    "resumed_exit_code": 0,
+    "resumed_stdout": "finished-once",
+    "launch_count": 1
+  },
+  "monitor_verification": {
+    "local_subprocess_tests": 7,
+    "real_go_test_report": {
+      "label": "redis-recovery",
+      "executable": "go",
+      "elapsed_seconds": 9.35,
+      "exit_code": 0,
+      "timed_out": false,
+      "interrupted": false,
+      "error_kind": null,
+      "output_log": "redis-recovery.log",
+      "child_user_seconds": 3.138,
+      "child_system_seconds": 2.997,
+      "sampled_peak_tree_rss_kib": 273200,
+      "packages": [
+        {
+          "package": "github.com/liuzhouquan/GoStream/internal/platform",
+          "action": "pass",
+          "seconds": 5.39
+        }
+      ],
+      "slowest_tests": [
+        {
+          "package": "github.com/liuzhouquan/GoStream/internal/platform",
+          "action": "pass",
+          "seconds": 5.36,
+          "test": "TestFeedRedisCacheFallbackAndRecovery"
+        }
+      ],
+      "unfinished_tests": []
+    },
+    "real_ci_collectors": "3 completed runs, successful collection using gh 2.45",
+    "unit_test_run": {
+      "label": "timing-tool-tests",
+      "executable": "python3",
+      "elapsed_seconds": 1.438,
+      "exit_code": 0,
+      "timed_out": false,
+      "interrupted": false,
+      "error_kind": null,
+      "output_log": "timing-tool-tests.log",
+      "child_user_seconds": 0.397,
+      "child_system_seconds": 0.176,
+      "sampled_peak_tree_rss_kib": 0,
+      "packages": [],
+      "slowest_tests": [],
+      "unfinished_tests": []
+    }
+  },
+  "limitations": [
+    "Sleep and poll times overlap remote workflow execution; do not sum these categories and CI job durations as independent parts of elapsed time.",
+    "Tool categories classify whole orchestration calls by command patterns and are approximate.",
+    "Registration handler elapsed time includes more than hashing and may overlap other work; it is not pure bcrypt CPU.",
+    "The external-shell latency probe cannot distinguish approval, orchestration and transport overhead.",
+    "A04 run list uses start-to-last-update spans; exact completed-job timings are separately recorded for selected runs.",
+    "Raw sessions, command arguments, environment and test logs are not exported into this report."
+  ],
+  "shell_startup_probes": [
+    {
+      "mode": "nonlogin",
+      "elapsed_ms": 8.981,
+      "exit_code": 0
+    },
+    {
+      "mode": "nonlogin",
+      "elapsed_ms": 4.452,
+      "exit_code": 0
+    },
+    {
+      "mode": "nonlogin",
+      "elapsed_ms": 8.216,
+      "exit_code": 0
+    },
+    {
+      "mode": "login",
+      "elapsed_ms": 4.133,
+      "exit_code": 0
+    },
+    {
+      "mode": "login",
+      "elapsed_ms": 3.926,
+      "exit_code": 0
+    },
+    {
+      "mode": "login",
+      "elapsed_ms": 4.084,
+      "exit_code": 0
+    }
+  ],
+  "shell_batch_tool_round_trip_ms": 7587,
+  "environment_notes": {
+    "sandbox_initialization_symlink_conflict_observed": true,
+    "gh_version": "2.45.0",
+    "production_go_code_changed": false,
+    "full_a04_rerun_for_this_investigation": false,
+    "new_full_ci_rerun_for_this_investigation": false
+  },
+  "current_host_snapshot": {
+    "cpu_count": 16,
+    "load_average": [
+      0.39453125,
+      0.24609375,
+      0.3134765625
+    ],
+    "memory_kib": {
+      "MemTotal": 14235292,
+      "MemAvailable": 10736404,
+      "SwapTotal": 4194304,
+      "SwapFree": 1820460
+    },
+    "matching_processes": [],
+    "limit": "Current snapshot only; it cannot establish resource pressure during previous runs."
+  }
+}
