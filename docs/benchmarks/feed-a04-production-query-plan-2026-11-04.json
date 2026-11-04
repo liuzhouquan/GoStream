@@ -1,0 +1,206 @@
+{
+  "workflow": {
+    "run_id": 41791236803,
+    "url": "https://github.com/liuzhouquan/GoStream/actions/runs/41791236803",
+    "commit": "b2c7a8b9e5fd62c34c9824427311cb9941bce728",
+    "artifact_id": 13303394494,
+    "artifact_url": "https://github.com/liuzhouquan/GoStream/actions/runs/41791236803/artifacts/13303394494",
+    "started_at_utc": "2026-11-04T07:17:33Z",
+    "completed_at_utc": "2026-11-04T07:36:27Z",
+    "duration_seconds": 1134,
+    "conclusion": "failed: client Following P95 target only; load and consistency checks passed",
+    "interpolate_params": true
+  },
+  "environment": {
+    "go": "1.27.2",
+    "mysql": "8.4.13",
+    "runner_cpu_count": 4,
+    "innodb_buffer_pool_size_bytes": 134217728,
+    "fixture": {
+      "users": 2000,
+      "follows": 10999,
+      "videos": 20000,
+      "feed_inboxes": 1900000
+    },
+    "concurrency": 20,
+    "read_only_warmup_seconds": 30,
+    "measured_seconds_per_round": 60,
+    "runs_per_mode": 3
+  },
+  "acceptance": {
+    "sql_only_median_following_p95_ms": 32.521337,
+    "hybrid_median_following_p95_ms": 43.351345,
+    "hybrid_p95_improvement_percent": -33.3,
+    "required_improvement_percent": 20.0,
+    "target_met": false,
+    "mixed_requests_succeeded": 70987,
+    "mixed_request_failures": 0,
+    "video_publishes_succeeded": 120,
+    "publish_failures": 0,
+    "consistency_checks_passed": true,
+    "db_pool_waits": 0,
+    "maximum_hybrid_fanout_drain_seconds": 0.051451096,
+    "api_latency_histogram_window": "60s measured mixed workload"
+  },
+  "rounds": [
+    {
+      "mode": "sql-only",
+      "round": 1,
+      "client_following_p95_ms": 33.08,
+      "api_candidate_query_start_p95_bucket_ms": [10.0, 25.0],
+      "mysql_candidate_mean_ms": 12.943,
+      "mysql_candidate_observed_p95_bucket_ms": [22.908677, 23.988329],
+      "mysql_candidate_statement_count": 4676,
+      "mysql_candidate_histogram_count_difference": 0,
+      "mysql_candidate_rows_examined": 5245785
+    },
+    {
+      "mode": "hybrid",
+      "round": 1,
+      "client_following_p95_ms": 43.954,
+      "api_candidate_query_start_p95_bucket_ms": [25.0, 40.0],
+      "mysql_candidate_mean_ms": 10.124,
+      "mysql_candidate_observed_p95_bucket_ms": [34.673685, 36.307805],
+      "mysql_candidate_statement_count": 4656,
+      "mysql_candidate_histogram_count_difference": 0,
+      "mysql_candidate_rows_examined": 391104
+    },
+    {
+      "mode": "hybrid",
+      "round": 2,
+      "client_following_p95_ms": 41.638,
+      "api_candidate_query_start_p95_bucket_ms": [25.0, 40.0],
+      "mysql_candidate_mean_ms": 9.474,
+      "mysql_candidate_observed_p95_bucket_ms": [33.113112, 34.673685],
+      "mysql_candidate_statement_count": 4768,
+      "mysql_candidate_histogram_count_difference": 0,
+      "mysql_candidate_rows_examined": 400428
+    },
+    {
+      "mode": "sql-only",
+      "round": 2,
+      "client_following_p95_ms": 32.199,
+      "api_candidate_query_start_p95_bucket_ms": [10.0, 25.0],
+      "mysql_candidate_mean_ms": 12.597,
+      "mysql_candidate_observed_p95_bucket_ms": [21.877616, 22.908677],
+      "mysql_candidate_statement_count": 4796,
+      "mysql_candidate_histogram_count_difference": 0,
+      "mysql_candidate_rows_examined": 5398875
+    },
+    {
+      "mode": "sql-only",
+      "round": 3,
+      "client_following_p95_ms": 32.521,
+      "api_candidate_query_start_p95_bucket_ms": [10.0, 25.0],
+      "mysql_candidate_mean_ms": 12.817,
+      "mysql_candidate_observed_p95_bucket_ms": [21.877616, 22.908677],
+      "mysql_candidate_statement_count": 4704,
+      "mysql_candidate_histogram_count_difference": 0,
+      "mysql_candidate_rows_examined": 5284584
+    },
+    {
+      "mode": "hybrid",
+      "round": 3,
+      "client_following_p95_ms": 43.351,
+      "api_candidate_query_start_p95_bucket_ms": [25.0, 40.0],
+      "mysql_candidate_mean_ms": 9.471,
+      "mysql_candidate_observed_p95_bucket_ms": [33.113112, 34.673685],
+      "mysql_candidate_statement_count": 4808,
+      "mysql_candidate_histogram_count_difference": 0,
+      "mysql_candidate_rows_examined": 403872
+    }
+  ],
+  "query_plans": {
+    "source": "EXPLAIN FORMAT=JSON over production followingCandidateQuery, first page, page size 20, viewer 501",
+    "capture_window": "After the first measured round and its Performance Schema snapshots; plan execution was not part of the acceptance window",
+    "sql_only": {
+      "estimated_query_cost": 847.51,
+      "outer_ordering": {
+        "using_temporary_table": true,
+        "using_filesort": true
+      },
+      "access_paths": [
+        {
+          "table": "follows",
+          "access": "ref",
+          "index": "ux_follow_pair",
+          "estimated_rows_per_scan": 5
+        },
+        {
+          "table": "videos",
+          "access": "ref",
+          "index": "idx_video_author",
+          "estimated_rows_per_scan": 199,
+          "estimated_status_filter_percent": 50.0
+        }
+      ]
+    },
+    "hybrid": {
+      "estimated_query_cost": 29.32,
+      "outer_ordering": {
+        "using_filesort": true
+      },
+      "estimated_derived_rows": {
+        "pull_page": 21,
+        "late_follow_page": 16,
+        "push_page": 21,
+        "feed_page": 58
+      },
+      "access_paths": [
+        {
+          "branch": "pull_page",
+          "table": "videos",
+          "access": "ref",
+          "index": "idx_video_feed_pull",
+          "estimated_rows_per_scan": 200
+        },
+        {
+          "branch": "late_follow_page",
+          "table": "videos",
+          "access": "ref",
+          "index": "idx_video_author",
+          "estimated_rows_per_scan": 197,
+          "estimated_status_and_pull_filter_percent": 1.67
+        },
+        {
+          "branch": "late_follow_page",
+          "table": "feed_inboxes",
+          "access": "eq_ref",
+          "index": "ux_feed_inbox",
+          "estimated_rows_per_scan": 1
+        },
+        {
+          "branch": "push_page",
+          "table": "videos",
+          "access": "ref",
+          "index": "idx_video_author",
+          "estimated_rows_per_scan": 197,
+          "estimated_status_and_pull_filter_percent": 5.0
+        },
+        {
+          "branch": "push_page",
+          "table": "feed_inboxes",
+          "access": "eq_ref",
+          "index": "ux_feed_inbox",
+          "estimated_rows_per_scan": 1
+        },
+        {
+          "table": "videos",
+          "access": "eq_ref",
+          "index": "PRIMARY",
+          "estimated_rows_per_scan": 1
+        }
+      ]
+    }
+  },
+  "interpretation": {
+    "finding": "Measured candidate statement P95 buckets were higher for Hybrid in all three rounds despite lower means and about thirteen times fewer examined rows; API candidate_query_start buckets matched the same direction.",
+    "limits": [
+      "EXPLAIN rows and cost are estimates, not actual rows or elapsed times.",
+      "The plan is captured for one viewer and one first page per mode; no EXPLAIN ANALYZE operator timing was collected.",
+      "The evidence localizes the tail to the candidate statement in this workload but does not attribute it to one Hybrid branch or operator.",
+      "SQL-only remains the production default because the Hybrid P95 acceptance target remains unmet."
+    ],
+    "next_experiment": "The runner now has an opt-in EXPLAIN ANALYZE capture on separate diagnostic-only fixtures after the six acceptance rounds; full-size MySQL output is awaiting validation."
+  }
+}

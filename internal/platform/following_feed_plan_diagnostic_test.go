@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"gorm.io/driver/mysql"
@@ -62,18 +63,35 @@ func TestA04FollowingQueryPlanDiagnostic(t *testing.T) {
 		t.Fatalf("MySQL returned invalid EXPLAIN JSON")
 	}
 
+	analyzeTree := ""
+	analyzeError := ""
+	if os.Getenv("GOSTREAM_A04_PLAN_ANALYZE") == "true" {
+		if err := db.Raw("EXPLAIN ANALYZE FORMAT=TREE "+statement.SQL.String(), statement.Vars...).Row().Scan(&analyzeTree); err != nil {
+			analyzeError = err.Error()
+		} else if strings.TrimSpace(analyzeTree) == "" {
+			analyzeError = "MySQL returned an empty EXPLAIN ANALYZE plan"
+		}
+		if len(analyzeError) > 512 {
+			analyzeError = analyzeError[:512]
+		}
+	}
+
 	report := struct {
-		Source   string          `json:"source"`
-		Mode     string          `json:"mode"`
-		ViewerID uint            `json:"viewer_id"`
-		PageSize int             `json:"page_size"`
-		Plan     json.RawMessage `json:"plan"`
+		Source       string          `json:"source"`
+		Mode         string          `json:"mode"`
+		ViewerID     uint            `json:"viewer_id"`
+		PageSize     int             `json:"page_size"`
+		Plan         json.RawMessage `json:"plan"`
+		AnalyzeTree  string          `json:"analyze_tree,omitempty"`
+		AnalyzeError string          `json:"analyze_error,omitempty"`
 	}{
-		Source:   "production followingCandidateQuery; first page; limit 20 plus one row",
-		Mode:     mode,
-		ViewerID: viewerID,
-		PageSize: 20,
-		Plan:     json.RawMessage(planText),
+		Source:       "production followingCandidateQuery; first page; limit 20 plus one row",
+		Mode:         mode,
+		ViewerID:     viewerID,
+		PageSize:     20,
+		Plan:         json.RawMessage(planText),
+		AnalyzeTree:  analyzeTree,
+		AnalyzeError: analyzeError,
 	}
 	encoded, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {

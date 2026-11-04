@@ -1,4 +1,5 @@
 import http.server
+import json
 import pathlib
 import signal
 import subprocess
@@ -111,6 +112,69 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
             self.assertEqual(result["output_file"], output.name)
             self.assertEqual(result["viewer_id"], 500)
 
+    def test_following_query_plan_capture_can_include_execution_analysis(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "following-plan-hybrid-diagnostic.json"
+
+            def capture_plan(command, **kwargs):
+                self.assertEqual(kwargs["env"]["GOSTREAM_A04_PLAN_ANALYZE"], "true")
+                pathlib.Path(kwargs["env"]["GOSTREAM_A04_PLAN_OUTPUT"]).write_text(
+                    json.dumps(
+                        {
+                            "mode": "hybrid",
+                            "plan": {"query_block": {}},
+                            "analyze_tree": "-> Limit: 21 row(s) (actual time=0.10..0.20 rows=20 loops=1)",
+                        }
+                    )
+                )
+                return subprocess.CompletedProcess(command, 0, stdout="PASS\\n", stderr="")
+
+            with mock.patch.object(feed_a04_mixed.subprocess, "run", side_effect=capture_plan):
+                result = feed_a04_mixed.capture_following_query_plan(
+                    go_bin="/usr/local/go/bin/go",
+                    dsn="gostream:secret@tcp(127.0.0.1:3306)/fixture",
+                    viewer_id=500,
+                    mode="hybrid",
+                    round_number=4,
+                    output_path=output,
+                    analyze=True,
+                )
+
+            self.assertTrue(result["available"])
+            self.assertTrue(result["analyze_available"])
+            self.assertEqual(result["analyze_output_file"], output.name)
+
+    def test_following_query_analysis_failure_does_not_hide_estimated_plan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = pathlib.Path(directory) / "following-plan-sql-only-diagnostic.json"
+
+            def capture_plan(command, **kwargs):
+                pathlib.Path(kwargs["env"]["GOSTREAM_A04_PLAN_OUTPUT"]).write_text(
+                    json.dumps(
+                        {
+                            "mode": "sql-only",
+                            "plan": {"query_block": {}},
+                            "analyze_error": "EXPLAIN ANALYZE unavailable",
+                        }
+                    )
+                )
+                return subprocess.CompletedProcess(command, 0, stdout="PASS\\n", stderr="")
+
+            with mock.patch.object(feed_a04_mixed.subprocess, "run", side_effect=capture_plan):
+                result = feed_a04_mixed.capture_following_query_plan(
+                    go_bin="go",
+                    dsn="gostream:secret@tcp(127.0.0.1:3306)/fixture",
+                    viewer_id=500,
+                    mode="sql-only",
+                    round_number=4,
+                    output_path=output,
+                    analyze=True,
+                )
+
+            self.assertTrue(result["available"])
+            self.assertFalse(result["analyze_available"])
+            self.assertEqual(result["analyze_reason"], "EXPLAIN ANALYZE unavailable")
+
     def test_following_query_plan_capture_failure_is_best_effort(self):
         with tempfile.TemporaryDirectory() as directory:
             output = pathlib.Path(directory) / "following-plan-sql-only.json"
@@ -153,6 +217,45 @@ class FeedA04MixedHelpersTest(unittest.TestCase):
         self.assertTrue(summary["target_met"])
         self.assertTrue(summary["following_query_plan_diagnostics"]["hybrid"][0]["available"])
         self.assertIn("following-plan-hybrid.json", rendered)
+
+    def test_query_analyze_diagnostics_are_reported_without_changing_acceptance_gate(self):
+        reports = []
+        for round_number in range(1, 4):
+            reports.extend(
+                (
+                    run("sql-only", round_number, 100_000_000),
+                    run("hybrid", round_number, 70_000_000),
+                )
+            )
+        summary = feed_a04_mixed.summarize(reports, 0.20)
+        summary["following_query_analyze_diagnostics"] = {
+            "sql-only": [
+                {
+                    "round": 4,
+                    "diagnostic": {
+                        "available": True,
+                        "analyze_available": True,
+                        "output_file": "following-plan-sql-only-diagnostic.json",
+                    },
+                }
+            ],
+            "hybrid": [
+                {
+                    "round": 4,
+                    "diagnostic": {
+                        "available": True,
+                        "analyze_available": False,
+                        "analyze_reason": "explain analyze rejected",
+                    },
+                }
+            ],
+        }
+
+        rendered = feed_a04_mixed.format_summary(summary)
+
+        self.assertTrue(summary["target_met"])
+        self.assertIn("SQL-only r4 following-plan-sql-only-diagnostic.json", rendered)
+        self.assertIn("Hybrid r4 unavailable (explain analyze rejected)", rendered)
 
     def test_mysql_dsn_interpolation_is_opt_in(self):
         prefix = "gostream:gostream-ci-only@tcp(127.0.0.1:3306)/"

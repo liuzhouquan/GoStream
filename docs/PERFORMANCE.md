@@ -628,7 +628,30 @@ The post-fix run [#41784966658](https://github.com/liuzhouquan/GoStream/actions/
 
 The measured Following digest P95 is higher for Hybrid in all three rounds, while its mean is similar or lower. This is the strongest evidence so far that the Hybrid candidate statement itself has a server-side tail under this workload; it still does not identify which branch or plan operator causes it. The account-level measured wait totals were similar across both variants: `wait/io/table/sql/handler` about 1.26–1.27 million ms, `wait/io/file/sql/io_cache` 7.9–8.3 seconds, and `wait/io/file/sql/binlog` 4.05–4.17 seconds per 60-second account window. Idle connection time was reported separately at 226–234 seconds. These counters aggregate every statement for the account and cannot explain the Following query's tail. The sanitized [post-fix report](benchmarks/feed-a04-phase-wait-events-2026-11-04.json) retains each round and its count-gap limits; raw data is [artifact 13301891599](https://github.com/liuzhouquan/GoStream/actions/runs/41784966658/artifacts/13301891599).
 
-The A04 runner now has an opt-in capture that runs `EXPLAIN FORMAT=JSON` using the production `followingCandidateQuery` builder, after wait/digest snapshots and outside the measured window. It records one SQL-only and one Hybrid first-page plan without changing the client-P95 gate. The capture has passed the A04 helper tests and compiled as a Go test, but has not yet run against a full-size MySQL fixture. Until that plan is available, keep SQL-only as the default and treat the Hybrid UNION/sort/anti-join shape only as the leading hypothesis, not a confirmed root cause.
+The A04 runner has an opt-in capture that runs `EXPLAIN FORMAT=JSON` using the production `followingCandidateQuery` builder, after wait/digest snapshots and outside the measured window. It records one SQL-only and one Hybrid first-page plan without changing the client-P95 gate. Full-size capture and its limits are recorded below. Keep SQL-only as the default while the Hybrid target remains unmet; an estimated plan is not proof that a specific operator causes the tail.
+
+### Production Following query plans, 2026-11-04
+
+The opt-in capture ran in full-size workflow [#41791236803](https://github.com/liuzhouquan/GoStream/actions/runs/41791236803), using commit `b2c7a8b`. It captured the production first-page query plans for viewer 501 after the first SQL-only and Hybrid measured windows and their Performance Schema snapshots. The run used Go 1.27.2, MySQL 8.4.13, a four-vCPU runner, a 128 MiB InnoDB buffer pool, and the 2,000-user / 10,999-follow / 20,000-video / 1.9-million-inbox fixture. Each of six acceptance rounds used 20 workers, 30 seconds of read-only warmup, and 60 seconds of measured mixed load with `interpolateParams=true`.
+
+All **70,987 mixed requests succeeded**, all **120 publishes succeeded**, and counter, Feed visibility, outbox, and fanout consistency checks passed. Database pool waits were zero and maximum Hybrid fanout drain was **0.051 seconds**. The run failed only the client-P95 target: SQL-only median Following P95 was **32.521 ms** and Hybrid was **43.351 ms** (**33.30% slower**; the target is at least 20% faster).
+
+| Mode / round | Client Following P95 | API `candidate_query_start` P95 bucket | Measured MySQL candidate mean | Measured MySQL candidate P95 bucket | Rows examined |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| SQL-only 1 | 33.080 ms | (10, 25] ms | 12.943 ms | (22.909, 23.988] ms | 5,245,785 |
+| Hybrid 1 | 43.954 ms | (25, 40] ms | 10.124 ms | (34.674, 36.308] ms | 391,104 |
+| Hybrid 2 | 41.638 ms | (25, 40] ms | 9.474 ms | (33.113, 34.674] ms | 400,428 |
+| SQL-only 2 | 32.199 ms | (10, 25] ms | 12.597 ms | (21.878, 22.909] ms | 5,398,875 |
+| SQL-only 3 | 32.521 ms | (10, 25] ms | 12.817 ms | (21.878, 22.909] ms | 5,284,584 |
+| Hybrid 3 | 43.351 ms | (25, 40] ms | 9.471 ms | (33.113, 34.674] ms | 403,872 |
+
+The measured digest histogram count matched its statement count in all six rounds. Hybrid therefore had a higher measured server-side candidate-statement P95 bucket in every round despite its lower mean and roughly 13 times fewer examined rows. Its API `candidate_query_start` bucket was also higher in every round. This makes the candidate statement the strongest current location for the tail; it does not prove which internal branch or operator causes it. Candidate-row iteration and GORM scanning remained below 1 ms at P95 in both modes.
+
+The captured SQL-only plan starts with `follows` through `ux_follow_pair` (estimated five rows), then reads `videos` through `idx_video_author` (estimated 199 rows per scan, with an estimated 50% status filter). Its outer ordering uses a temporary table and filesort. The Hybrid estimate has three limited candidate branches: `pull_page` uses `idx_video_feed_pull`; `late_follow_page` and `push_page` use `idx_video_author` and check `feed_inboxes` through `ux_feed_inbox`; the derived `feed_page` is estimated at 58 rows and the outer query looks up `videos` by primary key before filesort. The estimated query costs were 847.51 for SQL-only and 29.32 for Hybrid. Those are optimizer estimates, not elapsed times; their opposite ordering from the measured tail is a reason to collect actual operator timing, not evidence that the optimizer or a particular join is the root cause.
+
+The sanitized [plan and result report](benchmarks/feed-a04-production-query-plan-2026-11-04.json) records these measurements. Raw plans and per-round diagnostics are in [artifact 13303394494](https://github.com/liuzhouquan/GoStream/actions/runs/41791236803/artifacts/13303394494). This run verifies that the estimated-plan capture works and the consistency paths remain intact. It does not pass the Hybrid performance target.
+
+A follow-up opt-in `EXPLAIN ANALYZE FORMAT=TREE` capture is now scheduled only on the two diagnostic-only fixtures, after all six acceptance rounds and their consistency checks. MySQL executes the read-only query to report actual iterator rows and timing; any capture error is retained as diagnostic metadata and does not alter the client-P95 gate. The new path has passed its helper tests and Go compilation, but a full-size run has not yet verified that MySQL output. No query change is justified yet; SQL-only remains the default.
 
 ## Remaining measurements
 
