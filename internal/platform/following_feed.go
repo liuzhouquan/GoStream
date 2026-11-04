@@ -21,6 +21,13 @@ func followingCandidateQuery(db *gorm.DB, viewerID uint, cursor feedCursor, limi
 	}
 
 	cursorTime := cursor.createdTime()
+	pushJoin := "JOIN"
+	if db.Dialector.Name() == "mysql" {
+		// The viewer/time/video index can scan this branch in page order and
+		// stop after filling the page. Without this order, MySQL starts from
+		// follows and videos and probes the inbox once for every candidate.
+		pushJoin = "STRAIGHT_JOIN"
+	}
 	// Keep the three candidate sources disjoint: unfinished fanout stays in
 	// pull, completed fanout uses inbox rows, and late follows only fill gaps.
 	// UNION ALL relies on these publication and inbox invariants.
@@ -58,9 +65,8 @@ SELECT id, created_at FROM (
 ) AS late_follow_page
 UNION ALL
 SELECT id, created_at FROM (
-  SELECT feed_inboxes.video_id AS id, feed_inboxes.created_at FROM feed_inboxes
-  JOIN videos ON videos.id = feed_inboxes.video_id
-  JOIN follows ON follows.followee_id = videos.author_id AND follows.follower_id = ?
+SELECT feed_inboxes.video_id AS id, feed_inboxes.created_at FROM feed_inboxes ` + pushJoin + ` videos ON videos.id = feed_inboxes.video_id
+  ` + pushJoin + ` follows ON follows.followee_id = videos.author_id AND follows.follower_id = ?
   WHERE feed_inboxes.user_id = ? AND videos.status = ? AND videos.feed_pull = ?`)
 	args = append(args, limit+1, viewerID, viewerID, "published", false)
 	if cursor.ID > 0 {
