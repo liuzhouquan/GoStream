@@ -275,7 +275,8 @@ def main() -> int:
     run.add_argument("--report", required=True)
     run.add_argument("--timeout-seconds", type=positive, default=300)
     run.add_argument("--heartbeat-seconds", type=positive, default=15)
-    run.add_argument("--grace-seconds", type=positive, default=2)
+    run.add_argument("--grace-seconds", type=positive, default=30,
+                     help="allow the command to clean external resources before SIGKILL (default: 30)")
     run.add_argument("--quiet", action="store_true")
     run.add_argument("command", nargs=argparse.REMAINDER)
     run.set_defaults(handler=observe)

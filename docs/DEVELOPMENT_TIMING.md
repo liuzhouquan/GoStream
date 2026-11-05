@@ -36,7 +36,7 @@ python3 tools/task_timing.py run \
   /usr/local/go/bin/go test -json -count=1 ./internal/platform
 ```
 
-每个心跳显示 PID、elapsed、距最后输出的时间、当前 Go 测试、存活进程树 CPU 与采样 RSS。结束时保存退出码、user/system CPU、最慢20个测试、未完成测试及包结果；非零退出码原样传播。超时返回124，并对同一进程组发送终止与强制退出信号，避免测试派生进程留在后台。无输出时间长只是观察值，不会自动判定挂死。
+每个心跳显示 PID、elapsed、距最后输出的时间、当前 Go 测试、存活进程树 CPU 与采样 RSS。结束时保存退出码、user/system CPU、最慢20个测试、未完成测试及包结果；非零退出码原样传播。超时返回124，并对同一进程组发送终止与强制退出信号，避免测试派生进程留在后台。无输出时间长只是观察值，不会自动判定挂死。 默认在超时后给命令30秒清理宽限期（可用 `--grace-seconds` 调整），所以总耗时可能超过主超时。独立会话需要由 launcher 自己回收；`im_smoke.py` 将 SIGTERM/SIGINT 转入清理、在创建前记录资源所有权，并在 Popen 句柄交接期间延后中断。SIGKILL 或宽限期耗尽仍无法保证外部 Docker/MySQL 资源清理。
 
 已有验证：真实 Redis recovery 用例的心跳显示测试名持续不变，CPU 基本不增长、输出静默约4秒，随后正常完成，符合测试中五秒熔断等待的行为。这里的存活树 CPU 可能因编译子进程退出而下降；最终 child CPU 是独立汇总。RSS 是采样峰值，不能当作精确的最大内存。
 
@@ -92,3 +92,5 @@ text({
 ```
 
 有 `session_id` 且无 `exit_code` 时继续读取该会话，直到拿到最终结果；这正是此前只输出 `result.output` 会丢失的部分。
+
+2026-11-05 分支审查新增真实信号回归：独立测试会话运行中取消、schema/user/Redis 创建后的取消、Popen 已生成子进程但尚未返回时取消；均先在旧实现上失败，再验证修正。真实 API 就绪后的 SIGTERM 清理结果见 [本轮审查记录](PENDING_BRANCH_REVIEW.md)。

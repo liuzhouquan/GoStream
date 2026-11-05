@@ -2,9 +2,11 @@ package platform
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -111,6 +113,117 @@ func TestFollowingFeedCacheIsolatedAndInvalidated(t *testing.T) {
 	fallback := request(t, h, http.MethodGet, path, tokenX, nil)
 	if fallback.Code != http.StatusOK || !bytes.Contains(fallback.Body.Bytes(), []byte("Redis fallback title")) {
 		t.Fatalf("following database fallback: %d %s", fallback.Code, fallback.Body.String())
+	}
+}
+
+func TestFollowingFeedCacheInvalidationAcrossInstances(t *testing.T) {
+	redisServer, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(redisServer.Close)
+	clientA := redis.NewClient(&redis.Options{Addr: redisServer.Addr(), MaxRetries: 0})
+	clientB := redis.NewClient(&redis.Options{Addr: redisServer.Addr(), MaxRetries: 0})
+	t.Cleanup(func() { _ = clientA.Close() })
+	t.Cleanup(func() { _ = clientB.Close() })
+	assertFollowingFeedCacheInvalidationAcrossInstances(t, clientA, clientB)
+}
+
+func TestFollowingFeedCacheCrossInstanceRealRedis(t *testing.T) {
+	addr := os.Getenv("GOSTREAM_TEST_REDIS_ADDR")
+	if addr == "" {
+		t.Skip("set GOSTREAM_TEST_REDIS_ADDR to an isolated Redis 8 instance")
+	}
+	// The Redis integration job reserves logical database 15 for this test so
+	// cache keys cannot collide with application data in the default database.
+	clientA := redis.NewClient(&redis.Options{Addr: addr, DB: 15, MaxRetries: 0})
+	clientB := redis.NewClient(&redis.Options{Addr: addr, DB: 15, MaxRetries: 0})
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := clientA.Ping(ctx).Err(); err != nil {
+		_ = clientA.Close()
+		_ = clientB.Close()
+		t.Fatal(err)
+	}
+	if keys, err := clientA.DBSize(ctx).Result(); err != nil || keys != 0 {
+		_ = clientA.Close()
+		_ = clientB.Close()
+		t.Fatalf("requires empty dedicated Redis database 15: keys=%d err=%v", keys, err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		var cursor uint64
+		for {
+			keys, next, err := clientA.Scan(ctx, cursor, "gostream:feed:*", 100).Result()
+			if err != nil {
+				t.Errorf("scan isolated Redis Feed keys: %v", err)
+				break
+			}
+			if len(keys) > 0 {
+				if err := clientA.Del(ctx, keys...).Err(); err != nil {
+					t.Errorf("delete isolated Redis Feed keys: %v", err)
+				}
+			}
+			cursor = next
+			if cursor == 0 {
+				break
+			}
+		}
+		if err := clientA.Close(); err != nil {
+			t.Errorf("close Redis client A: %v", err)
+		}
+		if err := clientB.Close(); err != nil {
+			t.Errorf("close Redis client B: %v", err)
+		}
+	})
+	assertFollowingFeedCacheInvalidationAcrossInstances(t, clientA, clientB)
+}
+
+func assertFollowingFeedCacheInvalidationAcrossInstances(t *testing.T, clientA, clientB *redis.Client) {
+	t.Helper()
+	instanceA, routerA, db := testServer(t)
+	instanceB := NewServer(db, "test-signing-secret-at-least-32-bytes", t.TempDir())
+	routerB := instanceB.Router()
+	instanceA.UseRedisFeedCache(clientA)
+	instanceB.UseRedisFeedCache(clientB)
+
+	authorA, authorToken := registerTestUser(t, routerA, "feed_cache_cross_author_a")
+	authorB, _ := registerTestUser(t, routerA, "feed_cache_cross_author_b")
+	viewerID, viewerToken := registerTestUser(t, routerA, "feed_cache_cross_viewer")
+	videoA := Video{AuthorID: authorA, Title: "author A video", MediaURL: "/media/cross-a.mp4", Status: "published"}
+	videoB := Video{AuthorID: authorB, Title: "author B video", MediaURL: "/media/cross-b.mp4", Status: "published"}
+	for _, video := range []*Video{&videoA, &videoB} {
+		if err := db.Create(video).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if res := request(t, routerA, http.MethodPut, fmt.Sprintf("/api/users/me/following/%d", authorA), viewerToken, nil); res.Code != http.StatusOK {
+		t.Fatalf("initial follow on instance A: %d %s", res.Code, res.Body.String())
+	}
+	path := "/api/feed?scene=following"
+	first := request(t, routerA, http.MethodGet, path, viewerToken, nil)
+	if first.Code != http.StatusOK || !pageHasOnly(first.Body.Bytes(), videoA.ID) {
+		t.Fatalf("initial following feed: %d %s", first.Code, first.Body.String())
+	}
+	// A follow on instance B must advance the shared per-viewer version so A
+	// cannot serve the page it cached before the relationship changed.
+	if res := request(t, routerB, http.MethodPut, fmt.Sprintf("/api/users/me/following/%d", authorB), viewerToken, nil); res.Code != http.StatusOK {
+		t.Fatalf("cross-instance follow: %d %s", res.Code, res.Body.String())
+	}
+	afterFollow := request(t, routerA, http.MethodGet, path, viewerToken, nil)
+	if afterFollow.Code != http.StatusOK || !pageHasOnly(afterFollow.Body.Bytes(), videoA.ID, videoB.ID) {
+		t.Fatalf("instance A served stale page after instance B follow (viewer %d): %d %s", viewerID, afterFollow.Code, afterFollow.Body.String())
+	}
+	// A global Feed mutation on B must also invalidate the following page held
+	// by A, even though the cache entry is scoped to one viewer.
+	updated := request(t, routerB, http.MethodPatch, fmt.Sprintf("/api/videos/%d", videoA.ID), authorToken, map[string]string{"title": "updated on instance B"})
+	if updated.Code != http.StatusOK {
+		t.Fatalf("cross-instance video edit: %d %s", updated.Code, updated.Body.String())
+	}
+	afterEdit := request(t, routerA, http.MethodGet, path, viewerToken, nil)
+	if afterEdit.Code != http.StatusOK || !bytes.Contains(afterEdit.Body.Bytes(), []byte("updated on instance B")) {
+		t.Fatalf("instance A served stale page after instance B video edit: %d %s", afterEdit.Code, afterEdit.Body.String())
 	}
 }
 

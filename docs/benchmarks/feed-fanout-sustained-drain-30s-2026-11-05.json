@@ -1,0 +1,60 @@
+{
+  "date": "2026-11-05",
+  "scenario": "Paced sustained publication waves with two production Feed fanout workers sharing MySQL",
+  "measurement_type": "bounded 30-second sustained-write and post-write drain acceptance; one host",
+  "command": "python3 tests/integration/im_smoke.py --go-bin /usr/local/go/bin/go --mysql-container <isolated-mysql-container> --mysql-addr 127.0.0.1:46372 --suite fanout-drain",
+  "environment": {
+    "os": "Linux 6.18.33.2-microsoft-standard-WSL2",
+    "architecture": "x86_64",
+    "cpu": "AMD Ryzen 7 5800H with Radeon Graphics",
+    "logical_cpus": 16,
+    "memory_gib": 13,
+    "go": "1.27.2",
+    "mysql": "8.4.11",
+    "redis_image": "redis:8.2.9",
+    "api_processes": 2,
+    "race_detector": true
+  },
+  "workload": {
+    "fanout_threshold_followers": 320,
+    "followers": 320,
+    "videos_published": 120,
+    "publish_waves": 30,
+    "concurrent_publishes_per_wave": 4,
+    "pause_between_waves_ms": 1000,
+    "publish_window_seconds": 29.808,
+    "max_drain_seconds": 60,
+    "consistency_checks": [
+      "all 120 publish API calls succeeded",
+      "all 120 durable fanout jobs completed",
+      "all videos received exactly 320 unique inbox rows",
+      "all videos left feed_pull mode",
+      "worker attempts matched three 128-row batches plus one terminal empty batch per video",
+      "all 120 fixture videos were returned exactly once across three Following Feed cursor pages",
+      "the first 50 Following Feed entries had a continuation cursor"
+    ]
+  },
+  "result": {
+    "runner_elapsed_seconds": 48.500,
+    "go_test_elapsed_seconds": 39.182,
+    "go_test_case_elapsed_seconds": 38.16,
+    "sampled_peak_pending_jobs": 10,
+    "drain_after_last_publish_seconds": 1.264,
+    "jobs_completed": 120,
+    "job_errors": 0,
+    "worker_attempts": 480,
+    "inbox_rows": 38400,
+    "following_first_page_rows": 50,
+    "following_cursor_pages": 3,
+    "following_fixture_videos": 120,
+    "remaining_test_processes": 0,
+    "remaining_schema": 0,
+    "remaining_mysql_user": 0,
+    "remaining_redis_container": false
+  },
+  "limitations": [
+    "Both API processes and MySQL/Redis ran on one WSL2 host.",
+    "The write window was about 30 seconds and used one author with 320 followers.",
+    "This verifies a bounded workload and a 60-second drain deadline; it does not establish multi-host capacity, longer-duration throughput, or behavior at larger follower counts."
+  ]
+}

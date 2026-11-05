@@ -1,0 +1,99 @@
+{
+  "date": "2026-11-05",
+  "scenario": "Following first page and anonymous recommendation first page with shared Redis cache",
+  "measurement_type": "short bounded burst; not a sustained or multi-host capacity result",
+  "command": "python3 tests/integration/im_smoke.py --go-bin /usr/local/go/bin/go --mysql-container <isolated-mysql-container> --mysql-addr 127.0.0.1:46372 --suite feed-cache-load",
+  "environment": {
+    "os": "Linux 6.18.33.2-microsoft-standard-WSL2",
+    "architecture": "x86_64",
+    "cpu": "AMD Ryzen 7 5800H with Radeon Graphics",
+    "logical_cpus": 16,
+    "memory_gib": 13,
+    "go": "1.27.2",
+    "mysql": "8.4.11",
+    "redis_image": "redis:8.2.9",
+    "api_processes": 2,
+    "race_detector": true
+  },
+  "workload": {
+    "concurrency": 12,
+    "requests_per_scene": 240,
+    "seeded_published_videos": 24,
+    "scenes": [
+      "following",
+      "recommend"
+    ],
+    "cache_priming": "one cold miss followed by a shared-cache hit; the Redis key and live TTL are checked before each burst",
+    "pass_criteria": "all responses valid; at least 95% cache hits per scene; zero request failures"
+  },
+  "runs": [
+    {
+      "runner_elapsed_seconds": 18.809,
+      "go_test_elapsed_seconds": 8.228,
+      "scenes": {
+        "following": {
+          "successes": 240,
+          "failures": 0,
+          "cache_hits": 240,
+          "cache_misses": 0,
+          "cache_hit_ratio": 1.0,
+          "candidate_sql_delta": 0,
+          "elapsed_ms": 339.882,
+          "requests_per_second": 706.1,
+          "p50_ms": 8.074,
+          "p95_ms": 15.407
+        },
+        "recommend": {
+          "successes": 240,
+          "failures": 0,
+          "cache_hits": 240,
+          "cache_misses": 0,
+          "cache_hit_ratio": 1.0,
+          "candidate_sql_delta": 0,
+          "elapsed_ms": 310.695,
+          "requests_per_second": 772.5,
+          "p50_ms": 7.639,
+          "p95_ms": 13.731
+        }
+      }
+    },
+    {
+      "runner_elapsed_seconds": 19.18,
+      "go_test_elapsed_seconds": 8.373,
+      "scenes": {
+        "following": {
+          "successes": 240,
+          "failures": 0,
+          "cache_hits": 240,
+          "cache_misses": 0,
+          "cache_hit_ratio": 1.0,
+          "candidate_sql_delta": 0,
+          "elapsed_ms": 325.257,
+          "requests_per_second": 737.9,
+          "p50_ms": 7.686,
+          "p95_ms": 14.011
+        },
+        "recommend": {
+          "successes": 240,
+          "failures": 0,
+          "cache_hits": 240,
+          "cache_misses": 0,
+          "cache_hit_ratio": 1.0,
+          "candidate_sql_delta": 0,
+          "elapsed_ms": 371.221,
+          "requests_per_second": 646.5,
+          "p50_ms": 9.823,
+          "p95_ms": 17.843
+        }
+      }
+    }
+  ],
+  "limitations": [
+    "Both API processes and Redis/MySQL ran on one WSL2 host.",
+    "The test measures a short warm-cache burst, not cache expiry, sustained load, multiple hosts, or user-specific recommendation caching.",
+    "Latency and throughput values are local observations and are not production SLOs or cross-machine performance promises.",
+    "The runner reported zero remaining API processes, isolated schemas, MySQL users, and temporary Redis containers after each run.",
+    "Original response checks accepted nonempty unique subsets of the 24 seeded videos, and candidate_sql delta was logged rather than asserted. The reviewed implementation requires all 24 videos and explicitly asserts zero candidate SQL."
+  ],
+  "latency_measurement": "Historical: request start through response headers; excludes response-body transfer. Reviewed implementation measures through full body consumption."
+}

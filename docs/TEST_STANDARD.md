@@ -77,7 +77,7 @@ IM 双进程故障验证运行 `python3 tests/integration/im_smoke.py --go-bin /
 | A01 启动与持久化 | 空库一键启动后 `/health`、`/ready`、`/metrics` 可访问；重启 API 后账号、视频、互动和消息仍在；依赖故障时 `/ready` 的语义与文档一致 | Compose、真实 MySQL/Redis/RabbitMQ/MinIO、重启记录 | 部分通过：MinIO 覆盖配置可启动，RabbitMQ 独立停机/重启恢复及真实 API worker 生命周期已验；最终全组件 Compose 持久化恢复仍待验 |
 | A02 身份与权限 | 注册、登录、JWT 过期/伪造、资料和头像修改、关注与取消；未登录者和其他用户不能修改私有资源；重复关注结果一致 | API 单元/集成测试 + 两账号浏览器操作 | 部分通过：主路径已有，最终部署权限矩阵待复验 |
 | A03 视频与对象 | 文件和分片上传能在断点后续传；同一会话可跨两 API 实例完成；错块、错哈希、越权、超限均拒绝；FFmpeg 成功后视频/封面可从 MinIO 读取，失败后不进入公共 Feed；重试、删除、孤儿清理无误删 | 真实 MySQL/MinIO/FFmpeg + 视频探测 + 故障测试 | 部分通过：真实 MinIO 双实例续传、FFmpeg、Range、对象清理及停机后上传恢复已验；离线旧媒体导入及隔离 SQL/对象恢复已验；分片与资产负例已在真实 MySQL/MinIO 上验证；输出 PUT 成功响应丢失及 JPEG/PNG/WebP 截断文件已验；存储完全中断、更多视频格式/权限场景与较大规模恢复成本待验 |
-| A04 Feed | 时间线、关注、热榜、推荐正确游标分页；推拉切换后关注者结果一致；缓存故障回退正确 | 单测 + 真实 MySQL/Redis 双实例 + 混合压测 | 部分通过：混合推拉、迟到关注、幂等和 MySQL 翻页已验。post-fix 全尺寸 run #41784966658 的 89,229 个 mixed 请求、120 次发布、全部一致性检查和 6/6 wait snapshots 通过；性能 gate 仍失败：SQL-only median Following P95 27.115ms、Hybrid 39.578ms（慢45.97%），目标为提升20%，默认保持 SQL-only。Measured MySQL Following digest P95：Hybrid 约27.5–33.1ms、SQL-only约18.2–20.0ms；账号级等待不能归因到单条查询，具体 Hybrid 执行计划待确认。runner 已加测量窗口外生产查询计划采集，尚未全尺寸实测。Redis回退、推荐/热榜目标和双实例故障仍待验。详见 [`PERFORMANCE.md`](PERFORMANCE.md) 和 [`feed-a04-phase-wait-events-2026-11-04.json`](benchmarks/feed-a04-phase-wait-events-2026-11-04.json)。 |
+| A04 Feed | 时间线、关注、热榜、推荐游标分页；推拉切换后关注结果一致；缓存故障回退与跨实例版本失效正确 | Go 单测、真实 MySQL/Redis、两实例及混合负载 | 部分通过：完整无缓存混合读写 run #41803621425 通过 +20% Following P95 门槛（Hybrid 26.250ms、SQL-only 46.051ms，改善43%），48,300请求、120次发布及一致性检查全通过。跨实例版本失效、独立进程 Redis 停机/SQL回退/恢复已有真实组件测试；暖缓存12并发、每场景240请求、100%命中、零候选SQL的有界实测已补完整24视频及正文计时断言。320关注者、120视频、约30秒写入和38,400条inbox的双进程 fanout 排空及3页完整性已验。证据见 [审查记录](PENDING_BRANCH_REVIEW.md)、[实测 JSON](benchmarks/pending-branch-review-2026-11-05.json) 和 [PERFORMANCE](PERFORMANCE.md)；20并发持续暖缓存性能门槛、不同关注规模和多主机仍待验。 |
 | A05 互动与计数 | 并发重复点赞/收藏、取消及关注只有一次状态转换；计数与明细一致且非负；评论回复层级、权限和通知正确；播放计数策略明确 | 真实 MySQL 并发集成测试，结束后核对表和计数 | 部分通过：真实 MySQL 曾因 1213 死锁返回 500；动作事务现按整个事务最多重试 10 次并加入随机退避；双连接、20 worker、每轮 80 次热点 like/favorite 切换在本地 MySQL 8.4.11 重复 30 轮均通过且计数匹配，MySQL 8.4.13 并发集成 CI 已通过；多用户/多视频、播放量和完整通知矩阵待验 |
 | A06 异步事件 | 业务事务失败不留待发事件；提交成功后 broker 停机也不丢事件；发布确认后重复投递不产生重复通知；消费者重启、失败重试和死信可恢复 | 真实 MySQL/RabbitMQ 故障注入 + outbox/消费者状态核对 | 部分通过：确认/不可路由、确认后 SQL 状态保留重试、SQL 提交后断连重投、并发去重、SQL 重试/死信/回放、DLQ 目标解绑恢复和真实 API worker 已有组件矩阵；精确 post-confirm/pre-SQL 和 consumer-commit/pre-ACK 进程强杀、满 DLQ、持续负载及最终联合配置仍待验 |
 | A07 IM | 两实例间单聊/群聊、成员权限、同一 `client_id` 重试、每设备 ACK、离线重放、超过 100 条的历史补页都正确；Redis 中断后重连能补齐；相同会话历史按服务端 ID 排序，重复推送可去重 | 两浏览器配置 + 两 API 实例 + 真实 MySQL/Redis 故障场景 | 部分通过：真实双 API/MySQL/Redis、双方 SIGKILL、Redis 停机/重订阅、重复提示、105 条单聊/群聊补页、逐设备 ACK 和群权限撤回已验证；同群提交行锁另有 MySQL 故障回归；前端补页/安全 ACK（含 350 条缺口/失败/过时响应）与真实 MySQL 成员撤回另有回归；最终两浏览器、默认 presence 完整过期已接入真实进程 CI；v005 活跃回执压缩及强杀恢复已验；1k/10k 稀疏查询已测量并优化；20 连接单聊三轮负载已验；群聊扇出与最终部署仍待验 |
@@ -205,7 +205,54 @@ For each successful following Feed measurement, the A04 report retains `candidat
 
 ## Feed Redis cache outage and recovery
 
-`TestFeedRedisCacheFallbackAndRecovery` uses miniredis to stop and restart the cache server on the same TCP address. Timeline, following, hot, and recommendation requests must continue through the database while Redis is unavailable and while the five-second cache circuit is open. After cooldown, the existing Redis client must reconnect, repopulate the feed entry, and serve a subsequent cache hit. This is an in-process cache recovery test; cross-instance failure and production Redis load remain separate checks.
+`TestFeedRedisCacheFallbackAndRecovery` uses miniredis to stop and restart the cache server on the same TCP address. Timeline, following, hot, and recommendation requests must continue through the database while Redis is unavailable and while the five-second cache circuit is open. After cooldown, the existing Redis client must reconnect, repopulate the feed entry, and serve a subsequent cache hit. This is an in-process recovery test; the separate API-process case is described below, while production Redis load remains open.
+
+### 跨实例共享 Feed 缓存版本
+
+`TestFollowingFeedCacheInvalidationAcrossInstances` 使用两个独立 `Server`/router 和 Redis client，共享 SQL 与 miniredis。先由实例 A 缓存关注页，再由实例 B 关注新作者；A 的下一次读取必须包含新作者的视频。之后 B 编辑视频，A 必须读取更新后的标题。真实组件版本为 `TestFollowingFeedCacheCrossInstanceRealRedis`；本地 Redis 8.2.9、DB 15 实测通过，新增的 `redis-integration` CI 步骤会执行相同测试，远程 CI 结果待运行确认：
+
+```sh
+GOSTREAM_TEST_REDIS_ADDR=127.0.0.1:6379 /usr/local/go/bin/go test ./internal/platform -run '^TestFollowingFeedCacheCrossInstanceRealRedis$' -count=1 -v
+```
+
+该变量必须指向本次测试专用的独立 Redis；测试只在 DB 15 清理 `gostream:feed:*` 键。此用例证明 Redis 共享版本键在两个 Server 对象间传播，不是独立进程的故障恢复演练；后者由下方真实双进程测试覆盖。暖缓存突发验收见下节。
+
+
+### 独立 API 进程 Redis 故障恢复
+
+`TestFeedCacheProcessRedisRecovery` 运行两个独立生产 API 可执行文件，各自连接同一隔离 MySQL schema 和 Redis 容器。实例 A 缓存 Following 页面后，实例 B 关注新作者，A 必须观察到共享版本失效；随后停 Redis，由 B 取关，要求 SQL 状态提交且 A 在 Redis 故障时回源读到新关系；Redis 恢复后，A 必须重新缓存并实际命中更新页面。运行入口会创建/删除随机 MySQL schema、用户、API 进程和 Redis 容器：
+
+```sh
+python3 tests/integration/im_smoke.py --go-bin /usr/local/go/bin/go \
+  --mysql-container <isolated-mysql-container> --mysql-addr 127.0.0.1:3306 \
+  --suite feed-cache
+```
+
+本地 Go 1.27.2、MySQL 8.4.11、Redis 8.2.9 实测通过：Go test 13.12 秒，包含编译、隔离资源创建和清理的 runner 29.33 秒；API 子进程、schema、MySQL 用户和 Redis 容器清理后均为 0。该场景覆盖单机上的两个真实 API 进程，不是多主机容量测试；CI 已配置该步骤，远程结果待运行确认。
+
+### Following 与公开推荐暖缓存突发负载
+
+`TestFeedCacheWarmBurst` 用两个生产 API 进程共享隔离 MySQL/Redis，分别预热关注首屏和未登录公开推荐首屏，再以 12 个并发 worker、每场景 240 个请求测量缓存突发流量。每个响应须为有效 JSON 且只包含夹具视频；每个场景 Redis 命中率须至少 95%，同时记录命中/未命中、P50/P95、吞吐和 `candidate_sql` 计数变化。该场景是短突发功能与观测门槛，不是多主机容量或长稳压结论；机器相关延迟仅作环境基线，不设跨机器延迟门槛。
+
+```sh
+python3 tests/integration/im_smoke.py --go-bin /usr/local/go/bin/go \
+  --mysql-container <isolated-mysql-container> --mysql-addr 127.0.0.1:3306 \
+  --suite feed-cache-load
+```
+
+关注首屏按 viewer 维度缓存；公开推荐首屏使用匿名缓存键。登录后的个性化推荐和游标分页不满足当前缓存资格，因此本项不把它们列为 Redis 暖缓存场景。CI 使用真实 MySQL/Redis 并启用 `-race`，远程运行结果待确认。Go 1.27.2 本地 race-enabled 实测连续两次通过：两个场景各 240 请求、命中率 100%、无错误、burst 中 `candidate_sql` 增量为 0；runner 耗时 18.809/19.180 秒且隔离资源清理为零。历史 P50/P95 仅计到响应头，原响应检查也未要求24条齐全；数值保留并标注在 [`feed-cache-warm-burst-2026-11-05.json`](benchmarks/feed-cache-warm-burst-2026-11-05.json)。审查后测试要求24条完整、零候选SQL，并计入完整正文传输；新实测见 [本轮记录](PENDING_BRANCH_REVIEW.md)。
+
+### 持续发布与 fanout 排空
+
+`TestFeedFanoutSustainedWriteDrain` 以两个配置了 `FEED_FANOUT_MAX_FOLLOWERS=320` 的生产 API 进程共享同一 MySQL/Redis；夹具创建 320 个关注者和120个媒体资产，随后在30波中每波并发发布4条视频，波次间隔1秒，最后停止写入并等待队列归零。必须在60秒内完成，并核对每条视频有且仅有320个 inbox follower、job 完成、`feed_pull=false`、无处理错误，且 API Following 页能够分页读取发布视频。
+
+```sh
+python3 tests/integration/im_smoke.py --go-bin /usr/local/go/bin/go \
+  --mysql-container <isolated-mysql-container> --mysql-addr 127.0.0.1:3306 \
+  --suite fanout-drain
+```
+
+本地 Go 1.27.2 race-enabled 实测：30波发布共120/120个 job 完成、38,400 条 inbox 行、采样峰值待处理10个 job；29.808秒发布窗口结束后1.264秒排空，runner 总耗时48.500秒。测试还遍历了3个 Following 游标页，120条夹具视频各返回一次，无重复或遗漏；临时 API 进程、schema、MySQL 用户和 Redis 容器均清零。先前的64视频、7.274秒结果保留为短突发基线。当前证据覆盖单机上的约30秒写入窗口和320关注者夹具；更长运行、不同关注规模与多主机运行待验。CI 步骤已配置，远程结果待运行确认。完整环境和数值见 [`feed-fanout-sustained-drain-30s-2026-11-05.json`](benchmarks/feed-fanout-sustained-drain-30s-2026-11-05.json) 及 [短突发基线](benchmarks/feed-fanout-sustained-drain-2026-11-05.json)。
 
 ## 2026-11-04 A04 inbox-first acceptance result
 
