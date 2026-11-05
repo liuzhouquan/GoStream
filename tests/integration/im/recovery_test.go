@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"slices"
@@ -15,6 +17,47 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/redis/go-redis/v9"
 )
+
+type feedCard struct {
+	ID    uint   `json:"id"`
+	Title string `json:"title"`
+}
+
+type followingFeedPage struct {
+	Items []feedCard `json:"items"`
+}
+
+func followingFeed(t *testing.T, base string, who account) []feedCard {
+	t.Helper()
+	var page followingFeedPage
+	call(t, base, http.MethodGet, "/api/feed?scene=following", who, "", nil, http.StatusOK, &page)
+	return page.Items
+}
+
+func feedCacheHitCount(t *testing.T, base string) float64 {
+	t.Helper()
+	client := &http.Client{Timeout: 3 * time.Second}
+	response, err := client.Get(base + "/metrics")
+	if err != nil {
+		t.Fatalf("get Feed cache metrics: %v", err)
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK {
+		t.Fatalf("read Feed cache metrics: status=%d err=%v", response.StatusCode, err)
+	}
+	const metric = `gostream_feed_cache_total{result="hit"} `
+	for _, line := range strings.Split(string(body), "\n") {
+		if strings.HasPrefix(line, metric) {
+			var hits float64
+			if _, err := fmt.Sscanf(strings.TrimPrefix(line, metric), "%f", &hits); err != nil {
+				t.Fatalf("parse Feed cache hit metric %q: %v", line, err)
+			}
+			return hits
+		}
+	}
+	return 0
+}
 
 // All dependencies must be disposable. The Python entry point creates them;
 // no credentials, Redis keys or rows from a demonstration instance are used.
@@ -418,4 +461,110 @@ func TestIMProcessRecovery(t *testing.T) {
 			t.Fatal("restarted device never completed replay")
 		}
 	})
+}
+
+// TestFeedCacheProcessRedisRecovery exercises shared version invalidation and
+// cache recovery across two production API processes, not in-process routers.
+func TestFeedCacheProcessRedisRecovery(t *testing.T) {
+	binary := os.Getenv("GOSTREAM_TEST_IM_BINARY")
+	dsn := os.Getenv("GOSTREAM_TEST_IM_MYSQL_DSN")
+	redisAddr := os.Getenv("GOSTREAM_TEST_IM_REDIS_ADDR")
+	container := os.Getenv("GOSTREAM_TEST_IM_REDIS_CONTAINER")
+	if binary == "" || dsn == "" || redisAddr == "" || container == "" {
+		t.Skip("requires isolated API binary, empty MySQL schema and disposable Redis; use tests/integration/im_smoke.py --suite feed-cache")
+	}
+	if !strings.HasPrefix(container, "gostream-im-test-") {
+		t.Fatal("refusing to stop a Redis container outside the disposable gostream-im-test- namespace")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal("invalid isolated MySQL configuration")
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	ctx := context.Background()
+	var tables int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE()").Scan(&tables); err != nil || tables != 0 {
+		t.Fatalf("requires a newly created empty schema: table_count=%d err=%v", tables, err)
+	}
+	rc := redis.NewClient(&redis.Options{Addr: redisAddr, DialTimeout: time.Second, ReadTimeout: time.Second, WriteTimeout: time.Second, MaxRetries: 0})
+	t.Cleanup(func() { _ = rc.Close() })
+	if keys, err := rc.DBSize(ctx).Result(); err != nil || keys != 0 {
+		t.Fatalf("requires an empty dedicated Redis server: keys=%d err=%v", keys, err)
+	}
+	secret := randomID(t) + randomID(t)
+	a, b := newProcess(t, binary, dsn, redisAddr, secret), newProcess(t, binary, dsn, redisAddr, secret)
+	a.start(t)
+	b.start(t)
+	owner := register(t, a.base, "feed_owner_"+randomID(t)[:8])
+	secondAuthor := register(t, a.base, "feed_author_"+randomID(t)[:8])
+	viewer := register(t, a.base, "feed_viewer_"+randomID(t)[:8])
+	insertVideo := func(authorID uint, title string, createdAt time.Time) uint {
+		t.Helper()
+		result, err := db.ExecContext(ctx, "INSERT INTO videos (author_id,title,media_url,status,created_at) VALUES (?,?,?,'published',?)", authorID, title, "/media/"+randomID(t)+".mp4", createdAt.UTC())
+		if err != nil {
+			t.Fatalf("insert isolated Feed video: %v", err)
+		}
+		id, err := result.LastInsertId()
+		if err != nil || id <= 0 {
+			t.Fatalf("read isolated Feed video ID: id=%d err=%v", id, err)
+		}
+		return uint(id)
+	}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	ownerVideo := insertVideo(owner.User.ID, "feed owner", now.Add(-time.Second))
+	authorVideo := insertVideo(secondAuthor.User.ID, "second author", now)
+	call(t, a.base, "PUT", fmt.Sprintf("/api/users/me/following/%d", owner.User.ID), viewer, "", nil, http.StatusOK, nil)
+	first := followingFeed(t, a.base, viewer)
+	if len(first) != 1 || first[0].ID != ownerVideo {
+		t.Fatalf("initial process Following Feed: %+v", first)
+	}
+	// The mutation is sent to process B. A must observe it through the shared
+	// per-viewer Redis version and invalidate the page it cached above.
+	call(t, b.base, "PUT", fmt.Sprintf("/api/users/me/following/%d", secondAuthor.User.ID), viewer, "", nil, http.StatusOK, nil)
+	updated := followingFeed(t, a.base, viewer)
+	if len(updated) != 2 || updated[0].ID != authorVideo || updated[1].ID != ownerVideo {
+		t.Fatalf("process A served a stale page after process B follow: %+v", updated)
+	}
+	_ = followingFeed(t, a.base, viewer)
+	initialHits := feedCacheHitCount(t, a.base)
+	if initialHits < 1 {
+		t.Fatal("process A did not serve the warmed Following page from Redis")
+	}
+
+	stopRedis := func(action string) {
+		t.Helper()
+		commandCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+		defer cancel()
+		if err := exec.CommandContext(commandCtx, "docker", action, container).Run(); err != nil {
+			t.Fatalf("disposable Redis %s failed: %v", action, err)
+		}
+	}
+	stopRedis("stop")
+	redisStopped := true
+	t.Cleanup(func() {
+		if redisStopped {
+			stopRedis("start")
+		}
+	})
+	// MySQL remains authoritative while Redis is down. The successful SQL
+	// unfollow cannot bump the cache version, so process A must bypass Redis.
+	call(t, b.base, "DELETE", fmt.Sprintf("/api/users/me/following/%d", owner.User.ID), viewer, "", nil, http.StatusOK, nil)
+	duringOutage := followingFeed(t, a.base, viewer)
+	if len(duringOutage) != 1 || duringOutage[0].ID != authorVideo {
+		t.Fatalf("Following Feed did not reflect SQL state during Redis outage: %+v", duringOutage)
+	}
+	stopRedis("start")
+	redisStopped = false
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		items := followingFeed(t, a.base, viewer)
+		if len(items) != 1 || items[0].ID != authorVideo {
+			t.Fatalf("stale Following page after Redis recovery: %+v", items)
+		}
+		if feedCacheHitCount(t, a.base) > initialHits {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	t.Fatal("process A did not rebuild and hit its Following cache after Redis recovery")
 }

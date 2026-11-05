@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Run real two-API recovery or load checks with disposable MySQL/Redis data."""
 import argparse
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -10,11 +11,49 @@ import shutil
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@contextmanager
+def cleanup_on_interrupt():
+    """Turn external cancellation into stack unwinding through main's finally."""
+    previous = {}
+
+    def interrupt(number, _frame):
+        raise InterruptedError(number)
+
+    try:
+        for number in (signal.SIGINT, signal.SIGTERM):
+            previous[number] = signal.signal(number, interrupt)
+        yield
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+
+
+@contextmanager
+def finish_process_start():
+    """Defer cancellation until Popen's handle is assigned to its owner."""
+    pending = []
+    previous = {}
+
+    def remember(number, _frame):
+        pending.append(number)
+
+    try:
+        for number in (signal.SIGINT, signal.SIGTERM):
+            previous[number] = signal.signal(number, remember)
+        yield
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+        if pending:
+            raise InterruptedError(pending[0])
 
 
 def running_group(group):
@@ -52,6 +91,7 @@ def stop_test_group(process):
         raise RuntimeError("could not stop isolated test process group")
 
 
+@cleanup_on_interrupt()
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mysql-container", required=True)
@@ -59,25 +99,29 @@ def main():
     parser.add_argument("--go-bin", default="go")
     parser.add_argument("--check-timeout-cleanup", action="store_true",
                         help="deliberately time out after API startup and verify outer process cleanup")
-    parser.add_argument("--suite", choices=["recovery", "load"], default="recovery")
+    parser.add_argument(
+        "--suite",
+        choices=["recovery", "feed-cache", "feed-cache-load", "fanout-drain", "load"],
+        default="recovery",
+    )
     parser.add_argument("--race-load", action="store_true", help="instrument the separate load suite with race detection")
     parser.add_argument("--report-file", type=Path, help="write successful load JSON outside the disposable work directory")
     args = parser.parse_args()
     if args.suite != "load" and (args.race_load or args.report_file):
         parser.error("--race-load and --report-file require --suite load")
-    if args.suite == "load" and args.check_timeout_cleanup:
+    if args.check_timeout_cleanup and args.suite != "recovery":
         parser.error("--check-timeout-cleanup applies only to recovery")
     report_path = args.report_file.resolve() if args.report_file else None
     if report_path:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         # A failed run must not leave an older successful report looking current.
         report_path.unlink(missing_ok=True)
-    instrument_race = args.suite == "recovery" or args.race_load
+    instrument_race = args.suite in ("recovery", "feed-cache", "feed-cache-load", "fanout-drain") or args.race_load
     required = re.search(r"^go (\S+)$", (ROOT / "go.mod").read_text(), re.M).group(1)
     actual = subprocess.check_output([args.go_bin, "env", "GOVERSION"], text=True).strip()
     if actual != "go" + required:
         raise RuntimeError(f"requires Go {required}; configured tool reports {actual}")
-    tag, password = secrets.token_hex(5), secrets.token_hex(24)
+    tag, password = secrets.token_hex(12), secrets.token_hex(24)
     schema, user, container = "gostream_im_" + tag, "gsim_" + tag, "gostream-im-test-" + tag
     work = Path(tempfile.mkdtemp(prefix="gostream-im-"))
     db_created = user_created = container_created = False
@@ -97,19 +141,27 @@ def main():
                     'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --batch --skip-column-names'],
                    input=sql, capture_output=True).stdout.strip()
 
+    def remove_redis():
+        remaining = run(["docker", "ps", "-a", "--filter", "name=^/" + container + "$",
+                         "--format", "{{.ID}}"], capture_output=True).stdout.strip()
+        if remaining:
+            run(["docker", "rm", "-f", "-v", container], capture_output=True)
+
     try:
-        mysql(f"CREATE DATABASE `{schema}`;")
+        # Record cleanup ownership before issuing external creates: cancellation
+        # can arrive after the server commits but before the CLI returns.
         db_created = True
-        mysql(f"CREATE USER '{user}'@'%' IDENTIFIED BY '{password}';")
+        mysql(f"CREATE DATABASE `{schema}`;")
         user_created = True
+        mysql(f"CREATE USER '{user}'@'%' IDENTIFIED BY '{password}';")
         mysql(f"GRANT ALL PRIVILEGES ON `{schema}`.* TO '{user}'@'%';")
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             port = listener.getsockname()[1]
         # An explicit host port remains stable across the Redis stop/start test.
+        container_created = True
         run(["docker", "run", "-d", "--name", container, "-p", f"127.0.0.1:{port}:6379",
              "redis:8.2.9", "redis-server", "--save", "", "--appendonly", "no"], capture_output=True)
-        container_created = True
         for _ in range(100):
             probe = subprocess.run(["docker", "exec", container, "redis-cli", "ping"], capture_output=True, text=True)
             if probe.returncode == 0 and probe.stdout.strip() == "PONG":
@@ -134,17 +186,30 @@ def main():
         env["GOSTREAM_TEST_IM_LOAD_RACE"] = "1" if instrument_race else ""
         env["GOSTREAM_TEST_IM_LOAD_REVISION"] = run(["git", "rev-parse", "HEAD"], capture_output=True).stdout.strip()
         env["GOSTREAM_TEST_IM_LOAD_REPORT"] = str(work / "load-report.json") if args.suite == "load" else ""
-        name = "TestIMConcurrentLoad" if args.suite == "load" else "TestIMProcessRecovery"
+        name = {
+            "recovery": "TestIMProcessRecovery",
+            "feed-cache": "TestFeedCacheProcessRedisRecovery",
+            "feed-cache-load": "TestFeedCacheWarmBurst",
+            "fanout-drain": "TestFeedFanoutSustainedWriteDrain",
+            "load": "TestIMConcurrentLoad",
+        }[args.suite]
         test_args = [args.go_bin, "test", *race_flag, "./tests/integration/im", "-run", "^" + name + "$", "-count=1", "-v"]
         if args.check_timeout_cleanup:
             env["GOSTREAM_TEST_IM_WAIT_FOR_TIMEOUT"] = "1"
             test_args.append("-timeout=10s")
         else:
-            test_args.append("-timeout=6m")
-        test_process = subprocess.Popen(test_args, cwd=ROOT, env=env, start_new_session=True,
-                                        stdout=subprocess.PIPE if args.check_timeout_cleanup else None,
-                                        stderr=subprocess.STDOUT if args.check_timeout_cleanup else None,
-                                        text=True)
+            if args.suite == "fanout-drain":
+                test_timeout = "-timeout=3m"
+            elif args.suite == "feed-cache-load":
+                test_timeout = "-timeout=2m"
+            else:
+                test_timeout = "-timeout=6m"
+            test_args.append(test_timeout)
+        with finish_process_start():
+            test_process = subprocess.Popen(test_args, cwd=ROOT, env=env, start_new_session=True,
+                                            stdout=subprocess.PIPE if args.check_timeout_cleanup else None,
+                                            stderr=subprocess.STDOUT if args.check_timeout_cleanup else None,
+                                            text=True)
         if args.check_timeout_cleanup:
             output, _ = test_process.communicate()
             if (test_process.returncode == 0 or "intentional API cleanup timeout" not in output
@@ -165,6 +230,10 @@ def main():
             report_data["host"] = dict(kernel=system.release, machine=system.machine,
                                        cpu_model=cpu_model, memory_bytes=memory_kib * 1024)
     finally:
+        # A second cancellation must not abort SQL/container/process cleanup.
+        # cleanup_on_interrupt restores the caller's handlers on exit.
+        for number in (signal.SIGINT, signal.SIGTERM):
+            signal.signal(number, signal.SIG_IGN)
         # Each cleanup remains independent so one failed deletion cannot skip
         # cleanup of the temporary credentials and the other resources.
         errors = []
@@ -174,9 +243,9 @@ def main():
         except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
             errors.append(str(exc))
         for needed, cleanup in [
-            (container_created, lambda: run(["docker", "rm", "-f", "-v", container], capture_output=True)),
-            (db_created, lambda: mysql(f"DROP DATABASE `{schema}`;")),
-            (user_created, lambda: mysql(f"DROP USER '{user}'@'%';")),
+            (container_created, remove_redis),
+            (db_created, lambda: mysql(f"DROP DATABASE IF EXISTS `{schema}`;")),
+            (user_created, lambda: mysql(f"DROP USER IF EXISTS '{user}'@'%';")),
         ]:
             if needed:
                 try:
@@ -221,4 +290,8 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except InterruptedError as error:
+        print("IM launcher interrupted; cleanup completed", file=sys.stderr)
+        raise SystemExit(128 + int(error.args[0]))

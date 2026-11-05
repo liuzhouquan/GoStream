@@ -31,6 +31,9 @@ jobs:
           echo "required=$required actual=$actual"
           test "$actual" = "$required"
 
+      - name: Test development timing helpers
+        run: python3 -m unittest discover -s tests/diagnostics -p 'test_*.py' -v
+
       - name: Go tests
         run: go test ./...
 
@@ -129,6 +132,30 @@ jobs:
           --mysql-container "${{ job.services.mysql.id }}"
           --mysql-addr 127.0.0.1:3306
 
+      - name: Exercise cross-process Feed cache outage and recovery
+        run: >-
+          python3 tests/integration/im_smoke.py
+          --go-bin go
+          --mysql-container "${{ job.services.mysql.id }}"
+          --mysql-addr 127.0.0.1:3306
+          --suite feed-cache
+
+      - name: Measure warm Following and public recommendation cache bursts
+        run: >-
+          python3 tests/integration/im_smoke.py
+          --go-bin go
+          --mysql-container "${{ job.services.mysql.id }}"
+          --mysql-addr 127.0.0.1:3306
+          --suite feed-cache-load
+
+      - name: Measure sustained hybrid Feed publication and fanout drain
+        run: >-
+          python3 tests/integration/im_smoke.py
+          --go-bin go
+          --mysql-container "${{ job.services.mysql.id }}"
+          --mysql-addr 127.0.0.1:3306
+          --suite fanout-drain
+
       - name: Measure 20-client cross-instance IM traffic and offline recovery
         run: |
           uname -srmo
@@ -193,6 +220,9 @@ jobs:
 
       - name: Test shared Redis request budget
         run: go test ./internal/platform -run '^TestRateLimiterRealRedisIntegration$' -count=1 -v
+
+      - name: Test cross-instance Feed cache invalidation
+        run: go test ./internal/platform -run '^TestFollowingFeedCacheCrossInstanceRealRedis$' -count=1 -v
 
   video-recovery-integration:
     runs-on: ubuntu-24.04

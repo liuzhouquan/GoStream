@@ -1,0 +1,103 @@
+{
+  "date": "2026-11-05",
+  "review_base": "87b1f598b23e8d54a498fda017640300ffb0b441",
+  "environment": {
+    "os": "Linux 6.18.33.2-microsoft-standard-WSL2",
+    "architecture": "x86_64",
+    "cpu": "AMD Ryzen 7 5800H with Radeon Graphics",
+    "logical_cpus": 16,
+    "memory_gib": 13,
+    "go": "1.27.2",
+    "mysql": "8.4.11",
+    "redis_image": "redis:8.2.9",
+    "api_processes": 2,
+    "race_detector": true
+  },
+  "checks": {
+    "branch-review-go-tests": {
+      "elapsed_seconds": 41.732,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    "review-feed-cache-recovery": {
+      "elapsed_seconds": 30.449,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    "review-feed-cache-warm": {
+      "elapsed_seconds": 15.211,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    "review-feed-fanout": {
+      "elapsed_seconds": 45.54,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    "review-real-launcher-interrupt-final": {
+      "elapsed_seconds": 9.453,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    "review-redis-cache-race": {
+      "elapsed_seconds": 14.292,
+      "exit_code": 0,
+      "timed_out": false
+    }
+  },
+  "python_diagnostic_tests": 10,
+  "python_feed_helper_tests": 59,
+  "warm_cache": {
+    "latency_definition": "HTTP request start through complete response body consumption, before JSON validation",
+    "concurrency": 12,
+    "requests_per_scene": 240,
+    "expected_videos_per_response": 24,
+    "following": {
+      "successes": 240,
+      "failures": 0,
+      "cache_hits": 240,
+      "candidate_sql_delta": 0,
+      "p50_ms": 8.535,
+      "p95_ms": 17.018,
+      "requests_per_second": 769.2
+    },
+    "anonymous_recommendation": {
+      "successes": 240,
+      "failures": 0,
+      "cache_hits": 240,
+      "candidate_sql_delta": 0,
+      "p50_ms": 7.151,
+      "p95_ms": 11.545,
+      "requests_per_second": 876.6
+    }
+  },
+  "fanout": {
+    "videos": 120,
+    "followers": 320,
+    "inbox_rows": 38400,
+    "publish_window_seconds": 29.784,
+    "sampled_peak_pending_jobs": 12,
+    "drain_after_stop_seconds": 1.772,
+    "allowed_drain_seconds": 60,
+    "jobs_completed": 120,
+    "job_errors": 0,
+    "worker_attempts": 480,
+    "following_cursor_pages": 3,
+    "following_fixture_videos": 120
+  },
+  "external_sigterm": {
+    "trigger": "production API became ready",
+    "launcher_exit_code": 143,
+    "remaining_test_processes": 0,
+    "remaining_schemas": 0,
+    "remaining_users": 0,
+    "remaining_redis_containers": 0
+  },
+  "limitations": [
+    "One WSL2 host; API processes and dependencies share it.",
+    "Warm cache results are one bounded burst, not the 20-concurrency sustained performance gate.",
+    "Fanout uses one author and 320 followers over about 30 seconds.",
+    "Historical warm-cache artifacts retain their original time-to-response-headers measurements.",
+    "Forced SIGKILL or exhausted cleanup grace can prevent external-resource cleanup."
+  ]
+}
