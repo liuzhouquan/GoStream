@@ -108,6 +108,7 @@ time.sleep(30)
 from pathlib import Path
 from unittest.mock import patch
 root,work=map(Path,sys.argv[1:3])
+sys.path.insert(0,str(root/'tests/integration'))
 stage=sys.argv[3]
 container_exists=False
 spec=importlib.util.spec_from_file_location('im_smoke',root/'tests/integration/im_smoke.py')
@@ -146,7 +147,7 @@ with patch.object(smoke.subprocess,'run',side_effect=run), \
      patch.object(smoke.subprocess,'check_output',return_value='go'+version+'\n'), \
      patch.object(smoke.subprocess,'Popen',side_effect=popen):
     try: smoke.main()
-    except InterruptedError: raise SystemExit(143)
+    except smoke.LauncherInterrupted: raise SystemExit(143)
 '''
         return [sys.executable, "-c", code, str(ROOT), directory, stage]
 

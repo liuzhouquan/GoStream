@@ -7,12 +7,14 @@ import (
 	"net"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 const rabbitOperationTimeout = 5 * time.Second
+const rabbitConnectAttemptTimeout = 2 * time.Second
 
 type rabbitSession struct {
 	conn *amqp.Connection
@@ -26,7 +28,8 @@ func (s *rabbitSession) close() {
 }
 
 type rabbitNotificationBroker struct {
-	url     string
+	urls    []string
+	nextURL atomic.Uint64
 	queue   string
 	gate    chan struct{}
 	pub     *rabbitSession // Owned by gate; consumer uses its own connection.
@@ -38,8 +41,18 @@ type rabbitNotificationBroker struct {
 // UseRabbitMQ configures reliable notification transport without requiring a
 // live broker at API startup. SQL notifications/outbox remain available offline.
 func (s *Server) UseRabbitMQ(rawURL, queue string) error {
-	if _, err := amqp.ParseURI(rawURL); err != nil || strings.TrimSpace(rawURL) == "" {
-		return errors.New("RABBITMQ_URL must be a valid amqp or amqps URI")
+	urls := strings.Split(rawURL, ",")
+	if len(urls) == 0 || strings.TrimSpace(rawURL) == "" {
+		return errors.New("RABBITMQ_URL or RABBITMQ_URLS must contain a valid amqp or amqps URI")
+	}
+	for i := range urls {
+		urls[i] = strings.TrimSpace(urls[i])
+		if urls[i] == "" {
+			return errors.New("RABBITMQ_URLS cannot contain an empty endpoint")
+		}
+		if _, err := amqp.ParseURI(urls[i]); err != nil {
+			return errors.New("RABBITMQ_URL or RABBITMQ_URLS must contain valid amqp or amqps URIs")
+		}
 	}
 	if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$`).MatchString(queue) || strings.HasPrefix(queue, "amq.") {
 		return errors.New("RABBITMQ_QUEUE must be 1-100 letters, digits, dots, underscores or hyphens and cannot start with amq.")
@@ -47,14 +60,31 @@ func (s *Server) UseRabbitMQ(rawURL, queue string) error {
 	if s.broker != nil {
 		return errors.New("RabbitMQ already configured")
 	}
-	s.broker = &rabbitNotificationBroker{url: rawURL, queue: queue, gate: make(chan struct{}, 1), metrics: s.metrics}
+	s.broker = &rabbitNotificationBroker{urls: urls, queue: queue, gate: make(chan struct{}, 1), metrics: s.metrics}
 	s.broker.gate <- struct{}{}
 	return nil
 }
 
 func (b *rabbitNotificationBroker) open(ctx context.Context) (*rabbitSession, error) {
+	start := int((b.nextURL.Add(1) - 1) % uint64(len(b.urls)))
+	for offset := range len(b.urls) {
+		if ctx.Err() != nil {
+			break
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, rabbitConnectAttemptTimeout)
+		session, err := b.openURL(attemptCtx, b.urls[(start+offset)%len(b.urls)])
+		cancel()
+		if err == nil {
+			return session, nil
+		}
+	}
+	// Never return an AMQP URI containing credentials in logs/LastError.
+	return nil, errors.New("RabbitMQ connection unavailable")
+}
+
+func (b *rabbitNotificationBroker) openURL(ctx context.Context, rawURL string) (*rabbitSession, error) {
 	var wire net.Conn
-	conn, err := amqp.DialConfig(b.url, amqp.Config{Heartbeat: 5 * time.Second, Dial: func(network, addr string) (net.Conn, error) {
+	conn, err := amqp.DialConfig(rawURL, amqp.Config{Heartbeat: 5 * time.Second, Dial: func(network, addr string) (net.Conn, error) {
 		var err error
 		wire, err = (&net.Dialer{}).DialContext(ctx, network, addr)
 		if err == nil {
@@ -67,7 +97,6 @@ func (b *rabbitNotificationBroker) open(ctx context.Context) (*rabbitSession, er
 		if wire != nil {
 			_ = wire.Close()
 		}
-		// Never return an AMQP URI containing credentials in logs/LastError.
 		return nil, errors.New("RabbitMQ connection unavailable")
 	}
 	session := &rabbitSession{conn: conn, wire: wire}

@@ -58,6 +58,9 @@ jobs:
       - name: Test Feed A04 mixed-load acceptance helpers
         run: python3 -m unittest discover -s tests/integration -p 'test_feed_a04_mixed.py' -v
 
+      - name: Test RabbitMQ ACK gate proxy
+        run: python3 -m unittest discover -s tests/integration -p 'test_rabbitmq_ack_proxy.py' -v
+
       - name: Validate Compose configuration
         env:
           JWT_SECRET: ci-compose-configuration-only-secret-123456789
@@ -98,6 +101,33 @@ jobs:
       - name: Exercise broker confirms, redelivery, DLQ replay, restart and API workers
         run: >-
           python3 tests/integration/rabbitmq_smoke.py
+          --go-bin go
+          --mysql-container "${{ job.services.mysql.id }}"
+          --mysql-addr 127.0.0.1:3306
+
+      - name: Exercise quorum delivery with one follower unavailable
+        run: >-
+          python3 tests/integration/rabbitmq_smoke.py
+          --rabbitmq-cluster
+          --cluster-only
+          --go-bin go
+          --mysql-container "${{ job.services.mysql.id }}"
+          --mysql-addr 127.0.0.1:3306
+
+      - name: Exercise quorum leader failover and application reconnect
+        run: >-
+          python3 tests/integration/rabbitmq_smoke.py
+          --rabbitmq-cluster
+          --cluster-leader-only
+          --go-bin go
+          --mysql-container "${{ job.services.mysql.id }}"
+          --mysql-addr 127.0.0.1:3306
+
+      - name: Exercise outbox recovery after quorum majority restoration
+        run: >-
+          python3 tests/integration/rabbitmq_smoke.py
+          --rabbitmq-cluster
+          --cluster-majority-only
           --go-bin go
           --mysql-container "${{ job.services.mysql.id }}"
           --mysql-addr 127.0.0.1:3306

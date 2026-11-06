@@ -4,6 +4,8 @@ GoStream is a runnable Go short-video social platform with a static web client, 
 
 ## Status
 
+For the remaining release work and multi-agent handoff, use the [SDD and detailed task checklist](docs/SDD.md). It defines the fixed release boundary, G01–G12 dependencies, acceptance evidence, and task ownership protocol.
+
 This repository is under active staged development. See [delivery scope](docs/DELIVERY_SCOPE.md), [test and acceptance standards](docs/TEST_STANDARD.md), and [PROGRESS.md](PROGRESS.md) for the target release, evidence requirements, and current status. Do not treat planned modules as implemented features. The [OpenAPI document](docs/openapi.yaml) has structure and representative runtime-schema checks; complete acceptance remains tracked in the matrix. For development order, document ownership and verification commands, start with the [development guide](docs/DEVELOPMENT.md).
 
 ## Local requirements

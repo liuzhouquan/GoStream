@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Run real two-API recovery or load checks with disposable MySQL/Redis data."""
 import argparse
-from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -15,45 +14,10 @@ import sys
 import tempfile
 import time
 
+from launcher_lifecycle import LauncherInterrupted, cleanup_on_interrupt, finish_process_start
+
 
 ROOT = Path(__file__).resolve().parents[2]
-
-
-@contextmanager
-def cleanup_on_interrupt():
-    """Turn external cancellation into stack unwinding through main's finally."""
-    previous = {}
-
-    def interrupt(number, _frame):
-        raise InterruptedError(number)
-
-    try:
-        for number in (signal.SIGINT, signal.SIGTERM):
-            previous[number] = signal.signal(number, interrupt)
-        yield
-    finally:
-        for number, handler in previous.items():
-            signal.signal(number, handler)
-
-
-@contextmanager
-def finish_process_start():
-    """Defer cancellation until Popen's handle is assigned to its owner."""
-    pending = []
-    previous = {}
-
-    def remember(number, _frame):
-        pending.append(number)
-
-    try:
-        for number in (signal.SIGINT, signal.SIGTERM):
-            previous[number] = signal.signal(number, remember)
-        yield
-    finally:
-        for number, handler in previous.items():
-            signal.signal(number, handler)
-        if pending:
-            raise InterruptedError(pending[0])
 
 
 def running_group(group):
@@ -292,6 +256,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except InterruptedError as error:
+    except LauncherInterrupted as error:
         print("IM launcher interrupted; cleanup completed", file=sys.stderr)
         raise SystemExit(128 + int(error.args[0]))
