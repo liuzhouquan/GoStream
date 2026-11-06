@@ -40,7 +40,11 @@ func run(args []string) error {
 		if queue == "" {
 			queue = "gostream.notifications.v1"
 		}
-		if err := server.UseRabbitMQ(os.Getenv("RABBITMQ_URL"), queue); err != nil {
+		brokerURL := os.Getenv("RABBITMQ_URLS")
+		if brokerURL == "" {
+			brokerURL = os.Getenv("RABBITMQ_URL")
+		}
+		if err := server.UseRabbitMQ(brokerURL, queue); err != nil {
 			return err
 		}
 		count, err := server.ReplayRabbitDeadLetters(ctx, *limit)

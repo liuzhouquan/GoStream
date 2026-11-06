@@ -1,5 +1,7 @@
 # 开发任务耗时诊断与监控
 
+2026-11-06补充：真实取消演练发现 `InterruptedError` 信号异常会被 `subprocess.run(capture_output=True)` 底层selector当EINTR吞掉，launcher继续运行而不执行finally；原仅模拟Docker返回的信号测试没有覆盖这个等待窗口。现用 `tests/integration/launcher_lifecycle.py` 的 `LauncherInterrupted(Exception)`，IM/RabbitMQ/MinIO共用。最小真实子进程等待回归先失败后通过；真实MySQL/broker创建后SIGTERM从超过30秒不退出修复为2.206秒清理完成，exit143、资源零残留。此发现说明要同时观察信号实际退出码和清理，不能把“已发送SIGTERM”当作命令已停止。
+
 本次调查针对开发和验证流程的耗时，不是平台 API 的容量测试。原始会话记录只在本机读取；仓库内仅保留脱敏后的数值、测试名、Actions 步骤名和来源链接。
 
 ## 已确认的原因

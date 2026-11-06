@@ -1,6 +1,6 @@
 # GoStream development guide
 
-Read `docs/DELIVERY_SCOPE.md`, `docs/TEST_STANDARD.md`, and the recent entries in
+Read `docs/SDD.md`, `docs/DELIVERY_SCOPE.md`, `docs/TEST_STANDARD.md`, and the recent entries in
 `PROGRESS.md` before choosing the next work package. Use the Go version declared
 in `go.mod`; the local installation is `/usr/local/go/bin/go`. Ask about a missing
 or incompatible runtime instead of silently falling back to another version.

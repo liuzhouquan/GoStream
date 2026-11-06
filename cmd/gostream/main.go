@@ -77,7 +77,11 @@ func main() {
 		log.Fatalf("migrate database: %v", err)
 	}
 	server := platform.NewServer(db, secret, mediaDir)
-	if brokerURL := os.Getenv("RABBITMQ_URL"); brokerURL != "" {
+	brokerURL := os.Getenv("RABBITMQ_URLS")
+	if brokerURL == "" {
+		brokerURL = os.Getenv("RABBITMQ_URL")
+	}
+	if brokerURL != "" {
 		if err := server.UseRabbitMQ(brokerURL, env("RABBITMQ_QUEUE", "gostream.notifications.v1")); err != nil {
 			log.Fatal(err)
 		}
