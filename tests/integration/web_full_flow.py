@@ -194,7 +194,15 @@ def verify_group_member_revocation(owner, removed, group_id):
 def restart_compose_api(project_name=None):
     """Restart a single API container in the Compose stack."""
     if project_name:
-        cmd = ["docker", "compose", "-p", project_name, "restart", "api"]
+        ps_out = subprocess.check_output(
+            ["docker", "ps", "--filter", f"label=com.docker.compose.project={project_name}",
+             "--filter", "label=com.docker.compose.service=api", "--format", "{{.ID}}"],
+            text=True
+        ).strip().splitlines()
+        if ps_out:
+            cmd = ["docker", "restart", ps_out[0]]
+        else:
+            cmd = ["docker", "compose", "-p", project_name, "restart", "api"]
     else:
         # Fallback to restarting first api container found
         ps_out = subprocess.check_output(
