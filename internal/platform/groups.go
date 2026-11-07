@@ -283,7 +283,7 @@ func (s *Server) ackGroupMessage(c *gin.Context) {
 		return
 	}
 	if deviceID != "" {
-		err := transactionWithDeadlockRetry(context.Background(), s.DB, func(tx *gorm.DB) error {
+		err := transactionWithDeadlockRetry(c.Request.Context(), s.DB, func(tx *gorm.DB) error {
 			var locked ChatGroup
 			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&locked, group.ID).Error; err != nil {
 				return err
@@ -363,6 +363,11 @@ func (s *Server) sendGroupMessage(userID uint, client *hubClient, e socketEvent)
 	msg := GroupMessage{GroupID: e.GroupID, SenderID: userID, ClientID: e.ClientID, Body: e.Body}
 	created, conflict := false, false
 	err := transactionWithDeadlockRetry(context.Background(), s.DB, func(tx *gorm.DB) error {
+		// A rolled-back INSERT may leave its allocated ID in the Go value.
+		// Reallocate on every attempt so a retry cannot commit an older ID
+		// after another same-group send has committed and been ACKed.
+		msg = GroupMessage{GroupID: e.GroupID, SenderID: userID, ClientID: e.ClientID, Body: e.Body}
+		created, conflict = false, false
 		// Allocate IDs and serialize against invitations and member removal
 		// using the same group row lock.
 		// A later same-group message must not commit ahead of an earlier insert:

@@ -55,7 +55,7 @@ def running_group(group):
 
 def stop_test_group(process):
     """Gracefully terminate, then force kill, a child process group."""
-    if process is None or process.poll() is not None:
+    if process is None:
         return
     for action, duration in [(signal.SIGTERM, 10), (signal.SIGKILL, 3)]:
         if not running_group(process.pid):
@@ -69,8 +69,11 @@ def stop_test_group(process):
             time.sleep(0.05)
     try:
         process.wait(timeout=3)
-    except subprocess.TimeoutExpired:
-        pass
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("command leader survived process-group cleanup") from exc
+    remaining = running_group(process.pid)
+    if remaining:
+        raise RuntimeError(f"command descendants survived cleanup: {len(remaining)}")
 
 
 def get_git_info(cwd):
@@ -92,6 +95,8 @@ def get_host_info():
             if line.startswith("model name"):
                 cpu_model = line.split(":", 1)[1].strip()
                 break
+    except LauncherInterrupted:
+        raise
     except Exception:
         pass
 
@@ -101,6 +106,8 @@ def get_host_info():
             if line.startswith("MemTotal:"):
                 memory_kib = int(line.split()[1])
                 break
+    except LauncherInterrupted:
+        raise
     except Exception:
         pass
 
@@ -205,6 +212,24 @@ class AcceptanceStack:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=True)
         return proc.stdout.strip()
 
+    def check_remaining_volumes(self):
+        """Check project-owned volumes as well as the containers using them."""
+        proc = subprocess.run([
+            "docker", "volume", "ls", "--filter",
+            f"label=com.docker.compose.project={self.project_name}",
+            "--format", "{{.Name}}",
+        ], capture_output=True, text=True, check=True)
+        return proc.stdout.strip()
+
+    def check_remaining_networks(self):
+        """Find Compose networks owned by the named project."""
+        proc = subprocess.run([
+            "docker", "network", "ls", "--filter",
+            f"label=com.docker.compose.project={self.project_name}",
+            "--format", "{{.ID}}",
+        ], capture_output=True, text=True, check=True)
+        return proc.stdout.strip()
+
     def verify_go_runtime(self):
         """Verify local Go matches go.mod specification."""
         go_mod = (self.root / "go.mod").read_text()
@@ -220,6 +245,16 @@ class AcceptanceStack:
         git_info = get_git_info(self.root)
         host_info = get_host_info()
 
+        # A caller-selected name is not proof that its data is disposable.
+        # Refuse existing projects before claiming any cleanup ownership.
+        for kind, probe in (
+            ("containers", self.check_remaining_containers),
+            ("volumes", self.check_remaining_volumes),
+            ("networks", self.check_remaining_networks),
+        ):
+            if probe():
+                raise RuntimeError(f"refusing existing Compose project {self.project_name}: {kind} already present")
+
         up_args = ["up", "-d", "--scale", "api=2"]
         if self.build:
             up_args.append("--build")
@@ -227,7 +262,7 @@ class AcceptanceStack:
         start_time = time.monotonic()
         # Mark started before invocation so interruption during up() guarantees down() cleanup
         self.started = True
-        self.run_compose(*up_args)
+        self.run_compose(*up_args, capture_output=False)
 
         self.wait_for_ready(self.wait_timeout)
         ready_elapsed = round(time.monotonic() - start_time, 3)
@@ -323,8 +358,12 @@ class AcceptanceStack:
                             name = parsed.get("Name") or parsed.get("name")
                             cid = parsed.get("ID") or parsed.get("id")
                             instances.append({"service": "api", "container_name": name, "container_id": cid})
+                except LauncherInterrupted:
+                    raise
                 except Exception:
                     pass
+        except LauncherInterrupted:
+            raise
         except Exception:
             pass
 
@@ -336,6 +375,7 @@ class AcceptanceStack:
         if self.child_process is not None:
             try:
                 stop_test_group(self.child_process)
+                self.child_process = None
             except Exception as exc:
                 errors.append(f"stop_child_process: {exc}")
 
@@ -354,7 +394,22 @@ class AcceptanceStack:
             except Exception as exc:
                 errors.append(f"verify_cleanup: {exc}")
 
-            self.started = False
+            try:
+                remaining = self.check_remaining_volumes()
+                if remaining:
+                    errors.append(f"surviving volumes: {remaining}")
+            except Exception as exc:
+                errors.append(f"verify_volume_cleanup: {exc}")
+
+            try:
+                remaining = self.check_remaining_networks()
+                if remaining:
+                    errors.append(f"surviving networks: {remaining}")
+            except Exception as exc:
+                errors.append(f"verify_network_cleanup: {exc}")
+
+            if not errors:
+                self.started = False
 
         if errors:
             raise RuntimeError("; ".join(errors))
@@ -380,7 +435,6 @@ class AcceptanceStack:
             )
 
         exit_code = self.child_process.wait()
-        self.child_process = None
         return exit_code
 
     def __enter__(self):
@@ -462,16 +516,6 @@ def main():
         elif not args.probe_only:
             print("No command specified and not --probe-only. Stack verified successfully.", flush=True)
 
-        if exit_code == 0:
-            stack.metadata["launcher_cleanup"] = {"containers": 0, "volumes": 0}
-            report_json = json.dumps(stack.metadata, indent=2) + "\n"
-            if report_path:
-                report_path.write_text(report_json)
-                report_path.chmod(0o600)
-                print(f"Acceptance report written to: {report_path}", flush=True)
-            else:
-                print(f"ACCEPTANCE_METADATA_JSON={report_json}", flush=True)
-
     finally:
         for number in (signal.SIGINT, signal.SIGTERM):
             signal.signal(number, signal.SIG_IGN)
@@ -483,6 +527,18 @@ def main():
                 exit_code = 1
         if report_path and exit_code != 0:
             report_path.unlink(missing_ok=True)
+
+    # Only a normally completed subcommand followed by successful teardown
+    # may publish an acceptance report. Exceptions/cancellation skip this.
+    if exit_code == 0:
+        stack.metadata["launcher_cleanup"] = {"containers": 0, "volumes": 0, "networks": 0}
+        report_json = json.dumps(stack.metadata, indent=2) + "\n"
+        if report_path:
+            report_path.write_text(report_json)
+            report_path.chmod(0o600)
+            print(f"Acceptance report written to: {report_path}", flush=True)
+        else:
+            print(f"ACCEPTANCE_METADATA_JSON={report_json}", flush=True)
 
     sys.exit(exit_code)
 

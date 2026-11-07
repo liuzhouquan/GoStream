@@ -236,6 +236,7 @@ class ComponentOutageRunner:
         self.db_path = db_path
         self.project_name = project_name
         self.checkpoints = {}
+        self.broker_event_ids = []
 
     def query_sql(self, query: str):
         if self.mode == "compose":
@@ -256,7 +257,46 @@ class ComponentOutageRunner:
                 return str(row[0])
             return str(row)
 
+    def require_broker_event_state(self, notification_ids, recovered):
+        """The inbox is not a delivery receipt: verify each source and delivery row."""
+        for notification_id in notification_ids:
+            notification_id = int(notification_id)
+            source_key = f"notification:{notification_id}"
+            delivery_key = "broker-delivery:" + source_key
+            source_phase = "published_at IS NOT NULL" if recovered else "published_at IS NULL"
+            source_count = int(self.query_sql(
+                "SELECT COUNT(*) FROM outbox_events "
+                f"WHERE event_key='{source_key}' AND topic='notification.created' "
+                f"AND {source_phase} AND dead_at IS NULL"
+            ))
+            assert source_count == 1, f"broker source {source_key} has not reached the required state"
+            deliveries = int(self.query_sql(
+                f"SELECT COUNT(*) FROM outbox_events WHERE event_key='{delivery_key}'"
+            ))
+            expected_deliveries = 1 if recovered else 0
+            assert deliveries == expected_deliveries, f"broker delivery {delivery_key} count={deliveries}"
+            if recovered:
+                dispatched = int(self.query_sql(
+                    "SELECT COUNT(*) FROM outbox_events "
+                    f"WHERE event_key='{delivery_key}' AND topic='notification.deliver' "
+                    "AND published_at IS NOT NULL AND dead_at IS NULL"
+                ))
+                assert dispatched == 1, f"broker delivery {delivery_key} was not dispatched"
+
+    def wait_for_broker_event_recovery(self, notification_ids, timeout=45):
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                self.require_broker_event_state(notification_ids, recovered=True)
+                return
+            except AssertionError as error:
+                if time.monotonic() >= deadline:
+                    raise AssertionError("broker source/delivery recovery did not complete") from error
+                time.sleep(0.2)
+
     def run_all(self, miniredis_proc=None, media_dir: str = "", restart_cb=None) -> dict:
+        if self.mode == "compose" and self.stack is None:
+            raise NotImplementedError("Compose outage testing requires an owned AcceptanceStack instance")
         print("============================================================")
         print("GoStream Component Outage & Persistence Runner (G09 / A01-A10)")
         print(f"Mode: {self.mode}, API A: {self.api_a}, API B: {self.api_b}")
@@ -398,10 +438,20 @@ class ComponentOutageRunner:
         comment_count_sql = int(self.query_sql(f"SELECT comment_count FROM videos WHERE id = {target_video_id}"))
         assert comment_count_sql == 1, f"expected comment_count=1 in SQL, got {comment_count_sql}"
 
+        if self.mode == "compose":
+            for kind in ("like", "comment"):
+                predicate = (f"user_id={int(author_id)} AND actor_id={int(viewer_id)} "
+                             f"AND video_id={int(target_video_id)} AND kind='{kind}'")
+                assert int(self.query_sql(f"SELECT COUNT(*) FROM notifications WHERE {predicate}")) == 1
+                self.broker_event_ids.append(int(self.query_sql(
+                    f"SELECT id FROM notifications WHERE {predicate}"
+                )))
+            self.require_broker_event_state(self.broker_event_ids, recovered=False)
+
         # 3e. Restore RabbitMQ in compose mode
         if self.mode == "compose":
             self.stack.run_compose("start", "rabbitmq")
-            time.sleep(3)
+            self.wait_for_broker_event_recovery(self.broker_event_ids)
 
         # 3f. Author verifies notifications received on API A
         deadline = time.monotonic() + 15
@@ -415,8 +465,9 @@ class ComponentOutageRunner:
             time.sleep(0.5)
 
         assert len(notifications) >= 2, f"expected at least 2 notifications after recovery, got {len(notifications)}"
-        self.checkpoints["rabbitmq_outage_outbox_retention_and_delivery"] = True
-        print("  rabbitmq_outage_outbox_retention_and_delivery: PASS")
+        self.checkpoints["rabbitmq_outage_outbox_retention_and_delivery"] = self.mode == "compose"
+        print("  rabbitmq_outage_outbox_retention_and_delivery: "
+              + ("PASS" if self.mode == "compose" else "NOT VERIFIED (no RabbitMQ in SQLite mode)"))
 
         # ------------------------------------------------------------------
         # Checkpoint 4: MinIO Outage, Isolation & Resumable Recovery
@@ -512,9 +563,11 @@ class ComponentOutageRunner:
 
         return {
             "status": "PASS" if all_passed else "FAIL",
+            "release_gate_passed": all_passed and self.mode == "compose",
             "mode": self.mode,
             "endpoints": {"api_a": self.api_a, "api_b": self.api_b},
             "checkpoints": self.checkpoints,
+            "broker_notification_ids": self.broker_event_ids,
             "elapsed_seconds": elapsed,
         }
 

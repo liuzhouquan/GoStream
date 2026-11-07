@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"math/rand"
-	"strings"
 	"time"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
+	sqlite3 "github.com/mattn/go-sqlite3"
 	"gorm.io/gorm"
 )
 
@@ -21,8 +21,8 @@ func isRetryableDBLock(err error) bool {
 	if errors.As(err, &mysqlErr) && (mysqlErr.Number == 1213 || mysqlErr.Number == 1205) {
 		return true
 	}
-	msg := err.Error()
-	return strings.Contains(msg, "database is locked") || strings.Contains(msg, "busy")
+	var sqliteErr sqlite3.Error
+	return errors.As(err, &sqliteErr) && (sqliteErr.Code == sqlite3.ErrBusy || sqliteErr.Code == sqlite3.ErrLocked)
 }
 
 // MySQL can abort one of two valid concurrent transactions with error 1213,

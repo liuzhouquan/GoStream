@@ -43,6 +43,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from launcher_lifecycle import cleanup_on_interrupt
+from acceptance_config import resolve_acceptance_target
 
 
 def free_port():
@@ -418,16 +419,15 @@ def run_search_query_matrix(api_a, api_b):
     report["checkpoints"]["query_performance_and_plans"] = True
 
     report["applicability"] = {
-        "dataset_size_videos": 20000,
-        "dataset_size_users": 2000,
+        "dataset_size_videos": None,
+        "dataset_size_users": None,
         "observed_p95_ms": round(p95, 2),
-        "keyset_order_filesort": "None (uses PRIMARY / indexed keyset)",
-        "applicable_range_sql_like": "<= 100,000 videos",
+        "keyset_order_filesort": "Requires an actual production-query execution plan",
+        "applicable_range_sql_like": "not established",
         "conclusion": (
-            "At 20,000 videos, P95 is ~10-15ms, with zero filesort overhead on keyset pagination. "
-            "For catalogs <= 100,000 rows, SQL LIKE with B-tree keyset pagination avoids the operational "
-            "complexity, RAM overhead, and eventual consistency lag of external engines (Elasticsearch). "
-            "Beyond 100,000-500,000 videos, inverted indexing (Elasticsearch / ngram) should be introduced."
+            "HTTP latency is measured for the configured fixture only. Dataset counts and production "
+            "MySQL execution plans must be recorded separately; no capacity limit or search-engine "
+            "migration threshold is established by this smoke."
         ),
     }
     print(f"  query_performance_and_plans: PASS (P50={p50:.2f}ms, P95={p95:.2f}ms, Max={max_lat:.2f}ms)")
@@ -442,9 +442,8 @@ def main():
     parser.add_argument("--report", default="data/diagnostics/search_query_smoke.json")
     args = parser.parse_args()
 
-    mode = args.mode
-    if mode == "auto":
-        mode = "compose" if os.environ.get("API_A") or os.environ.get("BASE") else "sqlite"
+    Path(args.report).unlink(missing_ok=True)
+    mode, external_api_a, external_api_b = resolve_acceptance_target(args.mode)
 
     print(f"GoStream Production Search & Notifications Queries Runner")
     print(f"Mode: {mode}, Scale: {args.scale}")
@@ -458,8 +457,7 @@ def main():
 
     with ExitStack() as stack:
         if mode == "compose":
-            api_a = os.environ.get("API_A") or os.environ.get("BASE", "http://127.0.0.1:8080")
-            api_b = os.environ.get("API_B", api_a)
+            api_a, api_b = external_api_a, external_api_b
         else:
             temp_dir = stack.enter_context(tempfile.TemporaryDirectory(prefix="gostream_search_"))
             db_path = os.path.join(temp_dir, "search_prod.db")
@@ -524,6 +522,8 @@ def main():
         results = run_search_query_matrix(api_a, api_b)
         report.update(results)
         report["status"] = "PASS"
+        report["validation_scope"] = "component_query_smoke"
+        report["release_gate_passed"] = False
 
     elapsed = time.time() - start_time
     report["elapsed_sec"] = round(elapsed, 3)

@@ -8,7 +8,7 @@
 
 GoStream 采用**模块化单体与多组件共享架构**。核心业务事实存储在 MySQL/SQLite 关系数据库中，媒体资产文件存储在 MinIO 对象存储或本地文件系统，异步事件由 RabbitMQ 削峰投递，实时连接与缓存由 Redis 托管。
 
-### 1.1 停写快照边界（Quiescent Snapshot Boundary）与 RPO 保证
+### 1.1 停写快照边界与恢复保证边界
 
 > [!IMPORTANT]
 > **在线热备限制说明**：由于关系型数据库（MySQL/SQLite）与对象存储（MinIO/S3）属于独立的分布式存储系统，缺乏跨存储的分布式两阶段提交（2PC）或全局原子快照硬件支持，在系统持续写入状态下分别进行备份**无法保证 SQL 元数据与底层物理对象在微秒级别的时序对齐**。
@@ -17,14 +17,13 @@ GoStream 采用**模块化单体与多组件共享架构**。核心业务事实�
 - **停写维护窗口操作**：
   1. 通过反向代理或负载均衡将写流量切流至只读/维护提示页面（HTTP 503 / Maintenance Mode）。
   2. 观察并等待当前执行中的转码作业（`video_process_jobs`）与 Outbox 事件排空。
-  3. 执行快照备份：
+  3. 停止所有 API 实例和独立后台 worker，确认没有转码、上传完成或垃圾回收继续写 SQL/对象；仅屏蔽浏览器写请求不足以形成停写边界。
+  4. 执行快照备份：
      - **SQL 快照**：`mysqldump --single-transaction --routines --triggers --no-tablespaces --set-gtid-purged=OFF`（或 SQLite `PRAGMA wal_checkpoint(TRUNCATE)` 后复制文件）。
      - **对象存储备份**：`gostream-media backup --dir /backup/media`（或全量归档对象存储卷）。
-  4. 备份完成后，恢复对外写流量。
+  5. 备份完成并校验后，启动服务并恢复对外写流量。
 
-- **实测 RPO（恢复点目标）与 RTO（恢复时间目标）**：
-  - **实测 RPO**：**0 秒（零数据丢失）**。在停写快照边界下，SQL 数据行与媒体物理文件的 SHA-256 摘要严格 1:1 吻合，零孤儿对象，零损坏记录。
-  - **实测 RTO**：**< 5 秒**（基准规模下数据库恢复 4.57ms，对象恢复与 API 服务重连启动约 1.2s）。
+- **恢复目标与测量边界**：当前未建立生产配置的 RPO/RTO 承诺。G10 历史记录中的4.57ms仅为5用户/10视频、约4MiB本地媒体的 SQLite 文件恢复阶段，不含完整 MySQL/MinIO 恢复、API启动和业务验证，不能作为端到端RTO。实际维护窗口、备份与恢复阶段必须分别计时，并核对恢复后完整身份集合及对象摘要。
 
 ---
 
@@ -48,7 +47,7 @@ GoStream 采用**模块化单体与多组件共享架构**。核心业务事实�
 3. **恢复媒体对象存储**：
    ```bash
    # 使用官方 gostream-media 恢复工具
-   gostream-media restore --dir /backup/snapshot/media_store/media
+   gostream-media restore --dir /backup/media
    ```
 
 4. **版本迁移核验与幂等校验**：

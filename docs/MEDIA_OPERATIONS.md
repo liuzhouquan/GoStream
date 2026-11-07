@@ -62,7 +62,9 @@ docker compose -p gostream-transfer -f docker-compose.yml -f docker-compose.obje
   -f tests/integration/object-test.compose.yml down -v
 ```
 
-## 媒体格式矩阵与十视频恢复验收（G04 / A03）
+## 媒体格式矩阵候选脚本（G04 / A03，最终对象栈待验）
+
+下表是原G04任务报告的本地执行记录，尚未独立复验完整MySQL/MinIO双实例环境；脚本存在、SQLite模式或ffprobe兼容shim输出不代表A03最终通过。真实ffprobe、对象读写/恢复和最终配置证据仍按SDD补齐。
 
 对应 `tests/integration/media_matrix_smoke.py`，覆盖 MP4/MOV/WebM 容器、有音轨/无音轨、不同编解码、竖屏与分片大文件，并严格检验失败视频的隐私边界与作者恢复流程。
 

@@ -49,6 +49,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from launcher_lifecycle import cleanup_on_interrupt
+from acceptance_config import resolve_acceptance_target
 
 
 def free_port() -> int:
@@ -682,9 +683,8 @@ def main():
     parser.add_argument("--report", default="data/diagnostics/group_im_smoke.json")
     args = parser.parse_args()
 
-    mode = args.mode
-    if mode == "auto":
-        mode = "compose" if os.environ.get("API_A") or os.environ.get("BASE") else "sqlite"
+    Path(args.report).unlink(missing_ok=True)
+    mode, external_api_a, external_api_b = resolve_acceptance_target(args.mode)
 
     msgs_per_client = 10 if args.duration_mode == "smoke" else 50
 
@@ -707,8 +707,7 @@ def main():
 
     with ExitStack() as stack:
         if mode == "compose":
-            api_a = os.environ.get("API_A") or os.environ.get("BASE", "http://127.0.0.1:8080")
-            api_b = os.environ.get("API_B", api_a)
+            api_a, api_b = external_api_a, external_api_b
             pids = {"driver": os.getpid()}
         else:
             temp_dir = stack.enter_context(tempfile.TemporaryDirectory(prefix="gostream_group_im_"))

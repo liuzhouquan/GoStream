@@ -1,0 +1,90 @@
+{
+  "format_version": 1,
+  "date": "2026-11-07",
+  "remote_baseline": "a922b6b",
+  "local_candidate": "52d1376",
+  "working_tree_dirty": true,
+  "interpretation": "Review working-tree evidence; not final same-tree release acceptance. No production capacity or RPO/RTO claim.",
+  "go_unit": {
+    "elapsed_seconds": 41.059,
+    "exit_code": 0,
+    "timed_out": false
+  },
+  "diagnostics": {
+    "elapsed_seconds": 12.959,
+    "exit_code": 0,
+    "timed_out": false,
+    "test_methods": 78
+  },
+  "focused_race": {
+    "elapsed_seconds": 17.781,
+    "exit_code": 0,
+    "timed_out": false
+  },
+  "compose_probe": {
+    "elapsed_seconds": 111.11,
+    "exit_code": 0,
+    "timed_out": false,
+    "api_instances": 2,
+    "cleanup": {
+      "containers": 0,
+      "volumes": 0,
+      "networks": 0
+    }
+  },
+  "compose_sigterm": {
+    "exit_code": 143,
+    "total_seconds": 24.626,
+    "cleanup_seconds": 3.791,
+    "cleanup": {
+      "children": 0,
+      "containers": 0,
+      "volumes": 0,
+      "networks": 0
+    },
+    "success_report_published": false
+  },
+  "group_load_launcher": {
+    "elapsed_seconds": 31.483,
+    "exit_code": 0,
+    "timed_out": false
+  },
+  "group_load": {
+    "go_version": "go1.27.2",
+    "mysql_version": "8.4.11",
+    "redis_version": "8.2.9",
+    "clients": 20,
+    "total_messages": 1000,
+    "expected_deliveries": 19000,
+    "elapsed_seconds": 8.628880844,
+    "duplicate_ack_frames": 0,
+    "duplicate_delivery_frames": 0,
+    "sender_ack": {
+      "count": 1000,
+      "p50_ms": 168.324593,
+      "p95_ms": 181.079186,
+      "p99_ms": 191.44180699999998,
+      "max_ms": 233.34134
+    },
+    "recipient_delivery": {
+      "count": 19000,
+      "p50_ms": 173.252421,
+      "p95_ms": 186.79623,
+      "p99_ms": 198.061124,
+      "max_ms": 241.428314
+    },
+    "launcher_cleanup": {
+      "processes": 0,
+      "schemas": 0,
+      "users": 0,
+      "redis_containers": 0
+    }
+  },
+  "prior_failure": {
+    "stage": "first group launch before MySQL ready",
+    "exit_code": 1,
+    "elapsed_seconds": 0.869,
+    "interpretation": "Not a business test result; rerun after readiness succeeded"
+  },
+  "ci": "Pending integration PR last-head checks"
+}

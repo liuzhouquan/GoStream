@@ -45,6 +45,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from launcher_lifecycle import cleanup_on_interrupt
+from acceptance_config import resolve_acceptance_target
 
 
 def free_port() -> int:
@@ -174,6 +175,18 @@ def populate_benchmark_feed_db(db_path: str):
 
 
 def run_load_burst(base_urls: list[str], path: str, token: str, concurrency: int, duration_sec: float) -> dict:
+    def signature(data):
+        if not isinstance(data, dict) or not isinstance(data.get("items"), list) or len(data["items"]) != 20:
+            raise ValueError("smoke fixture requires a complete 20-video page")
+        ids = tuple(item.get("id") for item in data["items"] if isinstance(item, dict))
+        if len(ids) != 20 or any(type(item) is not int or item <= 0 for item in ids) or len(set(ids)) != 20:
+            raise ValueError("invalid or duplicated video identities")
+        return ids, data.get("next_cursor")
+
+    code, baseline, _ = call_api(base_urls[0], path, "GET", token=token)
+    if code != 200:
+        raise ValueError("could not establish Feed smoke fixture")
+    expected = signature(baseline)
     latencies_ms = []
     statuses = {}
     failures = 0
@@ -188,9 +201,15 @@ def run_load_burst(base_urls: list[str], path: str, token: str, concurrency: int
         base = base_urls[worker_id % len(base_urls)]
         while time.monotonic() < deadline:
             code, data, elapsed = call_api(base, path, "GET", token=token)
+            valid = False
+            if code == 200:
+                try:
+                    valid = signature(data) == expected
+                except ValueError:
+                    pass
             with lock:
                 statuses[code] = statuses.get(code, 0) + 1
-                if code == 200:
+                if valid:
                     successes += 1
                     latencies_ms.append(elapsed)
                     if isinstance(data, dict):
@@ -247,6 +266,8 @@ def parse_prometheus_metrics(base_url: str) -> dict:
 
 
 def run_continuous_feed_matrix(api_a: str, api_b: str, duration_mode: str = "smoke") -> dict:
+    if duration_mode != "smoke":
+        raise ValueError("full release gate is not implemented: use the component smoke until G07 is completed")
     bases = [api_a, api_b]
     report = {
         "checkpoints": {},
@@ -418,13 +439,14 @@ def main():
     parser = argparse.ArgumentParser(description="GoStream Feed Continuous Warm-Cache Runner (G07 / A04)")
     parser.add_argument("--mode", choices=["auto", "sqlite", "compose"], default="auto")
     parser.add_argument("--duration-mode", choices=["smoke", "standard"], default="smoke",
-                        help="smoke: 5s warmup + 10s load; standard: 30s warmup + 60s load x 3")
+                        help="smoke: component-only 5s/10s; standard: reserved, not yet implemented")
     parser.add_argument("--report", default="data/diagnostics/feed_warm_cache_smoke.json")
     args = parser.parse_args()
 
-    mode = args.mode
-    if mode == "auto":
-        mode = "compose" if os.environ.get("API_A") or os.environ.get("BASE") else "sqlite"
+    Path(args.report).unlink(missing_ok=True)
+    if args.duration_mode != "smoke":
+        parser.error("full release gate is not implemented; standard mode cannot run yet")
+    mode, external_api_a, external_api_b = resolve_acceptance_target(args.mode)
 
     print("=" * 60)
     print(f"GoStream Feed Warm-Cache Load Runner (G07 / A04)")
@@ -440,8 +462,7 @@ def main():
 
     with ExitStack() as stack:
         if mode == "compose":
-            api_a = os.environ.get("API_A") or os.environ.get("BASE", "http://127.0.0.1:8080")
-            api_b = os.environ.get("API_B", api_a)
+            api_a, api_b = external_api_a, external_api_b
         else:
             temp_dir = stack.enter_context(tempfile.TemporaryDirectory(prefix="gostream_warm_feed_"))
             db_path = os.path.join(temp_dir, "feed.db")
@@ -515,6 +536,13 @@ def main():
         results = run_continuous_feed_matrix(api_a, api_b, duration_mode=args.duration_mode)
         report.update(results)
         report["status"] = "PASS"
+        report["validation_scope"] = "component_smoke"
+        report["release_gate_passed"] = False
+        report["unverified_requirements"] = [
+            "production-size MySQL and real Redis fixture",
+            "three 30s/60s rounds per required scene and concurrency",
+            "sustained authenticated recommendation and deep cursor pages",
+        ]
 
     elapsed = time.time() - start_time
     report["elapsed_seconds"] = round(elapsed, 2)
@@ -528,7 +556,7 @@ def main():
     for cp, ok in report["checkpoints"].items():
         print(f"  {cp}: {'PASS' if ok else 'FAIL'}")
     print(f"Total Elapsed: {elapsed:.2f}s")
-    print(f"Feed Warm Cache Gate Acceptance: {report['status']}")
+    print(f"Feed component smoke: {report['status']}; release gate: NOT_ACCEPTED")
     return 0 if report["status"] == "PASS" else 1
 
 

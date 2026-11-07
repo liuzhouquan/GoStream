@@ -1,5 +1,7 @@
 """Diagnostic tests for the AcceptanceStack launcher: lifecycle, signals, and cleanup."""
 
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -45,6 +47,8 @@ def fake_run(*cmd, **kwargs):
         record("compose_down")
         if stage.name == "second_signal":
             cancel()
+    elif "ps" in cmd_str and stage.name == "inspect":
+        cancel()
     return subprocess.CompletedProcess(cmd, 0, stdout="{}", stderr="")
 
 def fake_probe(url, timeout=2):
@@ -68,6 +72,8 @@ stack = stack_mod.AcceptanceStack(
 with patch.object(stack, "run_compose", side_effect=fake_run), \
      patch.object(stack, "probe_url", side_effect=fake_probe), \
      patch.object(stack, "check_remaining_containers", return_value=""), \
+     patch.object(stack, "check_remaining_volumes", return_value=""), \
+     patch.object(stack, "check_remaining_networks", return_value=""), \
      patch.object(stack, "verify_go_runtime", return_value="go1.27.2"):
     try:
         with stack:
@@ -178,6 +184,8 @@ class AcceptanceStackUnitTest(unittest.TestCase):
                  patch.object(stack, "wait_for_ready", return_value=None), \
                  patch.object(stack, "inspect_instances", return_value=[]), \
                  patch.object(stack, "check_remaining_containers", return_value=""), \
+                 patch.object(stack, "check_remaining_volumes", return_value=""), \
+                 patch.object(stack, "check_remaining_networks", return_value=""), \
                  patch.object(stack, "verify_go_runtime", return_value="go1.27.2"):
                 # Subcommand that exits with 42
                 exit_code = stack.run_subcommand([sys.executable, "-c", "import sys; sys.exit(42)"])
@@ -215,11 +223,103 @@ class AcceptanceStackLifecycleTest(unittest.TestCase):
         self.assertIn("compose_up", cleanups)
         self.assertIn("compose_down", cleanups)
 
+    def test_sigterm_during_instance_inspection_is_not_swallowed(self):
+        ret, cleanups = self.run_cancellation("inspect")
+        self.assertEqual(ret, 143)
+        self.assertIn("compose_down", cleanups)
+
     def test_second_signal_during_teardown_does_not_abort_cleanup(self):
         ret, cleanups = self.run_cancellation("second_signal")
         self.assertEqual(ret, 143)
         self.assertIn("compose_up", cleanups)
         self.assertIn("compose_down", cleanups)
+
+
+class AcceptanceStackReviewRegressionTest(unittest.TestCase):
+    def test_up_refuses_any_existing_project_resources_without_teardown(self):
+        for kind in ("containers", "volumes", "networks"):
+            with self.subTest(kind=kind):
+                stack = AcceptanceStack(project_name="existing-demo", root_dir=ROOT)
+                with patch.object(stack, "verify_go_runtime", return_value="go1.27.2"), \
+                     patch.object(stack, "check_remaining_containers", return_value="demo-api" if kind == "containers" else ""), \
+                     patch.object(stack, "check_remaining_volumes", return_value="demo-sql" if kind == "volumes" else ""), \
+                     patch.object(stack, "run_compose") as compose, \
+                     patch.object(stack, "wait_for_ready"), patch.object(stack, "inspect_instances", return_value=[]), \
+                     patch.object(stack, "check_remaining_networks", return_value="demo-net" if kind == "networks" else "", create=True):
+                    with self.assertRaisesRegex(RuntimeError, "existing|already|refus"):
+                        with stack:
+                            pass
+                    self.assertFalse(stack.started)
+                    compose.assert_not_called()
+
+    def test_exited_command_leader_does_not_leave_its_descendant(self):
+        stack = AcceptanceStack(project_name="test-orphan-review", root_dir=ROOT)
+        with tempfile.TemporaryDirectory() as directory:
+            pid_file = Path(directory) / "child.pid"
+            child = "import time;time.sleep(30)"
+            code = ("import subprocess,sys;from pathlib import Path;"
+                    f"p=subprocess.Popen([sys.executable,'-c',{child!r}]);"
+                    f"Path({str(pid_file)!r}).write_text(str(p.pid))")
+            try:
+                result = stack.run_subcommand([sys.executable, "-c", code])
+                self.assertEqual(result, 0)
+                child_pid = int(pid_file.read_text())
+                stack.down()
+                stat = Path(f"/proc/{child_pid}/stat")
+                if stat.exists():
+                    state = stat.read_text().rsplit(") ", 1)[1].split()[0]
+                    self.assertIn(state, ("Z", "X"), "exited leader left a running descendant")
+            finally:
+                if pid_file.exists():
+                    try:
+                        os.kill(int(pid_file.read_text()), signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
+    def test_cli_publishes_report_only_after_successful_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / "report.json"
+            stack = AcceptanceStack(project_name="test-publish-review", root_dir=ROOT)
+            stack.metadata = {"fixture": True}
+            observed = []
+
+            def down():
+                observed.append(report.exists())
+
+            with patch.object(acceptance_stack, "AcceptanceStack", return_value=stack), \
+                 patch.object(stack, "up"), patch.object(stack, "down", side_effect=down), \
+                 patch.object(sys, "argv", ["acceptance_stack.py", "--probe-only", "--report-file", str(report)]), \
+                 contextlib.redirect_stdout(io.StringIO()):
+                with self.assertRaises(SystemExit) as exited:
+                    acceptance_stack.main()
+            self.assertEqual(exited.exception.code, 0)
+            self.assertEqual(observed, [False], "success report was visible before cleanup")
+            self.assertEqual(json.loads(report.read_text())["launcher_cleanup"], {"containers": 0, "volumes": 0, "networks": 0})
+
+    def test_cli_teardown_failure_does_not_print_success_metadata(self):
+        stack = AcceptanceStack(project_name="test-failed-cleanup-review", root_dir=ROOT)
+        stack.metadata = {"fixture": True}
+        output = io.StringIO()
+        with patch.object(acceptance_stack, "AcceptanceStack", return_value=stack), \
+             patch.object(stack, "up"), patch.object(stack, "down", side_effect=RuntimeError("cleanup failed")), \
+             patch.object(sys, "argv", ["acceptance_stack.py", "--probe-only"]), \
+             contextlib.redirect_stdout(output), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as exited:
+                acceptance_stack.main()
+        self.assertEqual(exited.exception.code, 1)
+        self.assertNotIn("ACCEPTANCE_METADATA_JSON=", output.getvalue())
+
+    def test_down_detects_remaining_project_volumes(self):
+        stack = AcceptanceStack(project_name="test-volume-review", root_dir=ROOT)
+        stack.started = True
+
+        def run(command, **kwargs):
+            output = "left-behind-volume\n" if command[:3] == ["docker", "volume", "ls"] else ""
+            return subprocess.CompletedProcess(command, 0, stdout=output, stderr="")
+
+        with patch.object(stack, "run_compose"), patch.object(acceptance_stack.subprocess, "run", side_effect=run):
+            with self.assertRaisesRegex(RuntimeError, "volume"):
+                stack.down()
 
 
 if __name__ == "__main__":

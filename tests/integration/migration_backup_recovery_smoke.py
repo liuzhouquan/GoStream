@@ -40,6 +40,7 @@ import bcrypt
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests/integration"))
 from launcher_lifecycle import LauncherInterrupted, cleanup_on_interrupt
+from acceptance_config import has_external_acceptance_target
 
 SAMPLE_MP4 = bytes([0, 0, 0, 24]) + b"ftypisom" + bytes(4) + b"isommp42"
 
@@ -419,7 +420,7 @@ class MigrationBackupRecoveryRunner:
         print("  idempotency_and_migration_replay_safety: PASS (Apply on restored DB performed 0 changes)")
 
         all_passed = all(self.checkpoints.values())
-        print(f"\nMigration, Backup & Recovery Gate Acceptance: {'PASS' if all_passed else 'FAIL'}")
+        print(f"\nSQLite recovery component smoke: {'PASS' if all_passed else 'FAIL'}; release gate: NOT_ACCEPTED")
 
         self.metrics = {
             "backup_duration_ms": backup_duration_ms,
@@ -434,11 +435,15 @@ class MigrationBackupRecoveryRunner:
         return {
             "status": "PASS" if all_passed else "FAIL",
             "mode": self.mode,
+            "validation_scope": "sqlite_component_smoke",
+            "release_gate_passed": False,
             "checkpoints": self.checkpoints,
             "metrics": self.metrics,
             "rpo_rto_spec": {
-                "measured_rpo": "0s (quiescent stopped-writer snapshot boundary ensures zero data loss)",
-                "measured_rto_ms": restore_duration_ms,
+                "measured_rpo": None,
+                "measured_rto_ms": None,
+                "file_restore_stage_ms": restore_duration_ms,
+                "scope": "File copy stage only; end-to-end RPO/RTO were not measured",
                 "online_backup_limitation": "Online backup without stop-write/coordinated snapshot is unsupported; quiescent boundary is mandatory for cross-system consistency."
             }
         }
@@ -452,19 +457,14 @@ def main():
     parser.add_argument("--go-bin", default="/usr/local/go/bin/go")
     args = parser.parse_args()
 
-    env_api_a = os.environ.get("GOSTREAM_API_A")
-    compose_active = os.environ.get("GOSTREAM_COMPOSE_ACTIVE") == "1"
-
-    if args.mode == "compose" or (args.mode == "auto" and (env_api_a or compose_active)):
-        mode = "compose"
-        base_url = (env_api_a or "http://127.0.0.1:18080").rstrip("/")
-    else:
-        mode = "sqlite"
-        base_url = None
-
     report_path = args.report_file.resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.unlink(missing_ok=True)
+    if args.mode == "compose" or has_external_acceptance_target():
+        raise NotImplementedError(
+            "MySQL/MinIO Compose backup recovery is not implemented by this SQLite/local-file runner; "
+            "use the documented media_transfer_smoke.py joint recovery procedure"
+        )
 
     with tempfile.TemporaryDirectory(prefix="gostream_backup_drill_") as tmpdir:
         db_path = os.path.join(tmpdir, "primary.db")
