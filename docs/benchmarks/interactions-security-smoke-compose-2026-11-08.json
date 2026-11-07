@@ -1,0 +1,20 @@
+{
+  "checkpoints": {
+    "interactions_idempotency": "PASS",
+    "comment_hierarchy": "PASS",
+    "security_negative_boundaries": "PASS",
+    "play_rate_limiting": "PASS"
+  },
+  "interactions_idempotent": true,
+  "comments_hierarchy_verified": true,
+  "play_rate_limit_verified": true,
+  "security_boundaries_verified": true,
+  "mode": "compose",
+  "endpoints": {
+    "api_a": "http://127.0.0.1:18080",
+    "api_b": "http://127.0.0.1:18081"
+  },
+  "ffmpeg_bin": "/home/lzq/.vscode-server/extensions/kilocode.kilo-code-7.8.27-linux-x64/bin/ffmpeg",
+  "ffprobe_bin": "/home/lzq/projects/golangprojects/GoStream/tools/ffprobe_shim.py",
+  "elapsed_seconds": 2.665
+}
