@@ -65,14 +65,14 @@ def main():
                         help="deliberately time out after API startup and verify outer process cleanup")
     parser.add_argument(
         "--suite",
-        choices=["recovery", "feed-cache", "feed-cache-load", "fanout-drain", "load"],
+        choices=["recovery", "feed-cache", "feed-cache-load", "fanout-drain", "load", "group-load"],
         default="recovery",
     )
     parser.add_argument("--race-load", action="store_true", help="instrument the separate load suite with race detection")
     parser.add_argument("--report-file", type=Path, help="write successful load JSON outside the disposable work directory")
     args = parser.parse_args()
-    if args.suite != "load" and (args.race_load or args.report_file):
-        parser.error("--race-load and --report-file require --suite load")
+    if args.suite not in ("load", "group-load") and (args.race_load or args.report_file):
+        parser.error("--race-load and --report-file require --suite load or group-load")
     if args.check_timeout_cleanup and args.suite != "recovery":
         parser.error("--check-timeout-cleanup applies only to recovery")
     report_path = args.report_file.resolve() if args.report_file else None
@@ -146,16 +146,18 @@ def main():
                    GOSTREAM_TEST_IM_MYSQL_DSN=f"{user}:{password}@tcp({args.mysql_addr})/{schema}?charset=utf8mb4&parseTime=True&loc=Local",
                    GOSTREAM_TEST_IM_REDIS_ADDR=f"127.0.0.1:{port}",
                    GOSTREAM_TEST_IM_REDIS_CONTAINER=container)
-        env["GOSTREAM_TEST_IM_LOAD"] = "1" if args.suite == "load" else ""
+        env["GOSTREAM_TEST_IM_LOAD"] = "1" if args.suite in ("load", "group-load") else ""
+        env["GOSTREAM_TEST_IM_GROUP_LOAD"] = "1" if args.suite == "group-load" else ""
         env["GOSTREAM_TEST_IM_LOAD_RACE"] = "1" if instrument_race else ""
         env["GOSTREAM_TEST_IM_LOAD_REVISION"] = run(["git", "rev-parse", "HEAD"], capture_output=True).stdout.strip()
-        env["GOSTREAM_TEST_IM_LOAD_REPORT"] = str(work / "load-report.json") if args.suite == "load" else ""
+        env["GOSTREAM_TEST_IM_LOAD_REPORT"] = str(work / "load-report.json") if args.suite in ("load", "group-load") else ""
         name = {
             "recovery": "TestIMProcessRecovery",
             "feed-cache": "TestFeedCacheProcessRedisRecovery",
             "feed-cache-load": "TestFeedCacheWarmBurst",
             "fanout-drain": "TestFeedFanoutSustainedWriteDrain",
             "load": "TestIMConcurrentLoad",
+            "group-load": "TestGroupIMConcurrentFanout",
         }[args.suite]
         test_args = [args.go_bin, "test", *race_flag, "./tests/integration/im", "-run", "^" + name + "$", "-count=1", "-v"]
         if args.check_timeout_cleanup:
@@ -184,7 +186,7 @@ def main():
         elif test_process.wait() != 0:
             raise RuntimeError("IM " + args.suite + " suite failed")
         completed = True
-        if args.suite == "load":
+        if args.suite in ("load", "group-load"):
             report_data = json.loads((work / "load-report.json").read_text())
             cpu_model = next((line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines()
                               if line.startswith("model name")), "unknown")

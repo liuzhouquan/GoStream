@@ -205,6 +205,14 @@ jobs:
           --mysql-addr 127.0.0.1:3306
           --suite load --race-load --report-file "${{ runner.temp }}/im-load-race.json"
 
+      - name: Verify bounded group fanout against real MySQL and Redis
+        run: >-
+          python3 tests/integration/im_smoke.py
+          --go-bin go
+          --mysql-container "${{ job.services.mysql.id }}"
+          --mysql-addr 127.0.0.1:3306
+          --suite group-load --report-file "${{ runner.temp }}/im-group-load.json"
+
       - name: Retain raw IM load samples
         if: always()
         uses: actions/upload-artifact@v7.0.2
@@ -213,6 +221,7 @@ jobs:
           path: |
             ${{ runner.temp }}/im-load.json
             ${{ runner.temp }}/im-load-race.json
+            ${{ runner.temp }}/im-group-load.json
           if-no-files-found: warn
 
       - name: Verify cleanup when the Go test times out after API startup
@@ -275,6 +284,11 @@ jobs:
           fi
           ffmpeg -version >/dev/null
           ffprobe -version >/dev/null
+
+      - name: Test real FFmpeg corruption and media diagnostics
+        run: |
+          command -v ffmpeg
+          python3 -m unittest discover -s tests/diagnostics -p 'test_media_matrix.py' -v
 
       - name: Build API and test processor-disabled restart recovery
         run: |

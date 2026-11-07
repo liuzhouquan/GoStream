@@ -61,3 +61,40 @@ python3 tests/integration/media_transfer_smoke.py --go-bin /usr/local/go/bin/go 
 docker compose -p gostream-transfer -f docker-compose.yml -f docker-compose.object.yml \
   -f tests/integration/object-test.compose.yml down -v
 ```
+
+## 媒体格式矩阵候选脚本（G04 / A03，最终对象栈待验）
+
+下表是原G04任务报告的本地执行记录，尚未独立复验完整MySQL/MinIO双实例环境；脚本存在、SQLite模式或ffprobe兼容shim输出不代表A03最终通过。真实ffprobe、对象读写/恢复和最终配置证据仍按SDD补齐。
+
+对应 `tests/integration/media_matrix_smoke.py`，覆盖 MP4/MOV/WebM 容器、有音轨/无音轨、不同编解码、竖屏与分片大文件，并严格检验失败视频的隐私边界与作者恢复流程。
+
+### 十视频矩阵规格与实测数据
+
+运行入口：`python3 tests/integration/media_matrix_smoke.py --report-file data/diagnostics/media_matrix_smoke.json`。脚本支持 `--mode {auto,sqlite,compose}`，在双 API 实例间分发分片与查询。
+
+| 序号 | 标识与测试场景 | 输入容器与编解码 | 分辨率与音轨 | 源字节 | 终态 | 错误码 | 处理耗时 | 产物视频字节 | 产物封面字节 |
+|---|---|---|---|---|---|---|---|---|---|
+| 01 | `01_mp4_h264_aac` 基准发布 | MP4 (libx264+aac) | 640x360，有音轨 | 21,258 B | `published` | - | ~2.02s | 17,492 B | 6,956 B |
+| 02 | `02_mp4_h264_noaudio` 纯视频流 | MP4 (libx264) | 640x360，无音轨 | 12,434 B | `published` | - | ~2.02s | 9,698 B | 7,662 B |
+| 03 | `03_webm_vp8_vorbis` WebM输入 | WebM (vp8+vorbis) | 320x240，有音轨 | 36,103 B | `published` | - | ~2.02s | 12,581 B | 8,286 B |
+| 04 | `04_webm_vp9_opus` 现代WebM | WebM (vp9+opus) | 640x360，有音轨 | 30,016 B | `published` | - | ~2.02s | 22,905 B | 7,075 B |
+| 05 | `05_mov_prores` 专业格式 | MOV (prores+pcm) | 480x270，有音轨 | 1,060,497 B | `published` | - | ~2.03s | 17,687 B | 7,555 B |
+| 06 | `06_mov_h264_aac` 常见QuickTime | MOV (libx264+aac) | 640x360，有音轨 | 20,290 B | `published` | - | ~2.02s | 17,433 B | 7,055 B |
+| 07 | `07_mp4_portrait` 竖屏短视频 | MP4 (libx264+aac) | 360x640 竖屏 | 19,437 B | `published` | - | ~1.61s | 15,513 B | 19,015 B |
+| 08 | `08_overlong_reject` 超长截断 | MP4 (libx264) | 16x16，605秒 | 9,345 B | `failed` | `duration_limit` | ~1.61s | 0 B | 0 B |
+| 09 | `09_corrupted_reject` 损坏载荷 | MP4 (ftyp头+坏载荷) | 坏流 | 16,024 B | `failed` | `processing_failed` | ~28.15s (含重试) | 0 B | 0 B |
+| 10 | `10_chunked_large_mp4` 跨实例大分片 | MP4 (libx264) | 720x480，4.44MB | 4,442,473 B | `published` | - | ~2.49s | 2,452,920 B | 28,904 B |
+
+### 关键断言与恢复机制
+
+1. **失败隐私边界**：
+   - 匿名访问 `GET /api/videos/{failed_id}` 与其他登录用户访问均严格返回 `404 video not found`。
+   - 他人查看作者公开视频列表 `GET /api/users/{author_id}/videos` 时，失败视频自动过滤。
+   - 公共搜索 `GET /api/search?q=...&type=videos` 与公共 Feed 均排除未发布/失败视频。
+   - 仅作者本人携带令牌访问时可见 `processing_error` 字段（如 `duration_limit`、`processing_failed`）。
+2. **作者修复恢复（Recovery）**：
+   - 非作者账号通过 `PATCH /api/videos/{failed_id}` 试图替换媒体时，API 返回 `403 only the author can edit this video`。
+   - 作者上传合法媒体后发起 `PATCH /api/videos/{failed_id}` 携带新 `media_url`，视频状态重置为 `processing` 并重新入队。
+   - 后台重新完成转码与探测后，状态原子更新为 `published`，生成封面并在公共 Feed 与搜索中立即可见。
+3. **分片续传与跨实例**：
+   - 大于 4 MiB 视频（如用例 10）通过 `/api/uploads/sessions` 分片，分片分别打到 API A 和 API B，验证了跨实例分片状态与哈希组装一致性。
