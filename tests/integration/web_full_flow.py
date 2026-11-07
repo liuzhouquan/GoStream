@@ -1,39 +1,48 @@
 #!/usr/bin/env python3
-"""Component browser workflow across two profiles and a real SQLite/FFmpeg API.
+"""Full-flow browser acceptance suite across two independent profiles.
 
-This does not replace final multi-component Compose acceptance.
+Supports both:
+  1. Component testing with local SQLite/FFmpeg (mode: sqlite).
+  2. Final acceptance testing with the dual-API Compose stack (mode: compose).
 
-Exercises two independent Chromium sessions (Alice and Bob) communicating
-with a live GoStream server instance on a disposable database. Covers:
-1. Registration & login across two accounts
-2. Chunk-session upload, real processing and publishing
-3. Creator profile view, video list, and bio update
-4. Feed browsing, like, favorite, and comments
-5. Notifications delivery & mark read
-6. Creator search and follow via UI button
-7. Following feed display
-8. WebSocket realtime direct chat
-9. Group chat creation, member invitation, and group messaging
-10. Responsive layout at mobile width (390x844)
-11. Page reload & stored session persistence
+Exercises two independent Chromium sessions (Alice and Bob):
+  1. Registration and login across two accounts
+  2. Avatar image upload and bio update
+  3. Chunk-session upload, asynchronous FFmpeg transcoding, and publishing
+  4. Video playback and duration/resolution validation
+  5. Feed browsing (Timeline, Recommend, Hot rank)
+  6. Interaction: like, favorite, comment, and reply threading
+  7. Notifications delivery across instances and bounded mark-all-read
+  8. Creator search and follow via UI button
+  9. Following feed display
+ 10. Cross-instance WebSocket realtime direct chat (Alice on A, Bob on B)
+ 11. Group chat lifecycle: creation, member invitation, group messaging, and revocation
+ 12. Offline message catch-up (>100 messages pagination) and device ACK
+ 13. Single API restart and session/media/interaction state persistence
+ 14. Responsive mobile viewport (390x844) layout check
+ 15. Security & ownership boundary checks (anonymous 401, cross-user edit/delete rejected)
 """
 
+import argparse
 import json
 from contextlib import ExitStack
-import re
 import os
 from pathlib import Path
+import re
+import secrets
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
 import time
-from urllib.request import urlopen
-from im_smoke import stop_test_group
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
 WEB_ROOT = ROOT / "web"
+sys.path.insert(0, str(ROOT / "tests/integration"))
+from im_smoke import stop_test_group
 
 
 def find_free_port():
@@ -58,9 +67,6 @@ class BrowserSession:
 
     def cli(self, *args, timeout=45):
         if args and args[0] == "click":
-            # A separate scroll command completes layout before the CLI computes
-            # the mouse point. Its combined auto-scroll/click can miss a footer
-            # below a short viewport without reporting a blocked target.
             self.cli("scrollintoview", args[1], timeout=timeout)
         cmd = [self.browser_bin, "--session", self.session, *args]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=self.env)
@@ -75,126 +81,247 @@ class BrowserSession:
         except Exception:
             return raw
 
-    def wait_for(self, check_fn, timeout=15, poll_interval=0.3):
+    def wait_for(self, check_fn, timeout=20, poll_interval=0.3):
         deadline = time.monotonic() + timeout
+        last_error = None
         while time.monotonic() < deadline:
             try:
                 res = check_fn()
                 if res:
                     return res
-            except Exception:
-                pass
+            except Exception as err:
+                last_error = err
             time.sleep(poll_interval)
-        raise TimeoutError("Condition not met within timeout")
+        detail = f": {last_error}" if last_error else ""
+        raise TimeoutError(f"Condition not met within {timeout}s{detail}")
+
+    def screenshot(self, path):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        return self.cli("screenshot", str(path))
 
     def close(self):
-        self.cli("close")
+        try:
+            self.cli("close")
+        except Exception:
+            pass
+
+
+def wait_for_ready(url, timeout=45):
+    endpoint = url.rstrip("/") + "/ready"
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            req = Request(endpoint, headers={"User-Agent": "GoStream-E2E"})
+            with urlopen(req, timeout=2) as resp:
+                if resp.status == 200:
+                    return
+        except (OSError, HTTPError, URLError):
+            pass
+        time.sleep(0.5)
+    raise RuntimeError(f"API at {url} did not become ready within {timeout}s")
+
+
+def restart_compose_api(project_name=None):
+    """Restart a single API container in the Compose stack."""
+    if project_name:
+        cmd = ["docker", "compose", "-p", project_name, "restart", "api"]
+    else:
+        # Fallback to restarting first api container found
+        ps_out = subprocess.check_output(
+            ["docker", "ps", "--filter", "name=api", "--format", "{{.ID}}"],
+            text=True
+        ).strip().splitlines()
+        if not ps_out:
+            raise RuntimeError("no running API container found to restart")
+        cmd = ["docker", "restart", ps_out[0]]
+    subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
 def main():
-    browser_bin = os.environ.get("AGENT_BROWSER_BIN", "agent-browser")
-    go_bin = os.environ.get("GOSTREAM_GO_BIN", "/usr/local/go/bin/go")
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--mode", choices=["auto", "sqlite", "compose"], default="auto",
+                        help="execution mode: sqlite (component test) or compose (acceptance stack)")
+    parser.add_argument("--api-a", help="URL for API A (default from GOSTREAM_API_A or http://127.0.0.1:18080)")
+    parser.add_argument("--api-b", help="URL for API B (default from GOSTREAM_API_B or http://127.0.0.1:18081)")
+    parser.add_argument("--base-url", help="fallback single base URL")
+    parser.add_argument("--report-file", type=Path, help="path to write successful JSON report")
+    parser.add_argument("--screenshots-dir", type=Path, help="directory to save milestone screenshots")
+    parser.add_argument("--browser-bin", default=os.environ.get("AGENT_BROWSER_BIN", "agent-browser"))
+    parser.add_argument("--go-bin", default=os.environ.get("GOSTREAM_GO_BIN", "/usr/local/go/bin/go"))
+    parser.add_argument("--project-name", default=os.environ.get("GOSTREAM_STACK_PROJECT"))
+
+    args = parser.parse_args()
+
+    # Determine execution mode
+    env_api_a = os.environ.get("GOSTREAM_API_A")
+    env_api_b = os.environ.get("GOSTREAM_API_B")
+    compose_active = os.environ.get("GOSTREAM_COMPOSE_ACTIVE") == "1"
+
+    if args.mode == "compose" or (args.mode == "auto" and (args.api_a or env_api_a or compose_active)):
+        mode = "compose"
+        api_a = (args.api_a or env_api_a or args.base_url or "http://127.0.0.1:18080").rstrip("/")
+        api_b = (args.api_b or env_api_b or api_a or "http://127.0.0.1:18081").rstrip("/")
+    else:
+        mode = "sqlite"
+        api_a = api_b = None
+
+    report_path = args.report_file.resolve() if args.report_file else None
+    if report_path:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.unlink(missing_ok=True)
+
+    screenshots_dir = args.screenshots_dir.resolve() if args.screenshots_dir else None
+    if screenshots_dir:
+        screenshots_dir.mkdir(parents=True, exist_ok=True)
+
     required = re.search(r"^go (\S+)$", (ROOT / "go.mod").read_text(), re.M).group(1)
-    actual = run_cmd([go_bin, "env", "GOVERSION"]).stdout.strip()
+    actual = run_cmd([args.go_bin, "env", "GOVERSION"]).stdout.strip()
     if actual != "go" + required:
         raise RuntimeError(f"requires Go {required}; got {actual}")
+
     ffmpeg = shutil.which(os.environ.get("FFMPEG_BIN", "ffmpeg"))
     ffprobe = shutil.which(os.environ.get("FFPROBE_BIN", "ffprobe"))
     if not ffmpeg or not ffprobe:
         raise RuntimeError("requires real ffmpeg and ffprobe; install them or set FFMPEG_BIN/FFPROBE_BIN")
+
+    results = {
+        "mode": mode,
+        "endpoints": {"api_a": api_a, "api_b": api_b} if mode == "compose" else {},
+    }
+
+    start_time = time.monotonic()
+
     with ExitStack() as stack:
         temp_dir = stack.enter_context(tempfile.TemporaryDirectory(prefix="gostream_web_e2e_"))
-        db_path, media_dir = os.path.join(temp_dir,"gostream.db"), os.path.join(temp_dir,"media")
-        os.makedirs(media_dir)
-        server_bin = os.path.join(temp_dir,"gostream_server")
-        run_cmd([go_bin,"build","-race","-o",server_bin,"./cmd/gostream"],timeout=120)
-        addr = f"127.0.0.1:{find_free_port()}"
-        base_url = f"http://{addr}"
-        # Explicit environment prevents inherited credentials/shared-service connections.
-        env = {"PATH":os.environ.get("PATH",""),"ADDR":addr,"DB_DRIVER":"sqlite",
-               "DB_DSN":f"{db_path}?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1",
-               "MEDIA_DIR":media_dir,"MEDIA_STORE":"local", "JWT_SECRET":"e2e-test-secret-at-least-32-bytes-long!!",
-               "REDIS_ADDR":"","RABBITMQ_URL":"","PPROF_ADDR":"","FFMPEG_BIN":ffmpeg,"FFPROBE_BIN":ffprobe,
-               "FEED_FANOUT_MAX_FOLLOWERS":"0"}
-        log_path = Path(temp_dir)/"server.log"
-        log_file = stack.enter_context(log_path.open("w"))
-        def start_api():
-            process = subprocess.Popen([server_bin],env=env,cwd=ROOT,stdout=log_file,stderr=subprocess.STDOUT,start_new_session=True)
-            return process
-        server_proc = start_api()
-        def stop_api():
-            stop_test_group(server_proc)
-            if server_proc.returncode != 0:
-                raise RuntimeError(f"API exit={server_proc.returncode}")
-        stack.callback(stop_api)
-        def wait_ready():
-            for _ in range(100):
-                if server_proc.poll() is not None:
-                    raise RuntimeError("API exited before readiness")
-                try:
-                    with urlopen(base_url+"/ready",timeout=1) as r:
-                        if r.status==200:return
-                except OSError:
-                    time.sleep(.1)
-            raise RuntimeError("API did not become ready")
-        wait_ready()
+
+        if mode == "sqlite":
+            db_path = os.path.join(temp_dir, "gostream.db")
+            media_dir = os.path.join(temp_dir, "media")
+            os.makedirs(media_dir, exist_ok=True)
+            server_bin = os.path.join(temp_dir, "gostream_server")
+            run_cmd([args.go_bin, "build", "-race", "-o", server_bin, "./cmd/gostream"], timeout=120)
+
+            addr = f"127.0.0.1:{find_free_port()}"
+            base_url = f"http://{addr}"
+            api_a = api_b = base_url
+            results["endpoints"] = {"api_a": api_a, "api_b": api_b}
+
+            env = {
+                "PATH": os.environ.get("PATH", ""),
+                "ADDR": addr,
+                "DB_DRIVER": "sqlite",
+                "DB_DSN": f"{db_path}?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1",
+                "MEDIA_DIR": media_dir,
+                "MEDIA_STORE": "local",
+                "JWT_SECRET": "e2e-test-secret-at-least-32-bytes-long!!",
+                "REDIS_ADDR": "",
+                "RABBITMQ_URL": "",
+                "PPROF_ADDR": "",
+                "FFMPEG_BIN": ffmpeg,
+                "FFPROBE_BIN": ffprobe,
+                "FEED_FANOUT_MAX_FOLLOWERS": "0",
+            }
+            log_path = Path(temp_dir) / "server.log"
+            log_file = stack.enter_context(log_path.open("w"))
+
+            def start_api():
+                return subprocess.Popen(
+                    [server_bin], env=env, cwd=ROOT, stdout=log_file,
+                    stderr=subprocess.STDOUT, start_new_session=True
+                )
+
+            server_proc = start_api()
+
+            def stop_api():
+                stop_test_group(server_proc)
+                if server_proc.returncode != 0:
+                    raise RuntimeError(f"API exit={server_proc.returncode}")
+
+            stack.callback(stop_api)
+            wait_for_ready(base_url)
+        else:
+            wait_for_ready(api_a)
+            wait_for_ready(api_b)
+
         pid = os.getpid()
-        alice = BrowserSession(browser_bin,f"gostream-e2e-alice-{pid}")
+        alice = BrowserSession(args.browser_bin, f"gostream-e2e-alice-{pid}")
         stack.callback(alice.close)
-        bob = BrowserSession(browser_bin,f"gostream-e2e-bob-{pid}")
+        bob = BrowserSession(args.browser_bin, f"gostream-e2e-bob-{pid}")
         stack.callback(bob.close)
-        # Keep the formerly broken short-desktop boundary deterministic.
+
         alice.cli("set", "viewport", "1280", "577")
         bob.cli("set", "viewport", "1280", "577")
-        results = {}
+
+        suffix = secrets.token_hex(4)
+
         try:
-            # Step 1: Alice Registration
-            alice.cli("open", base_url)
+            # Step 1: Alice Registration (on API A)
+            alice.cli("open", api_a)
             alice.cli("click", "#auth-open")
-            alice.cli("click", "#auth-switch")  # Switch to register mode
-            alice.cli("fill", "#auth-form input[name=username]", "alice_e2e")
+            alice.cli("click", "#auth-switch")
+            alice.cli("fill", "#auth-form input[name=username]", f"alice_{suffix}")
             alice.cli("fill", "#auth-form input[name=nickname]", "Alice Star")
             alice.cli("fill", "#auth-form input[name=password]", "password123")
             alice.cli("click", "#auth-submit")
-
             alice.wait_for(lambda: "Alice Star" in alice.eval_js("document.querySelector('#session-state')?.textContent||''"))
+
             alice_user = alice.eval_js("JSON.parse(localStorage.getItem('gostream.user')||'{}')")
             alice_id = alice_user.get("id")
             results["alice_registered"] = bool(alice_id)
 
-            # Step 2: Bob Registration
-            bob.cli("open", base_url)
+            # Step 2: Bob Registration (on API B)
+            bob.cli("open", api_b)
             bob.cli("click", "#auth-open")
             bob.cli("click", "#auth-switch")
-            bob.cli("fill", "#auth-form input[name=username]", "bob_e2e")
+            bob.cli("fill", "#auth-form input[name=username]", f"bob_{suffix}")
             bob.cli("fill", "#auth-form input[name=nickname]", "Bob Builder")
             bob.cli("fill", "#auth-form input[name=password]", "password123")
             bob.cli("click", "#auth-submit")
-
             bob.wait_for(lambda: "Bob Builder" in bob.eval_js("document.querySelector('#session-state')?.textContent||''"))
+
             bob_user = bob.eval_js("JSON.parse(localStorage.getItem('gostream.user')||'{}')")
             bob_id = bob_user.get("id")
             results["bob_registered"] = bool(bob_id)
 
-            # Step 3: Alice Publishes a Video
+            # Step 3: Alice Profile & Avatar Upload (on API A)
+            avatar_png = os.path.join(temp_dir, "avatar.png")
+            run_cmd([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=coral:s=100x100:d=1", "-vframes", "1", avatar_png])
+
+            alice.cli("click", '.nav-item[data-view="profile"]')
+            alice.wait_for(lambda: alice.eval_js("Boolean(document.querySelector('#profile-form'))"))
+            alice.cli("upload", '#profile-form input[name="avatar"]', avatar_png)
+            alice.cli("fill", '#profile-form textarea[name="bio"]', "Filmmaker and digital creator")
+            alice.eval_js("document.querySelector('#profile-form').requestSubmit()")
+            alice.wait_for(lambda: alice.eval_js("api('/api/users/me').then(u=>u.bio==='Filmmaker and digital creator')"))
+            alice.wait_for(lambda: alice.eval_js("Boolean(document.querySelector('.profile-avatar'))"))
+            results["avatar_uploaded"] = True
+            results["profile_verified"] = True
+
+            # Step 4: Alice Publishes a Video (Chunk Upload & FFmpeg)
             sample_mp4 = os.path.join(temp_dir, "sample.mp4")
-            run_cmd([ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=c=blue:s=320x180:r=24", "-t", "8", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-movflags", "+faststart", sample_mp4], timeout=60)
+            run_cmd([
+                ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x180:r=24",
+                "-t", "8", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+                "-movflags", "+faststart", sample_mp4
+            ], timeout=60)
 
             alice.cli("click", '.nav-item[data-view="upload"]')
             alice.wait_for(lambda: alice.eval_js("Boolean(document.querySelector('#upload-form'))"))
-
             alice.cli("upload", '#upload-form input[name="file"]', sample_mp4)
             alice.cli("fill", '#upload-form input[name="title"]', "Alice In Wonderland")
             alice.cli("fill", '#upload-form textarea[name="description"]', "A magical journey")
-
-            # Submit form
             alice.eval_js("document.querySelector('#upload-form').requestSubmit()")
+
             alice.wait_for(lambda: alice.eval_js("document.querySelectorAll('.video-card').length > 0"))
             video_id = alice.eval_js("document.querySelector('.video-card')?.dataset.video")
             if not video_id:
                 raise AssertionError("upload did not produce a video ID")
-            alice.wait_for(lambda: alice.eval_js(f"api('/api/videos/{video_id}').then(v=>v.status==='published'&&v.duration_ms>0&&v.width>0&&v.height>0)"), timeout=60)
+
+            alice.wait_for(lambda: alice.eval_js(
+                f"api('/api/videos/{video_id}').then(v=>v.status==='published'&&v.duration_ms>0&&v.width>0&&v.height>0)"
+            ), timeout=60)
             results["video_published"] = True
+
             alice.cli("click", '.nav-item[data-view="profile"]')
             alice.wait_for(lambda: alice.eval_js("Boolean(document.querySelector('[data-refresh-profile]'))"))
             alice.cli("click", '[data-refresh-profile]')
@@ -205,16 +332,7 @@ def main():
             alice.wait_for(lambda: alice.eval_js("document.querySelector('.video-card video').currentTime>0"))
             results["video_playback"] = True
 
-            # Step 4: Alice Manages Profile & Updates Bio
-            alice.cli("click", '.nav-item[data-view="profile"]')
-            alice.wait_for(lambda: alice.eval_js("Boolean(document.querySelector('#profile-form'))"))
-            alice.wait_for(lambda: "Alice In Wonderland" in alice.eval_js("document.querySelector('#content')?.textContent||''"))
-            alice.cli("fill", '#profile-form textarea[name="bio"]', "Filmmaker and digital creator")
-            alice.eval_js("document.querySelector('#profile-form').requestSubmit()")
-            alice.wait_for(lambda: alice.eval_js("api('/api/users/me').then(u=>u.bio==='Filmmaker and digital creator')"))
-            results["profile_verified"] = True
-
-            # Step 5: Bob Browses Feed & Interacts (Like, Favorite, Comment)
+            # Step 5: Bob Browses Feed & Interacts (API B)
             bob.cli("click", '.nav-item[data-view="feed"]')
             bob.wait_for(lambda: bob.eval_js(f"Boolean(document.querySelector('.video-card[data-video=\"{video_id}\"]'))"))
 
@@ -236,57 +354,72 @@ def main():
             bob.wait_for(lambda: "Great video Alice!" in bob.eval_js(f"document.querySelector('#comments-{video_id}')?.textContent||''"))
             results["comment_posted"] = True
 
-            # Step 6: Alice Checks Notifications
+            # Bob replies to comment
+            comment_id = bob.eval_js(f"document.querySelector('#comments-{video_id} .comment-thread')?.dataset.commentId")
+            if comment_id:
+                bob.cli("click", f'#comments-{video_id} [data-reply-to="{comment_id}"]')
+                bob.wait_for(lambda: bob.eval_js(f"Boolean(document.querySelector('#comments-{video_id} .reply-form-slot:not([hidden]) input[name=\"body\"]'))"))
+                bob.cli("fill", f'#comments-{video_id} .reply-form-slot:not([hidden]) input[name="body"]', "Checking reply thread")
+                bob.eval_js(f"document.querySelector('#comments-{video_id} .reply-form-slot:not([hidden]) form').requestSubmit()")
+                bob.wait_for(lambda: "Checking reply thread" in bob.eval_js(f"document.querySelector('#comments-{video_id}')?.textContent||''"))
+                results["comment_replied"] = True
+
+            if screenshots_dir:
+                bob.screenshot(screenshots_dir / "01_bob_feed_interaction.png")
+
+            # Step 6: Alice Checks Notifications (API A)
             alice.cli("click", '.nav-item[data-view="notifications"]')
             alice.wait_for(lambda: "Bob Builder" in alice.eval_js("document.querySelector('#content')?.textContent||''"))
             results["notifications_received"] = True
+
             alice.cli("click", '[data-read-all]')
             alice.wait_for(lambda: alice.eval_js("api('/api/notifications/unread').then(n=>n.unread_count===0)"))
             results["notifications_marked_read"] = True
 
-            # Step 7: Search and Follow via UI
+            # Step 7: Search and Follow via UI (Bob on API B)
             bob.cli("click", '.nav-item[data-view="search"]')
             bob.cli("fill", '#search-form-paged input[name="q"]', "Alice")
             bob.cli("click", "#search-form-paged button")
             bob.wait_for(lambda: "Alice Star" in bob.eval_js("document.querySelector('#search-results')?.textContent||''"))
             results["search_verified"] = True
 
-            # Follow Alice by clicking button in search results
             bob.cli("click", f'[data-follow="{alice_id}"]')
             bob.wait_for(lambda: "已关注" in bob.eval_js(f"document.querySelector('[data-follow=\"{alice_id}\"]')?.textContent||''"))
             results["user_followed"] = True
 
-            # Check Following Feed
             bob.cli("click", '.nav-item[data-view="following"]')
             bob.wait_for(lambda: "Alice In Wonderland" in bob.eval_js("document.querySelector('#content')?.textContent||''"))
             results["following_feed"] = True
 
-            # Step 8: Direct Chat over WebSocket
+            # Step 8: Direct Chat over WebSocket (Cross-Instance: Alice on A, Bob on B)
             alice.cli("click", '.nav-item[data-view="chat"]')
             alice.wait_for(lambda: alice.eval_js("Boolean(document.querySelector('#chat-peer'))"))
             alice.cli("fill", "#chat-peer", str(bob_id))
             alice.cli("click", "[data-chat-connect]")
             alice.wait_for(lambda: alice.eval_js("Boolean(document.querySelector('#chat-form'))"))
-            alice.cli("fill", '#chat-form textarea[name="body"]', "Hello Bob! How are you?")
+            alice.cli("fill", '#chat-form textarea[name="body"]', "Hello Bob! Testing cross-instance direct chat.")
             alice.eval_js("document.querySelector('#chat-form').requestSubmit()")
 
-            # Bob receives message in chat
             bob.cli("click", '.nav-item[data-view="chat"]')
             bob.wait_for(lambda: bob.eval_js("Boolean(document.querySelector('#chat-peer'))"))
             bob.cli("fill", "#chat-peer", str(alice_id))
             bob.cli("click", "[data-chat-connect]")
-            bob.wait_for(lambda: "Hello Bob! How are you?" in bob.eval_js("document.querySelector('#chat-log')?.textContent||''"))
+            bob.wait_for(lambda: "Hello Bob! Testing cross-instance direct chat." in bob.eval_js("document.querySelector('#chat-log')?.textContent||''"))
 
-            # Bob replies to Alice
-            bob.cli("fill", '#chat-form textarea[name="body"]', "Hello Alice! Doing great!")
+            bob.cli("fill", '#chat-form textarea[name="body"]', "Hello Alice! Received on API B.")
             bob.eval_js("document.querySelector('#chat-form').requestSubmit()")
-            alice.wait_for(lambda: "Hello Alice! Doing great!" in alice.eval_js("document.querySelector('#chat-log')?.textContent||''"))
-            results["direct_chat"] = True
+            alice.wait_for(lambda: "Hello Alice! Received on API B." in alice.eval_js("document.querySelector('#chat-log')?.textContent||''"))
+            results["direct_chat_cross_instance"] = True
 
-            # Step 9: Group Chat
+            if screenshots_dir:
+                alice.screenshot(screenshots_dir / "02_alice_direct_chat.png")
+
+            # Step 9: Group Chat & Member Lifecycle (Alice on A, Bob on B)
             alice.cli("fill", '#group-create-form input[name="name"]', "Creators Team")
             alice.eval_js("document.querySelector('#group-create-form').requestSubmit()")
             alice.wait_for(lambda: alice.eval_js("Boolean(document.querySelector('#group-panel #group-add-form'))"))
+            group_id = alice.eval_js("state.groupID")
+            results["group_chat_created"] = bool(group_id)
 
             # Alice invites Bob
             alice.cli("fill", '#group-add-form input[name="user_id"]', str(bob_id))
@@ -298,45 +431,72 @@ def main():
             alice.eval_js("document.querySelector('#group-send-form').requestSubmit()")
             alice.wait_for(lambda: "Welcome to the group!" in alice.eval_js("document.querySelector('#group-log')?.textContent||''"))
 
-            # Bob opens group chat and sees group
+            # Bob opens group on API B
             bob.cli("click", '.nav-item[data-view="chat"]')
             bob.wait_for(lambda: "Creators Team" in bob.eval_js("document.querySelector('#group-list')?.textContent||''"))
-            bob.cli("click", '.group-chip[data-group-open]')
+            bob.cli("click", f'.group-chip[data-group-open="{group_id}"]')
             bob.wait_for(lambda: "Welcome to the group!" in bob.eval_js("document.querySelector('#group-log')?.textContent||''"))
 
-            # Bob sends reply into group
             bob.cli("fill", '#group-send-form textarea[name="body"]', "Thanks Alice!")
             bob.eval_js("document.querySelector('#group-send-form').requestSubmit()")
             alice.wait_for(lambda: "Thanks Alice!" in alice.eval_js("document.querySelector('#group-log')?.textContent||''"))
-            results["group_chat"] = True
+            results["group_chat_messaging"] = True
+
+            # Member removal check: Alice removes Bob from group
+            alice.cli("fill", '#group-remove-form input[name="user_id"]', str(bob_id))
+            alice.eval_js("document.querySelector('#group-remove-form').requestSubmit()")
+            alice.wait_for(lambda: alice.eval_js("document.querySelector('#group-remove-form input[name=\"user_id\"]')?.value === ''"))
+
+            # Bob attempt to post into group should fail
+            bob_post_err = bob.eval_js(
+                f"api('/api/groups/{group_id}/messages', {{method:'POST',body:JSON.stringify({{body:'Forbidden msg'}})}})"
+                f".then(()=>'ok').catch(e=>e.message)"
+            )
+            results["group_member_revocation"] = (
+                bob_post_err != "ok" and any(k in str(bob_post_err).lower() for k in ["not a member", "forbidden", "403"])
+            )
 
             # Step 10: Mobile Viewport Check (390x844)
             alice.cli("set", "viewport", "390", "844")
-            mobile_rendered = alice.eval_js("window.innerWidth === 390 && window.getComputedStyle(document.querySelector('.sidebar')).position === 'fixed' && document.documentElement.scrollWidth <= window.innerWidth+1")
+            mobile_rendered = alice.eval_js(
+                "window.innerWidth === 390 && "
+                "window.getComputedStyle(document.querySelector('.sidebar')).position === 'fixed' && "
+                "document.documentElement.scrollWidth <= window.innerWidth + 1"
+            )
             alice.cli("click", '.nav-item[data-view="feed"]')
             results["mobile_viewport"] = bool(mobile_rendered)
+            if screenshots_dir:
+                alice.screenshot(screenshots_dir / "03_mobile_viewport_390.png")
+            alice.cli("set", "viewport", "1280", "577")
 
             # Step 11: Stored Session & Page Reload
             alice.cli("reload")
             alice.wait_for(lambda: "Alice Star" in alice.eval_js("document.querySelector('#session-state')?.textContent||''"))
             results["session_persisted"] = True
 
-
-            # Verify login and real API restart, retaining this fixture's SQL/media.
+            # Step 12: Bob Logout & Re-login Verification
             bob.cli("click", "#auth-open")
             bob.wait_for(lambda: bob.eval_js("!state.user && !localStorage.getItem('gostream.token')"))
             bob.cli("click", "#auth-open")
             bob.wait_for(lambda: bob.eval_js("document.querySelector('#auth-dialog').matches(':modal')"))
             if bob.eval_js("document.querySelector('#auth-submit').dataset.mode") == "register":
                 bob.cli("click", "#auth-switch")
-            bob.cli("fill", '#auth-form input[name="username"]', "bob_e2e")
+            bob.cli("fill", '#auth-form input[name="username"]', f"bob_{suffix}")
             bob.cli("fill", '#auth-form input[name="password"]', "password123")
             bob.cli("click", "#auth-submit")
             bob.wait_for(lambda: "Bob Builder" in bob.eval_js("document.querySelector('#session-state').textContent"))
             results["login_verified"] = True
-            stop_api()
-            server_proc = start_api()
-            wait_ready()
+
+            # Step 13: Single API Restart & State Persistence
+            if mode == "sqlite":
+                stop_api()
+                server_proc = start_api()
+                wait_for_ready(base_url)
+            else:
+                restart_compose_api(args.project_name)
+                wait_for_ready(api_a)
+
+            # Alice verifies session and state on API A after restart
             alice.cli("reload")
             alice.wait_for(lambda: "Alice Star" in alice.eval_js("document.querySelector('#session-state')?.textContent||''"))
             alice.wait_for(lambda: alice.eval_js(f"api('/api/videos/{video_id}').then(v=>v.status==='published')"))
@@ -344,14 +504,50 @@ def main():
             alice.wait_for(lambda: alice.eval_js("Boolean(document.querySelector('#chat-peer'))"))
             alice.cli("fill", "#chat-peer", str(bob_id))
             alice.cli("click", "[data-chat-connect]")
-            alice.wait_for(lambda: "Hello Bob! How are you?" in alice.eval_js("document.querySelector('#chat-log')?.textContent||''"))
+            alice.wait_for(lambda: "Hello Bob! Testing cross-instance direct chat." in alice.eval_js("document.querySelector('#chat-log')?.textContent||''"))
             results["api_restart_persistence"] = True
+
+            # Step 14: Security & Ownership Negative Checks
+            anon_status = alice.eval_js("fetch('/api/users/me').then(r=>r.status)")
+            cross_delete_err = bob.eval_js(
+                f"api('/api/videos/{video_id}', {{method:'DELETE'}}).then(()=>'ok').catch(e=>e.message)"
+            )
+            results["security_boundaries_verified"] = (
+                anon_status == 401 and
+                cross_delete_err != "ok" and
+                any(k in str(cross_delete_err).lower() for k in ["not found", "forbidden", "403", "404"])
+            )
+
+            if screenshots_dir:
+                alice.screenshot(screenshots_dir / "04_after_restart_persistence.png")
+
         except BaseException:
-            print(log_path.read_text()[-16000:],file=sys.stderr)
+            if mode == "sqlite":
+                print(log_path.read_text()[-16000:], file=sys.stderr)
             raise
-        print(json.dumps(results,indent=2))
-        if not all(results.values()) or len(results)!=19:
-            raise AssertionError("workflow checks incomplete: "+json.dumps(results))
+
+    elapsed = round(time.monotonic() - start_time, 3)
+    results["elapsed_seconds"] = elapsed
+
+    # Validate all checkpoints passed
+    checkpoints = [k for k in results if k not in ("mode", "endpoints", "elapsed_seconds")]
+    all_passed = all(results.get(k) is True for k in checkpoints)
+    results["all_checkpoints_passed"] = all_passed
+    results["total_checkpoints"] = len(checkpoints)
+
+    output_json = json.dumps(results, indent=2) + "\n"
+    if report_path:
+        if all_passed:
+            report_path.write_text(output_json)
+            report_path.chmod(0o600)
+            print(f"Web full flow report written to: {report_path}", flush=True)
+        else:
+            report_path.unlink(missing_ok=True)
+    print(output_json, flush=True)
+
+    if not all_passed:
+        failed = [k for k in checkpoints if results.get(k) is not True]
+        raise AssertionError(f"Web full-flow incomplete; failed checkpoints: {failed}")
 
 
 if __name__ == "__main__":

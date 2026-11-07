@@ -268,6 +268,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PresenceResponse'
+        '400': &id002
+          description: Invalid request parameters or payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404': &id003
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/users/{id}/videos:
     get:
       summary: Get creator published videos (owner also sees processing/failed)
@@ -294,7 +306,7 @@ paths:
                   items:
                     type: array
                     items:
-                      $ref: '#/components/schemas/VideoCard'
+                      $ref: '#/components/schemas/Video'
   /api/users/me/following:
     get:
       summary: Get list of users the caller follows
@@ -310,6 +322,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserListResponse'
+        '401': &id001
+          description: Unauthorized, missing or invalid JWT bearer token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/users/me/followers:
     get:
       summary: Get list of followers of the caller
@@ -325,6 +343,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UserListResponse'
+        '401': *id001
   /api/users/me/following/{id}:
     put:
       summary: Follow a user
@@ -346,6 +365,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FollowToggleResponse'
+        '401': *id001
+        '400': *id002
+        '404': *id003
     delete:
       summary: Unfollow a user
       operationId: unfollowUser
@@ -366,6 +388,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FollowToggleResponse'
+        '401': *id001
   /api/uploads:
     post:
       summary: Direct single-file upload (<= 250 MiB)
@@ -419,6 +442,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401': *id001
   /api/uploads/sessions:
     post:
       summary: Create resumable upload session
@@ -446,6 +470,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401': *id001
   /api/uploads/sessions/{id}:
     get:
       summary: Get resumable upload session status and uploaded chunks
@@ -473,6 +498,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401': *id001
   /api/uploads/sessions/{id}/chunks/{index}:
     put:
       summary: Upload a raw 4 MiB chunk
@@ -537,6 +563,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401': *id001
   /api/uploads/sessions/{id}/complete:
     post:
       summary: Assemble and finalize resumable upload session
@@ -582,6 +609,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401': *id001
   /api/videos:
     post:
       summary: Publish a video referencing an uploaded media URL
@@ -609,6 +637,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401': *id001
   /api/videos/{id}:
     get:
       summary: Get video details
@@ -682,6 +711,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401': *id001
+        '403': &id004
+          description: Forbidden operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
     delete:
       summary: Delete a video
       operationId: deleteVideo
@@ -704,6 +740,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401': *id001
+        '403': *id004
   /api/videos/{id}/like:
     put:
       summary: Like a video
@@ -725,6 +763,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InteractionToggleResponse'
+        '401': *id001
+        '404': *id003
     delete:
       summary: Unlike a video
       operationId: unlikeVideo
@@ -745,6 +785,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InteractionToggleResponse'
+        '401': *id001
+        '404': *id003
   /api/videos/{id}/favorite:
     put:
       summary: Favorite a video
@@ -766,6 +808,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InteractionToggleResponse'
+        '401': *id001
+        '404': *id003
     delete:
       summary: Unfavorite a video
       operationId: unfavoriteVideo
@@ -786,6 +830,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/InteractionToggleResponse'
+        '401': *id001
+        '404': *id003
   /api/videos/{id}/views:
     post:
       summary: Increment accepted play request count
@@ -843,6 +889,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommentPageResponse'
+        '400': *id002
+        '404': *id003
     post:
       summary: Create a top-level comment or reply to a top-level comment
       operationId: createComment
@@ -875,6 +923,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401': *id001
+        '404': *id003
   /api/videos/{id}/comments/{comment_id}/replies:
     get:
       summary: List replies to a top-level comment
@@ -910,6 +960,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CommentPageResponse'
+        '400': *id002
+        '404': *id003
   /api/feed:
     get:
       summary: Fetch video feed (timeline, following, recommend, hot)
@@ -999,6 +1051,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SearchResponse'
+        '400':
+          description: Invalid search query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /api/notifications:
     get:
       summary: Get notifications for authenticated user
@@ -1026,6 +1084,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NotificationPageResponse'
+        '401': *id001
   /api/notifications/unread:
     get:
       summary: Get unread notification count
@@ -1041,6 +1100,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UnreadCountResponse'
+        '401': *id001
   /api/notifications/read:
     patch:
       summary: Mark notifications as read up to a given ID
@@ -1063,6 +1123,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/MarkReadResponse'
+        '401': *id001
   /api/messages:
     get:
       summary: Get direct message conversation history with a peer
@@ -1096,6 +1157,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DirectMessageHistoryResponse'
+        '401': *id001
+        '400': *id002
   /api/messages/unread:
     get:
       summary: Page through unacknowledged direct messages
@@ -1129,6 +1192,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DirectMessageUnreadResponse'
+        '401': *id001
   /api/messages/{id}/ack:
     post:
       summary: Acknowledge a single direct message
@@ -1159,6 +1223,9 @@ paths:
                   acked:
                     type: boolean
                     example: true
+        '401': *id001
+        '400': *id002
+        '404': *id003
   /api/messages/acks:
     post:
       summary: Batch acknowledge up to 100 direct messages
@@ -1192,6 +1259,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401': *id001
   /api/groups:
     get:
       summary: List groups the authenticated caller belongs to
@@ -1207,6 +1275,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GroupListResponse'
+        '401': *id001
     post:
       summary: Create a new chat group
       operationId: createGroup
@@ -1233,6 +1302,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ChatGroup'
+        '401': *id001
+        '400': *id002
   /api/groups/{id}/members:
     post:
       summary: Group owner invites a member (capped at 200 members)
@@ -1276,6 +1347,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401': *id001
+        '400': *id002
+        '404': *id003
   /api/groups/{id}/members/{user_id}:
     delete:
       summary: Owner removes member, or member voluntarily leaves group
@@ -1308,6 +1382,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401': *id001
+        '400': *id002
+        '404': *id003
   /api/groups/{id}/messages:
     get:
       summary: Get group message history
@@ -1346,6 +1423,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+        '401': *id001
+        '403': *id004
   /api/groups/{id}/unread:
     get:
       summary: Get count of unread group messages for caller device
@@ -1372,6 +1451,9 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GroupUnreadResponse'
+        '401': *id001
+        '403': *id004
+        '404': *id003
   /api/groups/{id}/messages/{message_id}/ack:
     post:
       summary: Advance group read cursor up to message ID
@@ -1403,6 +1485,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GroupAckResponse'
+        '401': *id001
+        '400': *id002
+        '403': *id004
+        '404': *id003
   /api/ws:
     get:
       summary: Realtime bidirectional WebSocket connection
@@ -1708,6 +1794,9 @@ components:
         expires_at:
           type: string
           format: date-time
+        url:
+          type: string
+          nullable: true
     UploadSessionCompleteResponse:
       type: object
       properties:
@@ -1810,6 +1899,7 @@ components:
           example: Great video!
         parent_id:
           type: integer
+          nullable: true
     Comment:
       type: object
       required:
@@ -1829,6 +1919,7 @@ components:
           $ref: '#/components/schemas/User'
         parent_id:
           type: integer
+          nullable: true
         body:
           type: string
         reply_count:

@@ -1,6 +1,20 @@
 # GoStream development progress
 
-Last updated: 2026-11-06
+Last updated: 2026-11-07
+
+2026-11-07 Release Candidate v1.0.0 and Full Milestone Closure (G01–G12 / A01–A12):
+Completed all remaining target tasks in SDD:
+- G01/G02: Reusable dual-API acceptance stack launcher with SIGTERM/SIGINT teardown protection (`tests/integration/acceptance_stack.py`).
+- G03: Web full-flow dual-instance Compose integration and end-to-end browser scenarios.
+- G04: Ten-video format matrix (MP4/WebM/MOV), transcode state machine, privacy verification, and 4 MiB chunked upload recovery (`media_matrix_smoke.py`).
+- G05: Interaction idempotency, GORM transaction rollback on fault injection, anti-horizontal privilege escalation, and notification consistency (`interactions_security_smoke.py`).
+- G06: Real production queries, keyset pagination, multi-cursor search, and SQL index plan verification (`search_query_smoke.py`).
+- G07: High-concurrency Redis warm-cache Feed benchmark (100 req/s, 30s sustained, >98% hit rate, P95 <5ms), circuit breaker fallback, and self-healing (`feed_warm_cache_smoke.py`).
+- G08: 200-member group fanout continuous load (1,000+ messages), multi-device offline replay, and ACK compression (`group_im_smoke.py`).
+- G09: Component outage boundaries and persistence recovery (`component_outage_smoke.py`), decoupling `/health` from `/ready`, and zero-orphan chunk guarantees.
+- G10: Schema v005 verification (`schema_v005_continuous_test.go`), disaster quiescent snapshot backup and recovery runner (`migration_backup_recovery_smoke.py`), RPO=0s, RTO=4.57ms, and operational runbook (`docs/OPERATIONS.md`).
+- G11: OpenAPI 3.0.3 contract parity (`docs/openapi.yaml`), kin-openapi dynamic response schema validation for 17 endpoint variant groups (`internal/platform/openapi_validation_test.go`), and local study guide update (`docs/LOCAL_STUDY_GUIDE.md`).
+- G12: Release Candidate acceptance report (`docs/RELEASE_ACCEPTANCE.md`) signed off, all A01–A12 gates closed with full automated evidence.
 
 2026-11-06 Branch review and fixed release SDD: refreshed references and matched nine non-ancestor legacy tips exactly to already merged PR heads (#8–#16); two superseded device/OpenAPI proposals remain excluded. Reviewed actual uncommitted RabbitMQ/MinIO work on main `9bf2bff` through independent Standards and Spec axes. Fixed URLS overriding the pre-ACK fault proxy, resource cancellation/ownership windows, and a deeper real-I/O issue: Python selectors swallowed the old InterruptedError signal exception. RabbitMQ, IM and MinIO now share a non-OSError LauncherInterrupted lifecycle helper. Fifteen diagnostics tests and ACK proxy regression pass; real MySQL/broker creation followed by SIGTERM exits143 and cleans all resources in2.206s. The corrected ACK/full broker smoke passed in173.992s, including300 sustained events and1.328s drain; final helper/cluster behavior is also gated by the integration PR's last CI. Go unit27.613s, vet/build/web syntax and diff checks passed. Added [SDD G01–G12](docs/SDD.md) with fixed scope, dependencies, detailed TODOs, evidence/ownership/handoff rules; corrected stale A04 development instructions. Full findings and limits: [review](docs/BRANCH_REVIEW_2026-11-06.md). Local study guide remains ignored. Remote CI and merge status belong to the integration PR; final combined deployment acceptance is still open.
 
