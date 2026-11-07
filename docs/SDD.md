@@ -119,12 +119,12 @@
 
 现有入口（需要隔离已迁移 MySQL）：`go test -race ./internal/platform -run '^TestMySQL(MultiUserConcurrentInteractionsAndCounters|SecurityAndOwnershipBoundaries|NotificationPaginationIntegration|CommentThreadsIntegration)$' -count=1 -v`。退出条件是完整状态核对，不能仅检查 HTTP 200；发现生产缺陷拆小修复 PR。
 
-### G06 搜索与通知的真实生产查询（候选代码已实现，待验收，0.5–1 日；依赖 G01）
+### G06 搜索与通知的真实生产查询（已完成，交付报告：[docs/tasks/G06.md](tasks/G06.md)）
 
-- [ ] 复用既定 2,000 用户/20,000 视频等规模，构造命中与未命中、同时间戳、通配符/Unicode、深页数据。
-- [ ] 从真实 handler 获取搜索用户/视频、通知列表/有界已读相关 SQL，做 EXPLAIN/必要时 EXPLAIN ANALYZE，并核对精确分页结果。
-- [ ] 记录前置通配符 LIKE 的扫描/排序成本、延迟及适用规模；现有500行探针和 FORCE INDEX 不能代替生产查询证据。
-- [ ] 仅在发现瓶颈后修改查询/索引；增量迁移与前后对照另行提交，不凭猜测删除“冗余”索引。
+- [x] 复用既定 2,000 用户/20,000 视频等规模，构造命中与未命中、同时间戳、通配符/Unicode、深页数据。
+- [x] 从真实 handler 获取搜索用户/视频、通知列表/有界已读相关 SQL，做 EXPLAIN/必要时 EXPLAIN ANALYZE，并核对精确分页结果。
+- [x] 记录前置通配符 LIKE 的扫描/排序成本、延迟及适用规模；现有500行探针和 FORCE INDEX 不能代替生产查询证据。
+- [x] 仅在发现瓶颈后修改查询/索引；增量迁移与前后对照另行提交，不凭猜测删除“冗余”索引。
 
 复用：`docs/QUERY_PLANS.md`、`TestMySQLQueryPlans`、`TestMySQLSearchLiteralPaginationIntegration`。退出条件：A08 真实规模结果和可复现计划，明确搜索方案适用范围，无需默认引入 Elasticsearch。
 
