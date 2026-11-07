@@ -83,12 +83,12 @@
 
 范围：`rabbitmq.go`、两个 CLI、`rabbitmq_smoke.py`、ACK proxy、`minio_outage_smoke.py`、CI。证据：`BRANCH_REVIEW_2026-11-06.md`。旧分支留档不等于待重开发。
 
-### G02 最终联合验收栈（候选代码已实现，待验收，0.5–1 日；依赖 G01）
+### G02 最终联合验收栈（已完成，交付报告：[docs/tasks/G02.md](tasks/G02.md)）
 
-- [ ] 在现有 object-test Compose 上增加可复用 launcher/配置，两个 API 对外地址明确，API 构建来自当前提交。
-- [ ] 自动创建独立配置/数据，等待 health/ready，记录版本、CPU/内存、commit、部署参数及 API 实例身份。
-- [ ] 支持浏览器测试使用现有 base URLs，禁止最终验收脚本另启 SQLite API 后冒充 Compose 验收。
-- [ ] 正常结束、断言失败和 SIGTERM 都清理本轮资源；失败保存脱敏诊断，报告不得沿用旧成功文件。
+- [x] 在现有 object-test Compose 上增加可复用 launcher/配置，两个 API 对外地址明确，API 构建来自当前提交。
+- [x] 自动创建独立配置/数据，等待 health/ready，记录版本、CPU/内存、commit、部署参数及 API 实例身份。
+- [x] 支持浏览器测试使用现有 base URLs，禁止最终验收脚本另启 SQLite API 后冒充 Compose 验收。
+- [x] 正常结束、断言失败和 SIGTERM 都清理本轮资源；失败保存脱敏诊断，报告不得沿用旧成功文件。
 
 复用：`tests/integration/object-test.compose.yml`、`im_smoke.py` 生命周期模式。退出条件：同一 launcher 可从空测试卷启动、完成探测、清理；新环境与外部取消各有实测。A01/A09/A10 的后续脚本统一复用它。
 
