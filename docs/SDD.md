@@ -110,12 +110,12 @@
 
 退出条件：A03 与 TEST_STANDARD“IM与媒体”中的十视频部分有逐文件结果；错误、重试、对象引用/清理可核对。扩展 `MEDIA_OPERATIONS.md`/任务报告，不编造转码吞吐。
 
-### G05 互动、通知及权限收口（候选代码已实现，待验收，0.5–1 日；依赖 G01，最终复验依赖 G02）
+### G05 互动、通知及权限收口（已完成，交付报告：[docs/tasks/G05.md](tasks/G05.md)）
 
-- [ ] 先读 `TestMySQLMultiUserConcurrentInteractionsAndCounters`、`TestMySQLSecurityAndOwnershipBoundaries`、通知分页/评论测试，列出已有证据，避免重复造矩阵。
-- [ ] 补并核对多用户/多视频重复点赞、收藏、取消、关注、评论/回复的明细、计数、通知/outbox 对应关系，禁止负数和重复业务效果。
-- [ ] 明确播放计数与请求预算；覆盖重复播放/限流边界、评论层级、陌生账号/匿名访问、取消权限后的缓存与搜索。
-- [ ] 最终栈运行代表性权限负例，并将 A02/A05/A08/A11 的缺项与证据一一对应。
+- [x] 先读 `TestMySQLMultiUserConcurrentInteractionsAndCounters`、`TestMySQLSecurityAndOwnershipBoundaries`、通知分页/评论测试，列出已有证据，避免重复造矩阵。
+- [x] 补并核对多用户/多视频重复点赞、收藏、取消、关注、评论/回复的明细、计数、通知/outbox 对应关系，禁止负数和重复业务效果。
+- [x] 明确播放计数与请求预算；覆盖重复播放/限流边界、评论层级、陌生账号/匿名访问、取消权限后的缓存与搜索。
+- [x] 最终栈运行代表性权限负例，并将 A02/A05/A08/A11 的缺项与证据一一对应。
 
 现有入口（需要隔离已迁移 MySQL）：`go test -race ./internal/platform -run '^TestMySQL(MultiUserConcurrentInteractionsAndCounters|SecurityAndOwnershipBoundaries|NotificationPaginationIntegration|CommentThreadsIntegration)$' -count=1 -v`。退出条件是完整状态核对，不能仅检查 HTTP 200；发现生产缺陷拆小修复 PR。
 
