@@ -285,6 +285,11 @@ jobs:
           ffmpeg -version >/dev/null
           ffprobe -version >/dev/null
 
+      - name: Test real FFmpeg corruption and media diagnostics
+        run: |
+          command -v ffmpeg
+          python3 -m unittest discover -s tests/diagnostics -p 'test_media_matrix.py' -v
+
       - name: Build API and test processor-disabled restart recovery
         run: |
           go build -o "$RUNNER_TEMP/gostream" ./cmd/gostream

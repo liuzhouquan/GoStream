@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -27,6 +28,8 @@ class FFprobeShimUnitTest(unittest.TestCase):
         code = ffprobe_shim.probe_with_ffmpeg("ffmpeg", "/nonexistent/video/path.mp4")
         self.assertEqual(code, 1)
 
+    @unittest.skipUnless(shutil.which(ffprobe_shim.find_ffmpeg()),
+                         "requires real FFmpeg; executed in video-recovery-integration")
     def test_probe_corrupted_file_returns_error_code(self):
         with tempfile.NamedTemporaryFile(suffix=".mp4") as tf:
             tf.write(b"NOT_A_VALID_MP4_HEADER_AT_ALL_GARBAGE_BYTES")

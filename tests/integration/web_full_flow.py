@@ -121,6 +121,76 @@ def wait_for_ready(url, timeout=45):
     raise RuntimeError(f"API at {url} did not become ready within {timeout}s")
 
 
+def browser_http_status(session, path, method="GET", authenticated=True):
+    headers = "{Authorization:'Bearer '+state.token}" if authenticated else "{}"
+    return session.eval_js(
+        f"fetch({json.dumps(path)}, {{method:{json.dumps(method)},headers:{headers}}})"
+        ".then(response=>response.status)"
+    )
+
+
+def verify_security_boundaries(owner, other, video_id):
+    path = f"/api/videos/{int(video_id)}"
+    assert browser_http_status(owner, path) == 200, "owner must see the existing video before negative checks"
+    assert browser_http_status(owner, "/api/users/me", authenticated=False) == 401, "anonymous identity request was not rejected"
+    status = browser_http_status(other, path, method="DELETE")
+    assert status in (403, 404), f"cross-user DELETE expected 403/404, received {status}"
+    assert browser_http_status(owner, path) == 200, "unauthorized DELETE removed the owner's video"
+    return True
+
+
+def group_history_ids(session, group_id):
+    return session.eval_js("""(async()=>{
+        const ids=[];
+        let before=0;
+        for(;;){
+            const page=await api('/api/groups/""" + str(int(group_id)) + """/messages?limit=100'+(before?'&before_id='+before:''));
+            for(const message of page.items||[])ids.push(message.id);
+            if(!page.has_more)break;
+            const next=Number(page.next_cursor||0);
+            if(!next||(before&&next>=before))throw new Error('group history cursor did not advance');
+            before=next;
+        }
+        if(new Set(ids).size!==ids.length)throw new Error('duplicate group history IDs');
+        return ids.sort((a,b)=>a-b);
+    })()""")
+
+
+def verify_group_member_revocation(owner, removed, group_id):
+    history_path = f"/api/groups/{int(group_id)}/messages?limit=100"
+    before = group_history_ids(owner, group_id)
+    assert before, "revocation fixture must have committed group history"
+    assert browser_http_status(removed, history_path) in (403, 404), "removed member can still read group history"
+    client_id = "revoked-" + secrets.token_hex(12)
+    payload = {"type": "group_message", "group_id": int(group_id),
+               "client_id": client_id, "body": "Forbidden revoked-member message " + client_id}
+    response = removed.eval_js("""(async()=>{
+        const socket=state.socket;
+        if(!socket||socket.readyState!==WebSocket.OPEN)throw new Error('revoked member socket is not open');
+        const payload=""" + json.dumps(payload) + """;
+        return await new Promise((resolve,reject)=>{
+            const cleanup=()=>{clearTimeout(timer);socket.removeEventListener('message',onMessage);};
+            const onMessage=event=>{
+                let frame;
+                try{frame=JSON.parse(event.data);}catch(_){return;}
+                if(frame.type==='ack'&&frame.client_id===payload.client_id){
+                    cleanup();resolve({rejected:false});
+                }else if(frame.type==='error'&&frame.message==='group not found'){
+                    cleanup();resolve({rejected:true,error:frame.message});
+                }
+            };
+            const timer=setTimeout(()=>{cleanup();reject(new Error('no group authorization rejection on WebSocket'));},5000);
+            socket.addEventListener('message',onMessage);
+            socket.send(JSON.stringify(payload));
+        });
+    })()""")
+    assert response == {"rejected": True, "error": "group not found"}, f"revoked group send was not rejected: {response}"
+    assert browser_http_status(removed, history_path) in (403, 404), "removed member regained history access"
+    after = group_history_ids(owner, group_id)
+    assert after == before, f"revoked send changed committed group history: {before} -> {after}"
+    return True
+
+
 def restart_compose_api(project_name=None):
     """Restart a single API container in the Compose stack."""
     if project_name:
@@ -447,14 +517,9 @@ def main():
             alice.eval_js("document.querySelector('#group-remove-form').requestSubmit()")
             alice.wait_for(lambda: alice.eval_js("document.querySelector('#group-remove-form input[name=\"user_id\"]')?.value === ''"))
 
-            # Bob attempt to post into group should fail
-            bob_post_err = bob.eval_js(
-                f"api('/api/groups/{group_id}/messages', {{method:'POST',body:JSON.stringify({{body:'Forbidden msg'}})}})"
-                f".then(()=>'ok').catch(e=>e.message)"
-            )
-            results["group_member_revocation"] = (
-                bob_post_err != "ok" and any(k in str(bob_post_err).lower() for k in ["not a member", "forbidden", "403"])
-            )
+            # Group sends use the actual WebSocket protocol. Verify server
+            # rejection plus unchanged authorized history after membership removal.
+            results["group_member_revocation"] = verify_group_member_revocation(alice, bob, group_id)
 
             # Step 10: Mobile Viewport Check (390x844)
             alice.cli("set", "viewport", "390", "844")
@@ -508,15 +573,7 @@ def main():
             results["api_restart_persistence"] = True
 
             # Step 14: Security & Ownership Negative Checks
-            anon_status = alice.eval_js("fetch('/api/users/me').then(r=>r.status)")
-            cross_delete_err = bob.eval_js(
-                f"api('/api/videos/{video_id}', {{method:'DELETE'}}).then(()=>'ok').catch(e=>e.message)"
-            )
-            results["security_boundaries_verified"] = (
-                anon_status == 401 and
-                cross_delete_err != "ok" and
-                any(k in str(cross_delete_err).lower() for k in ["not found", "forbidden", "403", "404"])
-            )
+            results["security_boundaries_verified"] = verify_security_boundaries(alice, bob, video_id)
 
             if screenshots_dir:
                 alice.screenshot(screenshots_dir / "04_after_restart_persistence.png")

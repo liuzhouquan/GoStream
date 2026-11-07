@@ -86,5 +86,28 @@
     "elapsed_seconds": 0.869,
     "interpretation": "Not a business test result; rerun after readiness succeeded"
   },
-  "ci": "Pending integration PR last-head checks"
+  "ci": "Pending integration PR last-head checks",
+  "browser_sqlite_review": {
+    "elapsed_seconds": 33.114,
+    "exit_code": 0,
+    "timed_out": false,
+    "mode": "sqlite",
+    "total_checkpoints": 24,
+    "all_checkpoints_passed": true,
+    "group_member_revocation": true,
+    "security_boundaries_verified": true,
+    "ffprobe": "real ffprobe 5.1.9 in read-only API image container; no network",
+    "scope": "Local SQLite/two browser sessions, not final Compose deployment"
+  },
+  "ci_first_attempt": {
+    "run_id": 42368102527,
+    "head": "87a2f30",
+    "result": "six jobs passed; quality missing FFmpeg prerequisite and browser invalid permission checks failed; both corrected before final-head CI"
+  },
+  "post_ci_diagnostics": {
+    "elapsed_seconds": 12.962,
+    "exit_code": 0,
+    "timed_out": false,
+    "test_methods": 81
+  }
 }

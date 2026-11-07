@@ -43,16 +43,45 @@ class WebFullFlowUnitTest(unittest.TestCase):
             self.assertEqual(env_api_a, "http://127.0.0.1:18080")
             self.assertEqual(env_api_b, "http://127.0.0.1:18081")
 
-    def test_security_boundary_check(self):
-        # Anonymous 401 and cross-user rejection
-        anon_status = 401
-        cross_delete_err = "video not found or unauthorized: 404"
-        security_verified = (
-            anon_status == 401 and
-            cross_delete_err != "ok" and
-            any(k in str(cross_delete_err).lower() for k in ["not found", "forbidden", "403", "404"])
-        )
-        self.assertTrue(security_verified)
+    def test_security_boundary_uses_actual_http_statuses(self):
+        owner = MagicMock()
+        other = MagicMock()
+        owner.eval_js.side_effect = [200, 401, 200]
+        other.eval_js.return_value = 403
+        self.assertTrue(web_full_flow.verify_security_boundaries(owner, other, 7))
+        expressions = [call.args[0] for call in owner.eval_js.call_args_list + other.eval_js.call_args_list]
+        self.assertTrue(all("fetch(" in expression and ".status" in expression for expression in expressions))
+        self.assertNotIn(".catch(e=>e.message)", "".join(expressions))
+
+    def test_security_boundary_rejects_successful_delete_or_disappearing_video(self):
+        for delete_status, after_status in ((200, 200), (500, 200), (403, 404)):
+            with self.subTest(delete_status=delete_status, after_status=after_status):
+                owner, other = MagicMock(), MagicMock()
+                owner.eval_js.side_effect = [200, 401, after_status]
+                other.eval_js.return_value = delete_status
+                with self.assertRaises(AssertionError):
+                    web_full_flow.verify_security_boundaries(owner, other, 7)
+
+    def test_revocation_requires_socket_rejection_and_unchanged_history(self):
+        owner, removed = MagicMock(), MagicMock()
+        owner.eval_js.side_effect = [[11, 12], [11, 12]]
+        removed.eval_js.side_effect = [404, {"rejected": True, "error": "group not found"}, 404]
+        self.assertTrue(web_full_flow.verify_group_member_revocation(owner, removed, 7))
+        socket_expression = removed.eval_js.call_args_list[1].args[0]
+        self.assertIn("socket.send(", socket_expression)
+        self.assertIn('"type": "group_message"', socket_expression)
+        self.assertIn("addEventListener('message'", socket_expression)
+        self.assertNotIn("method:'POST'", socket_expression)
+
+    def test_revocation_rejects_ack_and_growth_even_when_http_returns_404(self):
+        for reply, after in (({"rejected": False}, [11, 12]),
+                             ({"rejected": True, "error": "group not found"}, [11, 12, 13])):
+            with self.subTest(reply=reply, after=after):
+                owner, removed = MagicMock(), MagicMock()
+                owner.eval_js.side_effect = [[11, 12], after]
+                removed.eval_js.side_effect = [404, reply, 404]
+                with self.assertRaises(AssertionError):
+                    web_full_flow.verify_group_member_revocation(owner, removed, 7)
 
     def test_report_invalidation_on_incomplete_run(self):
         with tempfile.TemporaryDirectory() as td:
