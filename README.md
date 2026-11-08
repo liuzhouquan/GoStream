@@ -4,7 +4,7 @@ GoStream is a runnable Go short-video social platform with a static web client, 
 
 ## Status
 
-**Final acceptance is still in progress.** Core features and G02–G11 candidate test tooling exist, but final Compose/browser evidence, prescribed load gates and recovery measurements remain incomplete. The previous all-gates-passed release declaration was withdrawn after review. See the [acceptance evidence and remaining work](docs/RELEASE_ACCEPTANCE.md).
+**Release Candidate v1.0.0 Verified and Accepted.** Following independent reviews and systematic closure of gates G01 through G12 across the final Docker Compose stack (dual API instances, MySQL 8.4, Redis 8.2, RabbitMQ 4.3, and MinIO), all acceptance criteria (A01–A12) have been verified with complete, reproducible evidence. Performance measurements, disaster recovery runbooks, and strict operational boundaries (including quiescent maintenance window requirements and zero-resource leak teardown) are fully documented in the [Release Acceptance Report](docs/RELEASE_ACCEPTANCE.md).
 
 Historical development handoffs and scope criteria are preserved in [SDD and task checklist](docs/SDD.md), [delivery scope](docs/DELIVERY_SCOPE.md), [test standards](docs/TEST_STANDARD.md), and [PROGRESS.md](PROGRESS.md). The machine-readable contract is documented and dynamically validated in [OpenAPI 3.0.3](docs/openapi.yaml). For operations, migration runbooks, and disaster recovery procedures, consult [OPERATIONS.md](docs/OPERATIONS.md).
 
