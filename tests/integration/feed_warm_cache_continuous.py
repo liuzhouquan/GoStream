@@ -551,6 +551,53 @@ def run_continuous_feed_matrix(api_a: str, api_b: str, warmup_sec: float = 30.0,
     return report
 
 
+def check_dataset_scale(mode: str, db_path: str = "", mysql_addr: str = "") -> dict:
+    """Checks the database row counts to determine whether it meets TEST_STANDARD formal scale."""
+    users_count = 0
+    videos_count = 0
+    follows_count = 0
+    if mode == "sqlite" and db_path and os.path.exists(db_path):
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        try:
+            users_count = cur.execute("SELECT count(*) FROM users").fetchone()[0]
+            videos_count = cur.execute("SELECT count(*) FROM videos").fetchone()[0]
+            follows_count = cur.execute("SELECT count(*) FROM follows").fetchone()[0]
+        except Exception:
+            pass
+        finally:
+            conn.close()
+    elif mode == "compose":
+        project_name = os.environ.get("GOSTREAM_STACK_PROJECT", "gostream-acc")
+        qcmd = [
+            "docker", "compose", "-p", project_name,
+            "-f", str(ROOT / "docker-compose.yml"),
+            "-f", str(ROOT / "docker-compose.object.yml"),
+            "-f", str(ROOT / "tests/integration/object-test.compose.yml"),
+            "exec", "-T", "mysql", "sh", "-c",
+            'MYSQL_PWD="gostream-local" mysql -ugostream -D gostream --batch --skip-column-names -e "SELECT (SELECT count(*) FROM users), (SELECT count(*) FROM videos), (SELECT count(*) FROM follows)"'
+        ]
+        try:
+            res = subprocess.run(qcmd, cwd=str(ROOT), capture_output=True, text=True, timeout=10)
+            if res.returncode == 0 and res.stdout.strip():
+                parts = res.stdout.strip().split()
+                if len(parts) >= 3:
+                    users_count = int(parts[0])
+                    videos_count = int(parts[1])
+                    follows_count = int(parts[2])
+        except Exception:
+            pass
+
+    meets_formal = (users_count >= 2000 and videos_count >= 20000 and follows_count >= 10000)
+    return {
+        "users": users_count,
+        "videos": videos_count,
+        "follows": follows_count,
+        "meets_formal_scale": meets_formal,
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description="GoStream Feed Continuous Warm-Cache Runner (G07 / A04)")
     parser.add_argument("--mode", choices=["auto", "sqlite", "compose"], default="auto")
@@ -558,6 +605,7 @@ def main():
     parser.add_argument("--duration-seconds", type=float, default=60.0, help="measurement duration per round in seconds")
     parser.add_argument("--concurrency", type=int, default=20, help="worker concurrency")
     parser.add_argument("--rounds", type=int, default=3, help="number of repeated rounds for concurrency 20")
+    parser.add_argument("--formal-dataset", action="store_true", help="verify production scale dataset (2,000 users, 20,000 videos)")
     parser.add_argument("--report", default="docs/benchmarks/feed-warm-cache-continuous-2026-11-08.json")
     args = parser.parse_args()
 
@@ -680,8 +728,14 @@ def main():
         all_passed = bool(report.get("checkpoints")) and all(report["checkpoints"].values())
         report["status"] = "PASS" if all_passed else "FAIL"
 
+        db_path_for_check = db_path if mode == "sqlite" else ""
+        scale_info = check_dataset_scale(mode, db_path=db_path_for_check, mysql_addr=mysql_addr if mode == "compose" else "")
+        report["dataset_scale"] = scale_info
+
         is_formal_config = (
             mode == "compose"
+            and getattr(args, "formal_dataset", False)
+            and scale_info.get("meets_formal_scale", False)
             and args.warmup_seconds >= 30.0
             and args.duration_seconds >= 60.0
             and args.rounds >= 3
@@ -697,6 +751,11 @@ def main():
             unverified = []
             if mode != "compose":
                 unverified.append("real Compose stack with MySQL 8.4 and Redis 8.2 required for formal gate")
+            if not getattr(args, "formal_dataset", False) or not scale_info.get("meets_formal_scale", False):
+                unverified.append(
+                    f"production scale dataset (minimum 2,000 users, 20,000 videos, 10,000 follows) required for formal gate; "
+                    f"observed users={scale_info.get('users', 0)}, videos={scale_info.get('videos', 0)}, follows={scale_info.get('follows', 0)}"
+                )
             if args.warmup_seconds < 30.0:
                 unverified.append(f"warmup_seconds ({args.warmup_seconds}s) < required 30s")
             if args.duration_seconds < 60.0:
