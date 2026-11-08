@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 import unittest
 
@@ -62,6 +63,30 @@ class ComponentOutageDiagnosticUnitTest(unittest.TestCase):
         # Simulated using non-existent port
         with self.assertRaises(Exception):
             component_outage_smoke.json_call("http://127.0.0.1:9", "/test", expected=200)
+
+    def test_seed_feed_benchmark_dsn_redaction(self):
+        cmd = ["/usr/local/go/bin/go", "run", "./tools/seed_feed_benchmark.go", "-driver", "mysql", "-dsn", "fake_user:my_secret_token@tcp(127.0.0.1:99999)/gostream"]
+        res = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertNotEqual(res.returncode, 0)
+        output = res.stdout + res.stderr
+        self.assertNotIn("my_secret_token", output)
+        self.assertIn("fake_user:***@tcp(127.0.0.1:99999)/gostream", output)
+
+    def test_seed_group_im_benchmark_dsn_redaction(self):
+        cmd = ["/usr/local/go/bin/go", "run", "./tools/seed_group_im_benchmark.go", "-driver", "mysql", "-dsn", "fake_user:my_secret_token@tcp(127.0.0.1:99999)/gostream"]
+        res = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.assertNotEqual(res.returncode, 0)
+        output = res.stdout + res.stderr
+        self.assertNotIn("my_secret_token", output)
+        self.assertIn("fake_user:***@tcp(127.0.0.1:99999)/gostream", output)
+
+    def test_source_contains_finally_blocks_for_all_outages(self):
+        source = (ROOT / "tests/integration/component_outage_smoke.py").read_text()
+        # Ensure restore calls are executed in finally blocks
+        self.assertIn('finally:\n            # Clean up author WebSocket\n            try:\n                ws_author.close()\n            except Exception:\n                pass\n\n            # 2f. Restore Redis\n            if self.mode == "compose":\n                self.stack.run_compose("start", "redis")', source)
+        self.assertIn('finally:\n            # 3e. Restore RabbitMQ in compose mode\n            if self.mode == "compose":\n                self.stack.run_compose("start", "rabbitmq")', source)
+        self.assertIn('finally:\n            # 4c. Restore MinIO / write permissions\n            if self.mode == "compose":\n                self.stack.run_compose("start", "minio")', source)
+
 
 
 if __name__ == "__main__":
