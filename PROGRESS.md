@@ -2,6 +2,15 @@
 
 Last updated: 2026-11-08
 
+2026-11-08 Second Acceptance Recheck and Resolution (S1–S3, Q1–Q3):
+- Addressed all findings in `ACCEPTANCE_RECHECK_SECOND_2026-11-08.md`:
+- S1 fixed: Replaced string-chopping DSN sanitizer in `seed_feed_benchmark.go` and `seed_group_im_benchmark.go` with robust MySQL driver DSN parser (`mysqlDriver.ParseDSN`), preventing credential leak when password contains `://` or special characters. Added regression tests.
+- S2 fixed: Extracted and directly tested `verify_group_im_sql_facts` across missing verifier, duplicate IDs, count mismatch, and failure propagation; updated `test_feed_payload_validation.py` to test empty samples in burst window; added behavioral outage runner recovery tests with injected runtime failure.
+- S3 fixed: Enclosed component stop operations inside `try...finally` blocks, and tracked `managed_stopped_services` in `component_outage_smoke.py` to ensure only stopped services are restored.
+- Q1 fixed: Added database scale checks (`users >= 2000, videos >= 20000, follows >= 10000`) in `feed_warm_cache_continuous.py`; small fixtures in Compose strictly stay `component_smoke` and cannot pass formal standard gate.
+- Q2 fixed: Synchronized `docs/SDD.md` and `docs/tasks/G12.md` to uncheck pending 20,000 scale items and accurately label G06, G07, G08, G10, G12 as candidate phase (`v1.0-RC1`).
+- Q3 fixed: Aligned `docs/RELEASE_ACCEPTANCE.md` video matrix strictly to the 10 real fixtures in `media_matrix_smoke.py`.
+
 2026-11-08 Acceptance Recheck and Fixes (R1–R4, Documentation Alignment):
 - Independent recheck identified acceptance false-positives (R1 zero-load Feed acceptance, R2 Group IM SQL verification branch skip), outage cleanup failure risks (R3 missing try-finally around stopped Redis/RabbitMQ/MinIO), and raw DSN password formatting in seed tools (R4).
 - R1/R2 fixes: `feed_warm_cache_continuous.py` now strictly rejects zero/negative parameters and empty samples; `group_im_smoke.py` strictly mandates valid SQL verification before asserting consistency. Added diagnostic unit tests.
