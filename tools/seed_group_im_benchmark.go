@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/liuzhouquan/GoStream/internal/platform"
@@ -59,7 +60,7 @@ func main() {
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
-		log.Fatalf("failed to connect to database (%s: %s): %v", *driver, dbDSN, err)
+		log.Fatalf("failed to connect to database (%s: %s): %v", *driver, sanitizeDSN(dbDSN), err)
 	}
 
 	if *action == "verify" {
@@ -157,5 +158,23 @@ func main() {
 		"users":  summaries,
 	})
 	fmt.Printf("SEED_GROUP_IM_BENCHMARK_OK %s\n", string(out))
+}
+
+func sanitizeDSN(raw string) string {
+	prefix := ""
+	clean := raw
+	if idx := strings.Index(clean, "://"); idx != -1 {
+		prefix = clean[:idx+3]
+		clean = clean[idx+3:]
+	}
+	atIdx := strings.LastIndex(clean, "@")
+	if atIdx == -1 {
+		return raw
+	}
+	colonIdx := strings.Index(clean[:atIdx], ":")
+	if colonIdx == -1 {
+		return raw
+	}
+	return prefix + clean[:colonIdx+1] + "***" + clean[atIdx:]
 }
 

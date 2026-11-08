@@ -432,43 +432,47 @@ class ComponentOutageRunner:
             miniredis_proc.send_signal(signal.SIGTERM)
             miniredis_proc.wait(timeout=5)
 
-        # 2c. During Redis outage: /ready must remain 200
-        for name, url in [("API A", self.api_a), ("API B", self.api_b)]:
-            r_stat, r_body, _ = call_api(url, "/ready")
-            assert r_stat == 200 and r_body.get("status") == "ready", f"{name} /ready altered during Redis outage: {r_stat}"
+        try:
+            # 2c. During Redis outage: /ready must remain 200
+            for name, url in [("API A", self.api_a), ("API B", self.api_b)]:
+                r_stat, r_body, _ = call_api(url, "/ready")
+                assert r_stat == 200 and r_body.get("status") == "ready", f"{name} /ready altered during Redis outage: {r_stat}"
 
-        # 2d. Feed request during Redis outage falls back to SQL (200 OK)
-        feed_fallback = json_call(self.api_a, "/api/feed?scene=timeline&limit=10", expected=200)
-        assert "items" in feed_fallback, "feed fallback did not return items"
+            # 2d. Feed request during Redis outage falls back to SQL (200 OK)
+            feed_fallback = json_call(self.api_a, "/api/feed?scene=timeline&limit=10", expected=200)
+            assert "items" in feed_fallback, "feed fallback did not return items"
 
-        # 2e. IM direct message sent over WebSocket during Redis outage
-        im_body = f"persistent message during redis outage {suffix}"
-        client_msg_id = f"cli_outage_{suffix}"
-        ws_author.send_json({
-            "type": "message",
-            "recipient_id": viewer_id,
-            "client_id": client_msg_id,
-            "body": im_body,
-        })
-        ack_frame = ws_author.next_of_type("ack", timeout=5.0)
-        assert ack_frame is not None and ack_frame.get("client_id") == client_msg_id, f"did not receive ACK frame: {ack_frame}"
+            # 2e. IM direct message sent over WebSocket during Redis outage
+            im_body = f"persistent message during redis outage {suffix}"
+            client_msg_id = f"cli_outage_{suffix}"
+            ws_author.send_json({
+                "type": "message",
+                "recipient_id": viewer_id,
+                "client_id": client_msg_id,
+                "body": im_body,
+            })
+            ack_frame = ws_author.next_of_type("ack", timeout=5.0)
+            assert ack_frame is not None and ack_frame.get("client_id") == client_msg_id, f"did not receive ACK frame: {ack_frame}"
 
-        # Recipient reads message from SQL history on API B
-        hist = json_call(self.api_b, f"/api/messages?user_id={author_id}", "GET", token=viewer_token, expected=200)
-        hist_items = hist.get("items", [])
-        assert any(m.get("body") == im_body for m in hist_items), f"message not found in SQL history: {hist_items}"
+            # Recipient reads message from SQL history on API B
+            hist = json_call(self.api_b, f"/api/messages?user_id={author_id}", "GET", token=viewer_token, expected=200)
+            hist_items = hist.get("items", [])
+            assert any(m.get("body") == im_body for m in hist_items), f"message not found in SQL history: {hist_items}"
 
-        # Recipient unread count from SQL
-        unread = json_call(self.api_b, "/api/messages/unread", "GET", token=viewer_token, expected=200)
-        assert len(unread.get("items", [])) >= 1, f"expected unread items >= 1, got {unread}"
+            # Recipient unread count from SQL
+            unread = json_call(self.api_b, "/api/messages/unread", "GET", token=viewer_token, expected=200)
+            assert len(unread.get("items", [])) >= 1, f"expected unread items >= 1, got {unread}"
+        finally:
+            # Clean up author WebSocket
+            try:
+                ws_author.close()
+            except Exception:
+                pass
 
-        # Clean up author WebSocket
-        ws_author.close()
-
-        # 2f. Restore Redis
-        if self.mode == "compose":
-            self.stack.run_compose("start", "redis")
-            time.sleep(2)
+            # 2f. Restore Redis
+            if self.mode == "compose":
+                self.stack.run_compose("start", "redis")
+                time.sleep(2)
 
         self.checkpoints["redis_outage_fallback_and_recovery"] = True
         print("  redis_outage_fallback_and_recovery: PASS")
@@ -508,37 +512,40 @@ class ComponentOutageRunner:
             self.stack.run_compose("stop", "rabbitmq")
             time.sleep(2)
 
-        # 3b. Verify /ready remains 200 during broker outage
-        r_stat, _, _ = call_api(self.api_a, "/ready")
-        assert r_stat == 200, f"/ready altered during RabbitMQ outage: {r_stat}"
+        try:
+            # 3b. Verify /ready remains 200 during broker outage
+            r_stat, _, _ = call_api(self.api_a, "/ready")
+            assert r_stat == 200, f"/ready altered during RabbitMQ outage: {r_stat}"
 
-        # 3c. Viewer likes and comments during broker outage
-        like_resp = json_call(self.api_b, f"/api/videos/{target_video_id}/like", "PUT", token=viewer_token, expected=200)
-        comment_body = f"comment during broker outage {suffix}"
-        comment_resp = json_call(self.api_b, f"/api/videos/{target_video_id}/comments", "POST", token=viewer_token, body={
-            "body": comment_body
-        }, expected=201)
+            # 3c. Viewer likes and comments during broker outage
+            like_resp = json_call(self.api_b, f"/api/videos/{target_video_id}/like", "PUT", token=viewer_token, expected=200)
+            comment_body = f"comment during broker outage {suffix}"
+            comment_resp = json_call(self.api_b, f"/api/videos/{target_video_id}/comments", "POST", token=viewer_token, body={
+                "body": comment_body
+            }, expected=201)
 
-        # 3d. Verify SQL facts: interactions and pending outbox events exist
-        like_count_sql = int(self.query_sql(f"SELECT like_count FROM videos WHERE id = {target_video_id}"))
-        assert like_count_sql == 1, f"expected like_count=1 in SQL, got {like_count_sql}"
+            # 3d. Verify SQL facts: interactions and pending outbox events exist
+            like_count_sql = int(self.query_sql(f"SELECT like_count FROM videos WHERE id = {target_video_id}"))
+            assert like_count_sql == 1, f"expected like_count=1 in SQL, got {like_count_sql}"
 
-        comment_count_sql = int(self.query_sql(f"SELECT comment_count FROM videos WHERE id = {target_video_id}"))
-        assert comment_count_sql == 1, f"expected comment_count=1 in SQL, got {comment_count_sql}"
+            comment_count_sql = int(self.query_sql(f"SELECT comment_count FROM videos WHERE id = {target_video_id}"))
+            assert comment_count_sql == 1, f"expected comment_count=1 in SQL, got {comment_count_sql}"
+
+            if self.mode == "compose":
+                for kind in ("like", "comment"):
+                    predicate = (f"user_id={int(author_id)} AND actor_id={int(viewer_id)} "
+                                 f"AND video_id={int(target_video_id)} AND kind='{kind}'")
+                    assert int(self.query_sql(f"SELECT COUNT(*) FROM notifications WHERE {predicate}")) == 1
+                    self.broker_event_ids.append(int(self.query_sql(
+                        f"SELECT id FROM notifications WHERE {predicate}"
+                    )))
+                self.require_broker_event_state(self.broker_event_ids, recovered=False)
+        finally:
+            # 3e. Restore RabbitMQ in compose mode
+            if self.mode == "compose":
+                self.stack.run_compose("start", "rabbitmq")
 
         if self.mode == "compose":
-            for kind in ("like", "comment"):
-                predicate = (f"user_id={int(author_id)} AND actor_id={int(viewer_id)} "
-                             f"AND video_id={int(target_video_id)} AND kind='{kind}'")
-                assert int(self.query_sql(f"SELECT COUNT(*) FROM notifications WHERE {predicate}")) == 1
-                self.broker_event_ids.append(int(self.query_sql(
-                    f"SELECT id FROM notifications WHERE {predicate}"
-                )))
-            self.require_broker_event_state(self.broker_event_ids, recovered=False)
-
-        # 3e. Restore RabbitMQ in compose mode
-        if self.mode == "compose":
-            self.stack.run_compose("start", "rabbitmq")
             self.wait_for_broker_event_recovery(self.broker_event_ids)
 
         # 3f. Author verifies notifications received on API A
@@ -579,27 +586,31 @@ class ComponentOutageRunner:
             os.makedirs(chunks_dir, exist_ok=True)
             os.chmod(chunks_dir, 0o555)
 
-        # /ready remains 200 during storage outage
-        r_stat, _, _ = call_api(self.api_a, "/ready")
-        assert r_stat == 200, f"/ready altered during MinIO outage: {r_stat}"
+        try:
+            # /ready remains 200 during storage outage
+            r_stat, _, _ = call_api(self.api_a, "/ready")
+            assert r_stat == 200, f"/ready altered during MinIO outage: {r_stat}"
 
-        # 4b. Chunk upload during outage must return 500 or 503
-        c_stat, c_err, _ = call_api(self.api_a, f"/api/uploads/sessions/{outage_sess_id}/chunks/0", "PUT",
-                                    token=author_token, body=chunk_data, content_type="application/octet-stream")
-        assert c_stat in (500, 503), f"expected 500/503 during storage outage, got {c_stat}: {c_err}"
+            # 4b. Chunk upload during outage must return 500 or 503
+            c_stat, c_err, _ = call_api(self.api_a, f"/api/uploads/sessions/{outage_sess_id}/chunks/0", "PUT",
+                                        token=author_token, body=chunk_data, content_type="application/octet-stream")
+            assert c_stat in (500, 503), f"expected 500/503 during storage outage, got {c_stat}: {c_err}"
 
-        # Invariant: 0 chunks recorded in SQL, media_assets unchanged
-        chunks_in_db = int(self.query_sql(f"SELECT count(*) FROM upload_chunks WHERE session_id = '{outage_sess_id}'"))
-        assert chunks_in_db == 0, f"failed chunk created orphan SQL row: {chunks_in_db}"
-        assets_during = int(self.query_sql("SELECT count(*) FROM media_assets"))
-        assert assets_during == assets_before, f"failed upload created orphan media_asset: {assets_during} != {assets_before}"
-
-        # 4c. Restore MinIO / write permissions
-        if self.mode == "compose":
-            self.stack.run_compose("start", "minio")
-            time.sleep(3)
-        elif chunks_dir:
-            os.chmod(chunks_dir, 0o755)
+            # Invariant: 0 chunks recorded in SQL, media_assets unchanged
+            chunks_in_db = int(self.query_sql(f"SELECT count(*) FROM upload_chunks WHERE session_id = '{outage_sess_id}'"))
+            assert chunks_in_db == 0, f"failed chunk created orphan SQL row: {chunks_in_db}"
+            assets_during = int(self.query_sql("SELECT count(*) FROM media_assets"))
+            assert assets_during == assets_before, f"failed upload created orphan media_asset: {assets_during} != {assets_before}"
+        finally:
+            # 4c. Restore MinIO / write permissions
+            if self.mode == "compose":
+                self.stack.run_compose("start", "minio")
+                time.sleep(3)
+            elif chunks_dir:
+                try:
+                    os.chmod(chunks_dir, 0o755)
+                except Exception:
+                    pass
 
         # 4d. Re-upload chunk succeeds on API B
         c_stat2, c_resp2, _ = call_api(self.api_b, f"/api/uploads/sessions/{outage_sess_id}/chunks/0", "PUT",
@@ -746,9 +757,16 @@ def main():
         stack = ComposeStackController(project_name=project_name)
         runner = ComponentOutageRunner(mode="compose", api_a=external_api_a, api_b=external_api_b,
                                        stack=stack, project_name=project_name)
-        report = runner.run_all()
-        report_path.write_text(json.dumps(report, indent=2))
-        print(f"Report written to: {report_path}")
+        try:
+            report = runner.run_all()
+            report_path.write_text(json.dumps(report, indent=2))
+            print(f"Report written to: {report_path}")
+        finally:
+            for svc in ("redis", "rabbitmq", "minio"):
+                try:
+                    stack.run_compose("start", svc)
+                except Exception:
+                    pass
 
 
 if __name__ == "__main__":
