@@ -66,3 +66,24 @@ class FeedPayloadValidationTest(unittest.TestCase):
             self.assertIsNone(res["p50_ms"])
             self.assertIsNone(res["p95_ms"])
             self.assertIsNone(res["p99_ms"])
+
+    def test_dataset_scale_check_and_formal_gate_rejection(self):
+        import sqlite3
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+            db_path = tmp.name
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)")
+            conn.execute("CREATE TABLE videos (id INTEGER PRIMARY KEY)")
+            conn.execute("CREATE TABLE follows (id INTEGER PRIMARY KEY)")
+            for i in range(10):
+                conn.execute("INSERT INTO users VALUES (?)", (i + 1,))
+            for i in range(120):
+                conn.execute("INSERT INTO videos VALUES (?)", (i + 1,))
+            conn.commit()
+            conn.close()
+
+            scale = continuous.check_dataset_scale("sqlite", db_path=db_path)
+            self.assertEqual(scale["users"], 10)
+            self.assertEqual(scale["videos"], 120)
+            self.assertFalse(scale["meets_formal_scale"])
