@@ -110,34 +110,59 @@ class GroupIMDiagnosticUnitTest(unittest.TestCase):
         self.assertIn("resources", data)
 
     def test_sql_facts_checkpoint_requires_valid_sqlite_or_mysql(self):
-        # Verify that missing or empty verifier does not allow sql_facts_consistent_zero_duplicates to be True
+        # 1. Neither SQLite nor MySQL verifier provided -> returns False
+        self.assertFalse(group_im_smoke.verify_group_im_sql_facts(group_id=1, total_persisted=10, db_path="", mysql_verify_fn=None))
+
+        # 2. SQLite with duplicate client_id raises AssertionError
         import sqlite3
         import tempfile
         with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
             db_path = tmp.name
             conn = sqlite3.connect(db_path)
             conn.execute("CREATE TABLE group_messages (id INTEGER PRIMARY KEY, group_id INTEGER, client_id TEXT)")
-            # Insert duplicate client_id
             conn.execute("INSERT INTO group_messages (id, group_id, client_id) VALUES (1, 1, 'c1')")
             conn.execute("INSERT INTO group_messages (id, group_id, client_id) VALUES (2, 1, 'c1')")
             conn.commit()
             conn.close()
 
-            # Direct check against database logic
+            with self.assertRaises(AssertionError):
+                group_im_smoke.verify_group_im_sql_facts(group_id=1, total_persisted=2, db_path=db_path)
+
+        # 3. SQLite with row count mismatch raises AssertionError
+        with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+            db_path = tmp.name
             conn = sqlite3.connect(db_path)
-            cur = conn.cursor()
-            cur.execute("SELECT id, client_id FROM group_messages WHERE group_id=? ORDER BY id", (1,))
-            rows = cur.fetchall()
+            conn.execute("CREATE TABLE group_messages (id INTEGER PRIMARY KEY, group_id INTEGER, client_id TEXT)")
+            conn.execute("INSERT INTO group_messages (id, group_id, client_id) VALUES (1, 1, 'c1')")
+            conn.commit()
             conn.close()
 
             with self.assertRaises(AssertionError):
-                seen = set()
-                prev_id = 0
-                for rid, rcid in rows:
-                    assert rid > prev_id, f"non strictly increasing id: {rid} <= {prev_id}"
-                    prev_id = rid
-                    assert rcid not in seen, f"duplicate client_id in db: {rcid}"
-                    seen.add(rcid)
+                group_im_smoke.verify_group_im_sql_facts(group_id=1, total_persisted=5, db_path=db_path)
+
+        # 4. SQLite with valid data returns True
+        with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+            db_path = tmp.name
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE group_messages (id INTEGER PRIMARY KEY, group_id INTEGER, client_id TEXT)")
+            conn.execute("INSERT INTO group_messages (id, group_id, client_id) VALUES (1, 1, 'c1')")
+            conn.execute("INSERT INTO group_messages (id, group_id, client_id) VALUES (2, 1, 'c2')")
+            conn.commit()
+            conn.close()
+
+            self.assertTrue(group_im_smoke.verify_group_im_sql_facts(group_id=1, total_persisted=2, db_path=db_path))
+
+        # 5. MySQL verifier raising exception propagates
+        def failing_verify(gid, exp):
+            raise RuntimeError("mysql verify failed")
+        with self.assertRaises(RuntimeError):
+            group_im_smoke.verify_group_im_sql_facts(group_id=1, total_persisted=2, mysql_verify_fn=failing_verify)
+
+        # 6. MySQL verifier succeeding returns True
+        def passing_verify(gid, exp):
+            pass
+        self.assertTrue(group_im_smoke.verify_group_im_sql_facts(group_id=1, total_persisted=2, mysql_verify_fn=passing_verify))
+
 
 
 if __name__ == "__main__":
