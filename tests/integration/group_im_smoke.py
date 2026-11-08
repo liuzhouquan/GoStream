@@ -666,6 +666,7 @@ def run_group_fanout_matrix(
 
     total_persisted = total_messages + 125 + 10 + 10
 
+    sql_verified = False
     if db_path and os.path.exists(db_path):
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
@@ -681,8 +682,13 @@ def run_group_fanout_matrix(
             seen.add(rcid)
         assert len(rows) == total_persisted, f"expected {total_persisted} rows in SQL, got {len(rows)}"
         print(f"SQL verified: {len(rows)} messages persisted with strict ordering and zero duplicates.")
+        sql_verified = True
     elif mysql_verify_fn:
         mysql_verify_fn(group_id, total_persisted)
+        sql_verified = True
+    else:
+        print("WARNING: Neither SQLite db_path nor mysql_verify_fn was provided; SQL verification not performed.")
+        sql_verified = False
 
     checkpoints = {
         "fanout_matrix_20_clients": True,
@@ -693,7 +699,7 @@ def run_group_fanout_matrix(
         "offline_member_backfill_verified": True,
         "member_removal_and_reinvite_cursor_advanced": True,
         "per_device_independent_unread_verified": True,
-        "sql_facts_consistent_zero_duplicates": True,
+        "sql_facts_consistent_zero_duplicates": sql_verified,
     }
 
     return {
@@ -843,8 +849,18 @@ def main():
             db_path=db_path,
         )
         report.update(results)
-        report["status"] = "PASS" if all(results["checkpoints"].values()) else "FAIL"
-        report["release_gate_passed"] = report["status"] == "PASS" and args.duration_mode == "standard"
+        all_passed = bool(results.get("checkpoints")) and all(results["checkpoints"].values())
+        report["status"] = "PASS" if all_passed else "FAIL"
+        report["release_gate_passed"] = all_passed and args.duration_mode == "standard" and mode == "compose"
+        if not report["release_gate_passed"]:
+            unverified = []
+            if mode != "compose":
+                unverified.append("real Compose stack with dual API and Redis required for formal gate")
+            if args.duration_mode != "standard":
+                unverified.append("duration_mode must be standard (1000 messages)")
+            if not results.get("checkpoints", {}).get("sql_facts_consistent_zero_duplicates"):
+                unverified.append("SQL facts verification did not pass")
+            report["unverified_requirements"] = unverified
 
     elapsed = time.time() - start_time
     report["elapsed_seconds"] = round(elapsed, 2)

@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests/integration"))
 import feed_warm_cache_smoke as smoke
+import feed_warm_cache_continuous as continuous
 
 
 class FeedPayloadValidationTest(unittest.TestCase):
@@ -34,3 +35,20 @@ class FeedPayloadValidationTest(unittest.TestCase):
     def test_standard_mode_cannot_claim_unimplemented_release_gate(self):
         with self.assertRaisesRegex(ValueError, "release.*not implemented"):
             smoke.run_continuous_feed_matrix("http://a", "http://b", duration_mode="standard")
+
+    def test_continuous_feed_rejects_zero_or_negative_parameters(self):
+        with self.assertRaisesRegex(ValueError, "Invalid duration or rounds parameters"):
+            continuous.run_continuous_feed_matrix("http://a", "http://b", warmup_sec=0, test_sec=0, rounds=0)
+        with self.assertRaisesRegex(ValueError, "Invalid duration or rounds parameters"):
+            continuous.run_continuous_feed_matrix("http://a", "http://b", warmup_sec=-1, test_sec=10, rounds=3)
+        with self.assertRaisesRegex(ValueError, "Invalid duration or rounds parameters"):
+            continuous.run_continuous_feed_matrix("http://a", "http://b", warmup_sec=5, test_sec=-5, rounds=3)
+        with self.assertRaisesRegex(ValueError, "Invalid duration or rounds parameters"):
+            continuous.run_continuous_feed_matrix("http://a", "http://b", warmup_sec=5, test_sec=10, rounds=-1)
+
+    def test_continuous_feed_empty_samples_returns_none_latencies(self):
+        def response(*args, **kwargs):
+            return 500, {"error": "down"}, 10.0
+        with patch.object(continuous, "call_api", side_effect=response):
+            with self.assertRaises(ValueError):
+                continuous.run_load_burst(["http://fixture"], "/api/feed", "", 1, 0.01)
