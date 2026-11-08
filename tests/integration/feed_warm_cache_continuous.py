@@ -46,6 +46,9 @@ import urllib.parse
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "tests/integration"))
+
 from launcher_lifecycle import cleanup_on_interrupt
 from acceptance_config import resolve_acceptance_target
 
@@ -552,18 +555,44 @@ def run_continuous_feed_matrix(api_a: str, api_b: str, warmup_sec: float = 30.0,
 
 
 def check_dataset_scale(mode: str, db_path: str = "", mysql_addr: str = "") -> dict:
-    """Checks the database row counts to determine whether it meets TEST_STANDARD formal scale."""
+    """Checks database counts against TEST_STANDARD.md:111 formal scale criteria."""
     users_count = 0
-    videos_count = 0
+    published_videos_count = 0
+    total_videos_count = 0
     follows_count = 0
+    interactions_count = 0
+    high_author_count = 0
+    low_author_count = 0
+
     if mode == "sqlite" and db_path and os.path.exists(db_path):
         import sqlite3
         conn = sqlite3.connect(db_path)
         cur = conn.cursor()
         try:
             users_count = cur.execute("SELECT count(*) FROM users").fetchone()[0]
-            videos_count = cur.execute("SELECT count(*) FROM videos").fetchone()[0]
+        except Exception:
+            pass
+        try:
+            published_videos_count = cur.execute("SELECT count(*) FROM videos WHERE status = 'published'").fetchone()[0]
+        except Exception:
+            pass
+        try:
+            total_videos_count = cur.execute("SELECT count(*) FROM videos").fetchone()[0]
+        except Exception:
+            pass
+        try:
             follows_count = cur.execute("SELECT count(*) FROM follows").fetchone()[0]
+        except Exception:
+            pass
+        try:
+            va = cur.execute("SELECT count(*) FROM video_actions").fetchone()[0]
+            comm = cur.execute("SELECT count(*) FROM comments").fetchone()[0]
+            interactions_count = va + comm
+        except Exception:
+            pass
+        try:
+            high_author_count = cur.execute("SELECT count(*) FROM (SELECT followee_id, count(*) as cnt FROM follows GROUP BY followee_id HAVING cnt > 1000)").fetchone()[0]
+            low_author_count = cur.execute("SELECT count(*) FROM (SELECT followee_id, count(*) as cnt FROM follows GROUP BY followee_id HAVING cnt <= 1000 AND cnt > 0)").fetchone()[0]
         except Exception:
             pass
         finally:
@@ -576,24 +605,47 @@ def check_dataset_scale(mode: str, db_path: str = "", mysql_addr: str = "") -> d
             "-f", str(ROOT / "docker-compose.object.yml"),
             "-f", str(ROOT / "tests/integration/object-test.compose.yml"),
             "exec", "-T", "mysql", "sh", "-c",
-            'MYSQL_PWD="gostream-local" mysql -ugostream -D gostream --batch --skip-column-names -e "SELECT (SELECT count(*) FROM users), (SELECT count(*) FROM videos), (SELECT count(*) FROM follows)"'
+            'MYSQL_PWD="gostream-local" mysql -ugostream -D gostream --batch --skip-column-names -e "'
+            'SELECT '
+            '(SELECT count(*) FROM users), '
+            '(SELECT count(*) FROM videos WHERE status = \'published\'), '
+            '(SELECT count(*) FROM videos), '
+            '(SELECT count(*) FROM follows), '
+            '(SELECT count(*) FROM video_actions) + (SELECT count(*) FROM comments), '
+            '(SELECT count(*) FROM (SELECT followee_id FROM follows GROUP BY followee_id HAVING count(*) > 1000) t_high), '
+            '(SELECT count(*) FROM (SELECT followee_id FROM follows GROUP BY followee_id HAVING count(*) <= 1000 AND count(*) > 0) t_low);"'
         ]
         try:
             res = subprocess.run(qcmd, cwd=str(ROOT), capture_output=True, text=True, timeout=10)
             if res.returncode == 0 and res.stdout.strip():
                 parts = res.stdout.strip().split()
-                if len(parts) >= 3:
+                if len(parts) >= 7:
                     users_count = int(parts[0])
-                    videos_count = int(parts[1])
-                    follows_count = int(parts[2])
+                    published_videos_count = int(parts[1])
+                    total_videos_count = int(parts[2])
+                    follows_count = int(parts[3])
+                    interactions_count = int(parts[4])
+                    high_author_count = int(parts[5])
+                    low_author_count = int(parts[6])
         except Exception:
             pass
 
-    meets_formal = (users_count >= 2000 and videos_count >= 20000 and follows_count >= 10000)
+    meets_formal = (
+        users_count >= 2000
+        and published_videos_count >= 20000
+        and follows_count >= 10000
+        and interactions_count >= 50000
+        and high_author_count >= 1
+        and low_author_count >= 1
+    )
     return {
         "users": users_count,
-        "videos": videos_count,
+        "published_videos": published_videos_count,
+        "videos": total_videos_count,
         "follows": follows_count,
+        "interactions": interactions_count,
+        "has_high_author": high_author_count >= 1,
+        "has_low_author": low_author_count >= 1,
         "meets_formal_scale": meets_formal,
     }
 
@@ -716,6 +768,31 @@ def main():
             wait_url_ready(api_b, timeout=15)
             tracked_pids = [p_a.pid, p_b.pid]
 
+        db_path_for_check = db_path if mode == "sqlite" else ""
+        scale_info = check_dataset_scale(mode, db_path=db_path_for_check, mysql_addr=mysql_addr if mode == "compose" else "")
+        report["dataset_scale"] = scale_info
+
+        if getattr(args, "formal_dataset", False) and not scale_info.get("meets_formal_scale", False):
+            print("Formal dataset verification requested (--formal-dataset), but dataset scale does not meet formal criteria.", file=sys.stderr)
+            print(f"Observed scale: {scale_info}", file=sys.stderr)
+            report["status"] = "FAIL"
+            report["validation_scope"] = "rejected_insufficient_scale"
+            report["release_gate_passed"] = False
+            report["unverified_requirements"] = [
+                f"formal dataset scale requirement not met: minimum 2,000 users, 20,000 published videos, 10,000 follows, 50,000 interactions, and hybrid threshold authors; "
+                f"observed users={scale_info.get('users', 0)}, published_videos={scale_info.get('published_videos', 0)}, "
+                f"videos={scale_info.get('videos', 0)}, follows={scale_info.get('follows', 0)}, interactions={scale_info.get('interactions', 0)}, "
+                f"has_high_author={scale_info.get('has_high_author', False)}, has_low_author={scale_info.get('has_low_author', False)}"
+            ]
+            elapsed = time.time() - start_time
+            report["elapsed_seconds"] = round(elapsed, 2)
+            out_path = Path(args.report)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2, ensure_ascii=False)
+            print(f"Report written to: {out_path}")
+            return 1
+
         print(f"Running continuous warm-cache acceptance: API A={api_a}, API B={api_b}...")
         results = run_continuous_feed_matrix(
             api_a, api_b,
@@ -728,9 +805,13 @@ def main():
         all_passed = bool(report.get("checkpoints")) and all(report["checkpoints"].values())
         report["status"] = "PASS" if all_passed else "FAIL"
 
-        db_path_for_check = db_path if mode == "sqlite" else ""
-        scale_info = check_dataset_scale(mode, db_path=db_path_for_check, mysql_addr=mysql_addr if mode == "compose" else "")
-        report["dataset_scale"] = scale_info
+        # Check required scenes and full repetitions across all 4 required scenarios (TEST_STANDARD.md:115)
+        c20_rounds = report.get("concurrency_20_rounds", [])
+        scenes_run = set(r.get("scene") for r in c20_rounds)
+        rounds_per_scene = {sc: sum(1 for r in c20_rounds if r.get("scene") == sc) for sc in scenes_run}
+        required_scenes = {"following", "following_deep", "recommend_logged_in", "hot"}
+        has_all_scenes = required_scenes.issubset(scenes_run)
+        all_scenes_three_rounds = has_all_scenes and all(rounds_per_scene.get(sc, 0) >= 3 for sc in required_scenes)
 
         is_formal_config = (
             mode == "compose"
@@ -739,6 +820,7 @@ def main():
             and args.warmup_seconds >= 30.0
             and args.duration_seconds >= 60.0
             and args.rounds >= 3
+            and all_scenes_three_rounds
         )
 
         if is_formal_config and all_passed:
@@ -753,8 +835,17 @@ def main():
                 unverified.append("real Compose stack with MySQL 8.4 and Redis 8.2 required for formal gate")
             if not getattr(args, "formal_dataset", False) or not scale_info.get("meets_formal_scale", False):
                 unverified.append(
-                    f"production scale dataset (minimum 2,000 users, 20,000 videos, 10,000 follows) required for formal gate; "
-                    f"observed users={scale_info.get('users', 0)}, videos={scale_info.get('videos', 0)}, follows={scale_info.get('follows', 0)}"
+                    f"production scale dataset (minimum 2,000 users, 20,000 published videos, 10,000 follows, 50,000 interactions, and authors across hybrid threshold) required for formal gate; "
+                    f"observed users={scale_info.get('users', 0)}, published_videos={scale_info.get('published_videos', 0)}, "
+                    f"videos={scale_info.get('videos', 0)}, follows={scale_info.get('follows', 0)}, interactions={scale_info.get('interactions', 0)}, "
+                    f"has_high_author={scale_info.get('has_high_author', False)}, has_low_author={scale_info.get('has_low_author', False)}"
+                )
+            if not all_scenes_three_rounds:
+                missing_scenes = sorted(list(required_scenes - scenes_run))
+                incomplete_scenes = [sc for sc in required_scenes if rounds_per_scene.get(sc, 0) < 3 and sc in scenes_run]
+                unverified.append(
+                    f"formal gate requires full 3-round repetitions across all four scenarios (following 1st page, following deep page, logged-in recommend, hot ranking); "
+                    f"observed scenes={dict(sorted(rounds_per_scene.items()))}, missing={missing_scenes}, incomplete={incomplete_scenes}"
                 )
             if args.warmup_seconds < 30.0:
                 unverified.append(f"warmup_seconds ({args.warmup_seconds}s) < required 30s")

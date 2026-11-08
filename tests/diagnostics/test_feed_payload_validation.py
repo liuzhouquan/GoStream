@@ -74,16 +74,84 @@ class FeedPayloadValidationTest(unittest.TestCase):
             db_path = tmp.name
             conn = sqlite3.connect(db_path)
             conn.execute("CREATE TABLE users (id INTEGER PRIMARY KEY)")
-            conn.execute("CREATE TABLE videos (id INTEGER PRIMARY KEY)")
-            conn.execute("CREATE TABLE follows (id INTEGER PRIMARY KEY)")
+            conn.execute("CREATE TABLE videos (id INTEGER PRIMARY KEY, status TEXT)")
+            conn.execute("CREATE TABLE follows (id INTEGER PRIMARY KEY, follower_id INTEGER, followee_id INTEGER)")
+            conn.execute("CREATE TABLE video_actions (id INTEGER PRIMARY KEY, kind TEXT)")
+            conn.execute("CREATE TABLE comments (id INTEGER PRIMARY KEY)")
             for i in range(10):
                 conn.execute("INSERT INTO users VALUES (?)", (i + 1,))
             for i in range(120):
-                conn.execute("INSERT INTO videos VALUES (?)", (i + 1,))
+                conn.execute("INSERT INTO videos VALUES (?, ?)", (i + 1, "published"))
             conn.commit()
             conn.close()
 
             scale = continuous.check_dataset_scale("sqlite", db_path=db_path)
             self.assertEqual(scale["users"], 10)
+            self.assertEqual(scale["published_videos"], 120)
             self.assertEqual(scale["videos"], 120)
             self.assertFalse(scale["meets_formal_scale"])
+
+    def test_compose_dataset_scale_check_command_and_parsing(self):
+        from unittest.mock import MagicMock
+        with patch.object(continuous.subprocess, "run") as mock_run:
+            # Case 1: Meets formal scale
+            mock_res = MagicMock()
+            mock_res.returncode = 0
+            mock_res.stdout = "2500 21000 22000 12000 55000 3 15\n"
+            mock_run.return_value = mock_res
+
+            scale = continuous.check_dataset_scale("compose")
+            self.assertEqual(scale["users"], 2500)
+            self.assertEqual(scale["published_videos"], 21000)
+            self.assertEqual(scale["videos"], 22000)
+            self.assertEqual(scale["follows"], 12000)
+            self.assertEqual(scale["interactions"], 55000)
+            self.assertTrue(scale["has_high_author"])
+            self.assertTrue(scale["has_low_author"])
+            self.assertTrue(scale["meets_formal_scale"])
+
+            # Verify command includes Compose files and ROOT
+            cmd = mock_run.call_args[0][0]
+            self.assertIn("docker", cmd)
+            self.assertIn("compose", cmd)
+            self.assertIn(str(continuous.ROOT / "docker-compose.yml"), cmd)
+
+            # Case 2: Insufficient published videos (19,999)
+            mock_res.stdout = "2500 19999 22000 12000 55000 3 15\n"
+            scale = continuous.check_dataset_scale("compose")
+            self.assertFalse(scale["meets_formal_scale"])
+
+            # Case 3: Insufficient interactions (49,999)
+            mock_res.stdout = "2500 21000 22000 12000 49999 3 15\n"
+            scale = continuous.check_dataset_scale("compose")
+            self.assertFalse(scale["meets_formal_scale"])
+
+            # Case 4: No high author
+            mock_res.stdout = "2500 21000 22000 12000 55000 0 15\n"
+            scale = continuous.check_dataset_scale("compose")
+            self.assertFalse(scale["meets_formal_scale"])
+
+    def test_main_aborts_upfront_on_insufficient_formal_dataset(self):
+        import tempfile
+        import json
+        with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
+            report_file = tmp.name
+            with patch.object(continuous, "resolve_acceptance_target", return_value=("sqlite", "http://fake-a", "http://fake-b")), \
+                 patch.object(continuous, "populate_benchmark_feed_db"), \
+                 patch.object(continuous, "wait_url_ready"), \
+                 patch.object(continuous, "check_dataset_scale", return_value={
+                     "users": 10, "published_videos": 120, "videos": 120, "follows": 10,
+                     "interactions": 50, "has_high_author": False, "has_low_author": True,
+                     "meets_formal_scale": False
+                 }), \
+                 patch.object(continuous, "run_continuous_feed_matrix") as mock_matrix, \
+                 patch.object(sys, "argv", ["feed_warm_cache_continuous.py", "--mode", "sqlite", "--formal-dataset", "--report", report_file]):
+                code = continuous.main()
+                self.assertEqual(code, 1)
+                # Verify load matrix was NOT executed
+                mock_matrix.assert_not_called()
+                # Verify report content
+                rep = json.loads(Path(report_file).read_text())
+                self.assertEqual(rep["status"], "FAIL")
+                self.assertEqual(rep["validation_scope"], "rejected_insufficient_scale")
+                self.assertFalse(rep["release_gate_passed"])
