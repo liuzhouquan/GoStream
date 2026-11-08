@@ -120,25 +120,25 @@
 
 现有入口（需要隔离已迁移 MySQL）：`go test -race ./internal/platform -run '^TestMySQL(MultiUserConcurrentInteractionsAndCounters|SecurityAndOwnershipBoundaries|NotificationPaginationIntegration|CommentThreadsIntegration)$' -count=1 -v`。退出条件是完整状态核对，不能仅检查 HTTP 200；发现生产缺陷拆小修复 PR。
 
-### G06 搜索与通知的真实生产查询（已完成，交付报告：[docs/tasks/G06.md](tasks/G06.md)）
+### G06 搜索与通知的真实生产查询（阶段性完成，交付报告：[docs/tasks/G06.md](tasks/G06.md)）
 
-- [x] 复用既定 2,000 用户/20,000 视频等规模，构造命中与未命中、同时间戳、通配符/Unicode、深页数据。
+- [ ] 复用既定 2,000 用户/20,000 视频等规模，构造命中与未命中、同时间戳、通配符/Unicode、深页数据（已完成 SQLite 诊断查询；正式 MySQL 生产规模数据待补证）。
 - [x] 从真实 handler 获取搜索用户/视频、通知列表/有界已读相关 SQL，做 EXPLAIN/必要时 EXPLAIN ANALYZE，并核对精确分页结果。
 - [x] 记录前置通配符 LIKE 的扫描/排序成本、延迟及适用规模；现有500行探针和 FORCE INDEX 不能代替生产查询证据。
 - [x] 仅在发现瓶颈后修改查询/索引；增量迁移与前后对照另行提交，不凭猜测删除“冗余”索引。
 
 复用：`docs/QUERY_PLANS.md`、`TestMySQLQueryPlans`、`TestMySQLSearchLiteralPaginationIntegration`。退出条件：A08 真实规模结果和可复现计划，明确搜索方案适用范围，无需默认引入 Elasticsearch。
 
-### G07 Feed 持续暖缓存门槛（已完成，交付报告：[docs/tasks/G07.md](tasks/G07.md)）
+### G07 Feed 持续暖缓存门槛（阶段性完成，交付报告：[docs/tasks/G07.md](tasks/G07.md)）
 
-- [x] 复用完整基准数据，匿名/登录身份及缓存资格必须与生产实现一致；普通登录个性化推荐若不缓存应明确走 SQL，不能伪造命中。
-- [x] 按 TEST_STANDARD 执行 10/20 并发、30秒预热、60秒实测、3轮；关注首页/深页、登录推荐、热榜覆盖冷/暖路径。
-- [x] 20 并发预热场景三轮 P95≤200ms、P99≤500ms，无意外5xx与页面重复遗漏；记录完整正文时延、命中、SQL、CPU/RSS。
+- [ ] 复用完整基准数据，匿名/登录身份及缓存资格必须与生产实现一致；普通登录个性化推荐若不缓存应明确走 SQL，不能伪造命中（当前夹具为 10 作者 / 120 视频小规模基准；正式 20,000 视频 / 2,000 用户全量生产规模持续压测待补证）。
+- [ ] 按 TEST_STANDARD 执行 10/20 并发、30秒预热、60秒实测、3轮；关注首页/深页、登录推荐、热榜覆盖冷/暖路径（各场景逐个重复三轮待补全完整压测覆盖）。
+- [ ] 20 并发预热场景三轮 P95≤200ms、P99≤500ms，无意外5xx与页面重复遗漏；记录完整正文时延、命中、SQL、CPU/RSS（当前实测小夹具持续 P95 约 42–43ms、P99 约 52ms 达标；正式全量规模待补证）。
 - [x] 重用既有120视频/320关注者 fanout 和已通过无缓存A04收益证据；只在相关查询发生改变时重跑完整收益对照。
 
 复用：`tests/integration/im/feed_cache_load_test.go`、`feed_a04_mixed.py`、`tests/load`。新增驱动/入口在任务报告写出后再引用，当前12并发240请求短突发不能直接勾选本项。退出条件：A04 规定持续缓存负载证据完整，未达门槛先诊断，不降规模/阈值。
 
-### G08 群聊扇出与设备恢复（已完成，交付报告：[docs/tasks/G08.md](tasks/G08.md)）
+### G08 群聊扇出与设备恢复（阶段性完成，交付报告：[docs/tasks/G08.md](tasks/G08.md)）
 
 - [x] 复用 `tests/integration/im` 的20客户端/1000消息驱动，在两实例上补群聊扇出；先在任务规格列出每个客户端期望接收的ID集合。
 - [x] 覆盖重复 client_id、慢/离线成员、移除/重邀、重连补页、逐设备未读/ACK，区分发送ACK和接收ACK。
@@ -156,11 +156,11 @@
 
 退出条件：A01/A03/A04/A06/A07/A10中最终配置故障条件有同版证据，不能以“停了容器后HTTP 200”替代状态验证。不再新增集群压力测试作为前置。
 
-### G10 迁移、备份恢复与运维记录（已完成，交付报告：[docs/tasks/G10.md](tasks/G10.md)）
+### G10 迁移、备份恢复与运维记录（阶段性完成，交付报告：[docs/tasks/G10.md](tasks/G10.md)）
 
 - [x] 按当前 schema v005 复验新库安装、旧库升级、重复运行和中断后恢复；已有v002回滚演练不代表v005可直接混跑/降级。
 - [x] 复用 `mysql_recovery.sh`、`media_transfer_smoke.py`，在明确停写/快照边界下保证SQL与对象清单对应；记录用户/视频/消息/上传会话恢复后的身份集合与对象摘要。
-- [x] 在既定规模数据上记录备份/恢复耗时、SQL/对象/临时空间及恢复后读取；没有量测的 RPO/RTO 不写成承诺。
+- [ ] 在既定规模数据上记录备份/恢复耗时、SQL/对象/临时空间及恢复后读取；没有量测的 RPO/RTO 不写成承诺（端到端生产 RTO/RPO 严格量测留待生产基线演练）。
 - [x] README与运维文档明确可用备份方式、维护窗口、失败处理和已知在线备份限制；在线一致性未经证实时不能声称支持热备。
 
 退出条件：A10版本/数据恢复证据与操作文档一致，检查关键Prometheus指标能对应操作状态。最终栈安全备份前不得破坏演示数据。

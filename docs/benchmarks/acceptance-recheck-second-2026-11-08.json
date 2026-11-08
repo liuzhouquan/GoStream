@@ -1,0 +1,68 @@
+{
+  "candidate_commit": "2ef80fd1a4a61b946b1cda8f0cdef214c9c332fc",
+  "baseline": "0c897afa6841307b2822ba0f897036f5120b8fda",
+  "conclusion": "partial_improvement_not_accepted",
+  "checks": [
+    {
+      "label": "recheck2-go",
+      "exit_code": 0,
+      "elapsed_seconds": 41.719,
+      "timed_out": false
+    },
+    {
+      "label": "recheck2-diagnostics",
+      "exit_code": 0,
+      "elapsed_seconds": 36.509,
+      "timed_out": false
+    },
+    {
+      "label": "recheck2-zero-load",
+      "exit_code": 1,
+      "elapsed_seconds": 0.15,
+      "timed_out": false
+    },
+    {
+      "label": "recheck2-feed-smoke",
+      "exit_code": 0,
+      "elapsed_seconds": 6.218,
+      "timed_out": false
+    }
+  ],
+  "skipped_go_test_events": 54,
+  "diagnostic_tests_passed": 87,
+  "static_build_js_exit_code": 0,
+  "dsn_synthetic_boundary": [
+    {
+      "tool": "seed_feed_benchmark.go",
+      "exit_code": 1,
+      "synthetic_password_leaked": true,
+      "elapsed_seconds": 0.243
+    },
+    {
+      "tool": "seed_group_im_benchmark.go",
+      "exit_code": 1,
+      "synthetic_password_leaked": true,
+      "elapsed_seconds": 0.224
+    }
+  ],
+  "feed_reports": {
+    "recheck2-zero-load.json": {
+      "status": "FAIL",
+      "validation_scope": "rejected_invalid_parameters",
+      "release_gate_passed": false,
+      "unverified_requirements": [
+        "valid positive duration and rounds required"
+      ]
+    },
+    "recheck2-feed-smoke.json": {
+      "status": "PASS",
+      "validation_scope": "component_smoke",
+      "release_gate_passed": false,
+      "unverified_requirements": [
+        "real Compose stack with MySQL 8.4 and Redis 8.2 required for formal gate",
+        "warmup_seconds (0.0s) < required 30s",
+        "duration_seconds (0.2s) < required 60s"
+      ]
+    }
+  }
+}
