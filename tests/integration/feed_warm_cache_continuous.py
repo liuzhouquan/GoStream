@@ -276,9 +276,10 @@ def run_load_burst(base_urls: list[str], path: str, token: str, concurrency: int
     actual_duration = time.monotonic() - t0
 
     latencies_ms.sort()
-    p50 = latencies_ms[len(latencies_ms) // 2] if latencies_ms else 0.0
-    p95 = latencies_ms[int(len(latencies_ms) * 0.95)] if latencies_ms else 0.0
-    p99 = latencies_ms[int(len(latencies_ms) * 0.99)] if latencies_ms else 0.0
+    has_samples = len(latencies_ms) > 0
+    p50 = round(latencies_ms[len(latencies_ms) // 2], 2) if has_samples else None
+    p95 = round(latencies_ms[int(len(latencies_ms) * 0.95)], 2) if has_samples else None
+    p99 = round(latencies_ms[int(len(latencies_ms) * 0.99)], 2) if has_samples else None
     rps = successes / actual_duration if actual_duration > 0 else 0.0
 
     return {
@@ -289,9 +290,9 @@ def run_load_burst(base_urls: list[str], path: str, token: str, concurrency: int
         "failures": failures,
         "requests_per_sec": round(rps, 1),
         "statuses": statuses,
-        "p50_ms": round(p50, 2),
-        "p95_ms": round(p95, 2),
-        "p99_ms": round(p99, 2),
+        "p50_ms": p50,
+        "p95_ms": p95,
+        "p99_ms": p99,
         "bytes_transferred": bytes_total,
     }
 
@@ -347,6 +348,9 @@ def get_process_stats(pids: list[int]) -> dict:
 
 
 def run_continuous_feed_matrix(api_a: str, api_b: str, warmup_sec: float = 30.0, test_sec: float = 60.0, rounds: int = 3, tracked_pids: list[int] | None = None) -> dict:
+    if warmup_sec < 0 or test_sec <= 0 or rounds <= 0:
+        raise ValueError(f"Invalid duration or rounds parameters: warmup_sec={warmup_sec}, test_sec={test_sec}, rounds={rounds}")
+
     bases = [api_a, api_b]
     report = {
         "checkpoints": {},
@@ -402,14 +406,17 @@ def run_continuous_feed_matrix(api_a: str, api_b: str, warmup_sec: float = 30.0,
     # -------------------------------------------------------------
     print("Testing Checkpoint 2: 10 Concurrency Gate...")
     # Warmup
-    print(f"  10 Concurrency: Warming up for {warmup_sec}s...")
-    run_load_burst(bases, "/api/feed?scene=timeline&limit=20", "", 10, warmup_sec)
+    if warmup_sec > 0:
+        print(f"  10 Concurrency: Warming up for {warmup_sec}s...")
+        run_load_burst(bases, "/api/feed?scene=timeline&limit=20", "", 10, warmup_sec)
     # Test
     print(f"  10 Concurrency: Measuring for {test_sec}s...")
     burst_10 = run_load_burst(bases, "/api/feed?scene=timeline&limit=20", "", 10, test_sec)
     print(f"  10 Concurrency: reqs={burst_10['total_requests']}, rps={burst_10['requests_per_sec']}, P50={burst_10['p50_ms']}ms, P95={burst_10['p95_ms']}ms, P99={burst_10['p99_ms']}ms")
+    assert burst_10["total_requests"] > 0, "No requests executed during 10 concurrency measurement"
+    assert burst_10["successes"] > 0, "Zero successful requests during 10 concurrency measurement"
     assert burst_10["failures"] == 0, f"Unexpected failures: {burst_10['failures']}"
-    assert burst_10["p95_ms"] <= 200.0, f"P95 exceeded 200ms: {burst_10['p95_ms']}"
+    assert burst_10["p95_ms"] is not None and burst_10["p95_ms"] <= 200.0, f"P95 exceeded 200ms: {burst_10['p95_ms']}"
     report["checkpoints"]["concurrency_10"] = True
     report["concurrency_10_stats"] = burst_10
 
@@ -417,6 +424,7 @@ def run_continuous_feed_matrix(api_a: str, api_b: str, warmup_sec: float = 30.0,
     # Checkpoint 3: 20 Concurrency 3-Round Gate (A04)
     # -------------------------------------------------------------
     print(f"Testing Checkpoint 3: 20 Concurrency ({rounds} Rounds - A04 Gate, warmup: {warmup_sec}s, test: {test_sec}s)...")
+    assert rounds >= 3, f"A04 gate requires at least 3 rounds, got {rounds}"
     c20_rounds = []
     scenes = ["following", "timeline", "hot"]
 
@@ -429,8 +437,9 @@ def run_continuous_feed_matrix(api_a: str, api_b: str, warmup_sec: float = 30.0,
         json_call(api_a, path, token=token)
 
         # Warmup
-        print(f"  Round {r} ({scene}): Warming up for {warmup_sec}s...")
-        run_load_burst(bases, path, token, 20, warmup_sec)
+        if warmup_sec > 0:
+            print(f"  Round {r} ({scene}): Warming up for {warmup_sec}s...")
+            run_load_burst(bases, path, token, 20, warmup_sec)
         # Measured round
         print(f"  Round {r} ({scene}): Measuring for {test_sec}s...")
         r_stats = run_load_burst(bases, path, token, 20, test_sec)
@@ -438,12 +447,17 @@ def run_continuous_feed_matrix(api_a: str, api_b: str, warmup_sec: float = 30.0,
         r_stats["scene"] = scene
         print(f"  Round {r} (20 Concurrency, {scene}): reqs={r_stats['total_requests']}, rps={r_stats['requests_per_sec']}, P50={r_stats['p50_ms']}ms, P95={r_stats['p95_ms']}ms, P99={r_stats['p99_ms']}ms")
 
+        assert r_stats["total_requests"] > 0, f"Round {r} executed 0 requests"
+        assert r_stats["successes"] > 0, f"Round {r} had 0 successful requests"
         assert r_stats["failures"] == 0, f"Round {r} failures: {r_stats['failures']}"
-        assert r_stats["p95_ms"] <= 200.0, f"Round {r} P95 {r_stats['p95_ms']}ms exceeded 200ms"
-        assert r_stats["p99_ms"] <= 500.0, f"Round {r} P99 {r_stats['p99_ms']}ms exceeded 500ms"
+        assert r_stats["p95_ms"] is not None and r_stats["p95_ms"] <= 200.0, f"Round {r} P95 {r_stats['p95_ms']}ms exceeded 200ms"
+        assert r_stats["p99_ms"] is not None and r_stats["p99_ms"] <= 500.0, f"Round {r} P99 {r_stats['p99_ms']}ms exceeded 500ms"
         c20_rounds.append(r_stats)
 
-    report["checkpoints"]["concurrency_20_three_rounds"] = True
+    report["checkpoints"]["concurrency_20_three_rounds"] = len(c20_rounds) >= 3 and all(
+        r["successes"] > 0 and r["failures"] == 0 and r["p95_ms"] is not None and r["p95_ms"] <= 200.0 and r["p99_ms"] is not None and r["p99_ms"] <= 500.0
+        for r in c20_rounds
+    )
     report["rounds"] = c20_rounds
     report["concurrency_20_rounds"] = c20_rounds
 
@@ -565,6 +579,17 @@ def main():
         "rounds_count": args.rounds,
     }
 
+    if args.warmup_seconds < 0 or args.duration_seconds <= 0 or args.rounds <= 0:
+        print(f"Error: Invalid load parameters (warmup={args.warmup_seconds}, duration={args.duration_seconds}, rounds={args.rounds})", file=sys.stderr)
+        report["validation_scope"] = "rejected_invalid_parameters"
+        report["release_gate_passed"] = False
+        report["unverified_requirements"] = ["valid positive duration and rounds required"]
+        out_path = Path(args.report)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        return 1
+
     tracked_pids = []
 
     with ExitStack() as stack:
@@ -652,10 +677,33 @@ def main():
             tracked_pids=tracked_pids,
         )
         report.update(results)
-        report["status"] = "PASS"
-        report["validation_scope"] = "formal_standard"
-        report["release_gate_passed"] = True
-        report["unverified_requirements"] = []
+        all_passed = bool(report.get("checkpoints")) and all(report["checkpoints"].values())
+        report["status"] = "PASS" if all_passed else "FAIL"
+
+        is_formal_config = (
+            mode == "compose"
+            and args.warmup_seconds >= 30.0
+            and args.duration_seconds >= 60.0
+            and args.rounds >= 3
+        )
+
+        if is_formal_config and all_passed:
+            report["validation_scope"] = "formal_standard"
+            report["release_gate_passed"] = True
+            report["unverified_requirements"] = []
+        else:
+            report["validation_scope"] = "component_smoke"
+            report["release_gate_passed"] = False
+            unverified = []
+            if mode != "compose":
+                unverified.append("real Compose stack with MySQL 8.4 and Redis 8.2 required for formal gate")
+            if args.warmup_seconds < 30.0:
+                unverified.append(f"warmup_seconds ({args.warmup_seconds}s) < required 30s")
+            if args.duration_seconds < 60.0:
+                unverified.append(f"duration_seconds ({args.duration_seconds}s) < required 60s")
+            if args.rounds < 3:
+                unverified.append(f"rounds ({args.rounds}) < required 3 rounds")
+            report["unverified_requirements"] = unverified
 
     elapsed = time.time() - start_time
     report["elapsed_seconds"] = round(elapsed, 2)

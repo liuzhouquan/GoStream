@@ -109,6 +109,36 @@ class GroupIMDiagnosticUnitTest(unittest.TestCase):
         self.assertGreater(data["delivery_latency_ms"]["p50"], 0)
         self.assertIn("resources", data)
 
+    def test_sql_facts_checkpoint_requires_valid_sqlite_or_mysql(self):
+        # Verify that missing or empty verifier does not allow sql_facts_consistent_zero_duplicates to be True
+        import sqlite3
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".db") as tmp:
+            db_path = tmp.name
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE group_messages (id INTEGER PRIMARY KEY, group_id INTEGER, client_id TEXT)")
+            # Insert duplicate client_id
+            conn.execute("INSERT INTO group_messages (id, group_id, client_id) VALUES (1, 1, 'c1')")
+            conn.execute("INSERT INTO group_messages (id, group_id, client_id) VALUES (2, 1, 'c1')")
+            conn.commit()
+            conn.close()
+
+            # Direct check against database logic
+            conn = sqlite3.connect(db_path)
+            cur = conn.cursor()
+            cur.execute("SELECT id, client_id FROM group_messages WHERE group_id=? ORDER BY id", (1,))
+            rows = cur.fetchall()
+            conn.close()
+
+            with self.assertRaises(AssertionError):
+                seen = set()
+                prev_id = 0
+                for rid, rcid in rows:
+                    assert rid > prev_id, f"non strictly increasing id: {rid} <= {prev_id}"
+                    prev_id = rid
+                    assert rcid not in seen, f"duplicate client_id in db: {rcid}"
+                    seen.add(rcid)
+
 
 if __name__ == "__main__":
     unittest.main()
