@@ -296,6 +296,7 @@ def run_group_fanout_matrix(
     tokens: list[str] | None = None,
     device_ids: list[str] | None = None,
     db_path: str = "",
+    mysql_verify_fn=None,
 ) -> dict:
     bases = [api_a, api_b]
     client_count = 20
@@ -303,18 +304,57 @@ def run_group_fanout_matrix(
     expected_total_deliveries = total_messages * (client_count - 1)
 
     if accounts is None or tokens is None or device_ids is None:
-        print(f"Setting up {client_count} accounts (10 on API A, 10 on API B)...")
-        accounts = []
-        tokens = []
-        device_ids = []
-        for i in range(client_count):
-            base = bases[i // 10]
-            uname = f"gfanout_u{i:02d}_{int(time.time())}"
-            uid, tok = register_user(base, uname, i)
-            dev = test_uuid(i)
-            accounts.append(uid)
-            tokens.append(tok)
-            device_ids.append(dev)
+        mysql_addr = os.environ.get("GOSTREAM_MYSQL_ADDR", "")
+        mysql_dsn = os.environ.get("GOSTREAM_TEST_MYSQL_DSN", "")
+        if mysql_addr or mysql_dsn:
+            print(f"Seeding {client_count} accounts directly into MySQL (addr: {mysql_addr})...")
+            root = Path(__file__).resolve().parents[2]
+            cmd = ["go", "run", "./tools/seed_group_im_benchmark.go", "-driver", "mysql"]
+            if mysql_addr:
+                dsn = f"gostream:gostream-local@tcp({mysql_addr})/gostream?charset=utf8mb4&parseTime=True&loc=Local"
+                cmd.extend(["-dsn", dsn])
+            proc = subprocess.run(cmd, cwd=str(root), capture_output=True, text=True, check=True)
+            seed_json = None
+            for line in proc.stdout.splitlines():
+                if "SEED_GROUP_IM_BENCHMARK_OK" in line:
+                    seed_json = json.loads(line.split("SEED_GROUP_IM_BENCHMARK_OK", 1)[1].strip())
+                    break
+            if not seed_json:
+                raise RuntimeError(f"failed to parse seed output: {proc.stdout}")
+            secret = os.environ.get("JWT_SECRET", "group-im-signing-secret-at-least-32-bytes")
+            accounts = []
+            tokens = []
+            device_ids = []
+            now_ts = int(time.time())
+            for i, u in enumerate(seed_json["users"]):
+                uid = u["id"]
+                accounts.append(uid)
+                tok = jwt.encode({"sub": uid, "iat": now_ts, "exp": now_ts + 86400}, secret, algorithm="HS256")
+                tokens.append(tok)
+                device_ids.append(test_uuid(i))
+
+            if mysql_verify_fn is None:
+                def auto_mysql_verify(gid: int, expected: int):
+                    vcmd = ["go", "run", "./tools/seed_group_im_benchmark.go", "-driver", "mysql", "-action", "verify",
+                            "-verify-group", str(gid), "-expected-count", str(expected)]
+                    if mysql_addr:
+                        vcmd.extend(["-dsn", f"gostream:gostream-local@tcp({mysql_addr})/gostream?charset=utf8mb4&parseTime=True&loc=Local"])
+                    subprocess.run(vcmd, cwd=str(root), capture_output=True, text=True, check=True)
+                    print(f"MySQL verified: {expected} messages persisted with strict ordering and zero duplicates.")
+                mysql_verify_fn = auto_mysql_verify
+        else:
+            print(f"Setting up {client_count} accounts (10 on API A, 10 on API B)...")
+            accounts = []
+            tokens = []
+            device_ids = []
+            for i in range(client_count):
+                base = bases[i // 10]
+                uname = f"gfanout_u{i:02d}_{int(time.time())}"
+                uid, tok = register_user(base, uname, i)
+                dev = test_uuid(i)
+                accounts.append(uid)
+                tokens.append(tok)
+                device_ids.append(dev)
 
     sockets: list[SimpleWebSocket] = []
     print("Establishing 20 WebSocket connections...")
@@ -641,6 +681,8 @@ def run_group_fanout_matrix(
             seen.add(rcid)
         assert len(rows) == total_persisted, f"expected {total_persisted} rows in SQL, got {len(rows)}"
         print(f"SQL verified: {len(rows)} messages persisted with strict ordering and zero duplicates.")
+    elif mysql_verify_fn:
+        mysql_verify_fn(group_id, total_persisted)
 
     checkpoints = {
         "fanout_matrix_20_clients": True,
@@ -796,9 +838,13 @@ def main():
             }
 
         print(f"Running group fanout acceptance: API A={api_a}, API B={api_b}...")
-        results = run_group_fanout_matrix(api_a, api_b, msgs_per_client, pids, accounts, tokens, device_ids, db_path=db_path)
+        results = run_group_fanout_matrix(
+            api_a, api_b, msgs_per_client, pids, accounts, tokens, device_ids,
+            db_path=db_path,
+        )
         report.update(results)
         report["status"] = "PASS" if all(results["checkpoints"].values()) else "FAIL"
+        report["release_gate_passed"] = report["status"] == "PASS" and args.duration_mode == "standard"
 
     elapsed = time.time() - start_time
     report["elapsed_seconds"] = round(elapsed, 2)

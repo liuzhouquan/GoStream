@@ -1,0 +1,57 @@
+{
+  "status": "PASS",
+  "mode": "compose",
+  "duration_mode": "standard",
+  "clients": 20,
+  "messages_per_client": 50,
+  "total_messages": 1000,
+  "expected_deliveries": 19000,
+  "deliveries_received": 19000,
+  "duplicate_acks": 0,
+  "duplicate_deliveries": 0,
+  "elapsed_fanout_seconds": 6.67,
+  "sender_ack_latency_ms": {
+    "p50": 118.45,
+    "p95": 174.63,
+    "p99": 199.5
+  },
+  "delivery_latency_ms": {
+    "p50": 122.19,
+    "p95": 181.31,
+    "p99": 208.82
+  },
+  "persisted_group_messages": 1145,
+  "resources": {
+    "initial": {
+      "driver": {
+        "rss_bytes": 34971648,
+        "cpu_seconds": 0.23
+      }
+    },
+    "peak": {
+      "driver": {
+        "rss_bytes": 38162432,
+        "cpu_seconds": 10.0
+      }
+    },
+    "final": {
+      "driver": {
+        "rss_bytes": 38842368,
+        "cpu_seconds": 10.8
+      }
+    }
+  },
+  "checkpoints": {
+    "fanout_matrix_20_clients": true,
+    "expected_id_set_verified": true,
+    "sender_ack_latency_measured": true,
+    "delivery_latency_measured": true,
+    "duplicate_client_id_idempotent": true,
+    "offline_member_backfill_verified": true,
+    "member_removal_and_reinvite_cursor_advanced": true,
+    "per_device_independent_unread_verified": true,
+    "sql_facts_consistent_zero_duplicates": true
+  },
+  "release_gate_passed": true,
+  "elapsed_seconds": 9.6
+}
