@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -14,8 +15,11 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/redis/go-redis/v9"
+	gormmysql "gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 func testUUID(i int) string {
@@ -854,3 +858,405 @@ func TestGroupFanout_PerDeviceUnreadAndACK(t *testing.T) {
 		t.Fatalf("devB unread expected 0, got %d", uB)
 	}
 }
+
+func createGroupWithPeer(t *testing.T, h http.Handler, token, name string) ChatGroup {
+	t.Helper()
+	res := request(t, h, http.MethodPost, "/api/groups", token, map[string]string{"name": name})
+	if res.Code != http.StatusCreated {
+		t.Fatalf("create group failed: %d %s", res.Code, res.Body.String())
+	}
+	var grp ChatGroup
+	if err := json.Unmarshal(res.Body.Bytes(), &grp); err != nil {
+		t.Fatal(err)
+	}
+	return grp
+}
+
+func addMemberWithPeer(t *testing.T, h http.Handler, token string, groupID, userID uint) {
+	t.Helper()
+	res := request(t, h, http.MethodPost, fmt.Sprintf("/api/groups/%d/members", groupID), token, map[string]uint{"user_id": userID})
+	if res.Code != http.StatusOK {
+		t.Fatalf("add member failed: %d %s", res.Code, res.Body.String())
+	}
+}
+
+func TestMySQLGroupFanout_AllGates(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to run real MySQL group fanout verification")
+	}
+	db, err := gorm.Open(gormmysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	gin.SetMode(gin.TestMode)
+	s := NewServer(db, "mysql-group-fanout-jwt-secret-at-least-32-bytes", t.TempDir())
+
+	mr := miniredis.NewMiniRedis()
+	if err := mr.Start(); err != nil {
+		t.Fatalf("miniredis start: %v", err)
+	}
+	t.Cleanup(func() { mr.Close() })
+	rc := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rc.Close() })
+	if err := s.UseRedisRealtime(rc); err != nil {
+		t.Fatalf("use realtime: %v", err)
+	}
+
+	ts := httptest.NewServer(s.Router())
+	defer ts.Close()
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/ws"
+	h := s.Router()
+
+	t.Run("MySQL_DuplicateClientIDIdempotency", func(t *testing.T) {
+		tag := fmt.Sprintf("%d", time.Now().UnixNano())
+		_, tok1 := registerUserWithPeer(t, h, "my_idemp_u1_"+tag, 1)
+		u2ID, tok2 := registerUserWithPeer(t, h, "my_idemp_u2_"+tag, 2)
+
+		grp := createGroupWithPeer(t, h, tok1, "MySQL Idempotency Group")
+		addMemberWithPeer(t, h, tok1, grp.ID, u2ID)
+
+		sock1 := newGroupWsSocket(t, wsURL, tok1, testUUID(101))
+		defer sock1.conn.Close()
+		sock2 := newGroupWsSocket(t, wsURL, tok2, testUUID(102))
+		defer sock2.conn.Close()
+
+		key := "my-idemp-key-" + tag
+		body := "hello idempotent message"
+		if err := sock1.writeJSON(map[string]any{"type": "group_message", "group_id": grp.ID, "client_id": key, "body": body}); err != nil {
+			t.Fatal(err)
+		}
+		ack1 := sock1.next(t, "ack", 5*time.Second)
+		_ = sock2.next(t, "group_message", 5*time.Second)
+
+		// Resend identical client_id with same body
+		if err := sock1.writeJSON(map[string]any{"type": "group_message", "group_id": grp.ID, "client_id": key, "body": body}); err != nil {
+			t.Fatal(err)
+		}
+		ack2 := sock1.next(t, "ack", 5*time.Second)
+		if ack1["message_id"] != ack2["message_id"] {
+			t.Fatalf("idempotent resend returned differing message IDs: %v != %v", ack1["message_id"], ack2["message_id"])
+		}
+
+		var count int64
+		if err := db.Table("group_messages").Where("group_id = ? AND client_id = ?", grp.ID, key).Count(&count).Error; err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("expected 1 row in MySQL group_messages, got %d", count)
+		}
+		t.Log("MySQL duplicate client_id idempotency verified successfully")
+	})
+
+	t.Run("MySQL_PerDeviceUnreadAndACK", func(t *testing.T) {
+		tag := fmt.Sprintf("%d", time.Now().UnixNano())
+		_, tok1 := registerUserWithPeer(t, h, "my_pdev_u1_"+tag, 1)
+		u2ID, tok2 := registerUserWithPeer(t, h, "my_pdev_u2_"+tag, 2)
+
+		grp := createGroupWithPeer(t, h, tok1, "MySQL PerDevice Group")
+		addMemberWithPeer(t, h, tok1, grp.ID, u2ID)
+
+		devA := testUUID(201)
+		devB := testUUID(202)
+
+		sock1 := newGroupWsSocket(t, wsURL, tok1, testUUID(200))
+		defer sock1.conn.Close()
+
+		getUnread := func(dev string) int64 {
+			req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/groups/%d/unread", ts.URL, grp.ID), nil)
+			req.Header.Set("Authorization", "Bearer "+tok2)
+			req.Header.Set("X-GoStream-Device-ID", dev)
+			res, err := http.DefaultClient.Do(req)
+			if err != nil || res.StatusCode != http.StatusOK {
+				t.Fatalf("get unread failed: %v", err)
+			}
+			var payload struct {
+				UnreadCount int64 `json:"unread_count"`
+			}
+			_ = json.NewDecoder(res.Body).Decode(&payload)
+			res.Body.Close()
+			return payload.UnreadCount
+		}
+
+		ackMsg := func(dev string, msgID uint) {
+			req, _ := http.NewRequest(http.MethodPost, fmt.Sprintf("%s/api/groups/%d/messages/%d/ack", ts.URL, grp.ID, msgID), nil)
+			req.Header.Set("Authorization", "Bearer "+tok2)
+			req.Header.Set("X-GoStream-Device-ID", dev)
+			res, err := http.DefaultClient.Do(req)
+			if err != nil || res.StatusCode != http.StatusOK {
+				t.Fatalf("ack failed: %v", err)
+			}
+			res.Body.Close()
+		}
+
+		msgIDs := make([]uint, 10)
+		for i := 0; i < 10; i++ {
+			cid := fmt.Sprintf("my-pdev-%s-%02d", tag, i)
+			_ = sock1.writeJSON(map[string]any{"type": "group_message", "group_id": grp.ID, "client_id": cid, "body": fmt.Sprintf("msg %d", i)})
+			ack := sock1.next(t, "ack", 5*time.Second)
+			msgIDs[i] = uint(ack["message_id"].(float64))
+		}
+
+		if uA := getUnread(devA); uA != 10 {
+			t.Fatalf("expected 10 initial unread on devA, got %d", uA)
+		}
+		if uB := getUnread(devB); uB != 10 {
+			t.Fatalf("expected 10 initial unread on devB, got %d", uB)
+		}
+
+		ackMsg(devA, msgIDs[4])
+		if uA := getUnread(devA); uA != 5 {
+			t.Fatalf("devA unread expected 5, got %d", uA)
+		}
+		if uB := getUnread(devB); uB != 10 {
+			t.Fatalf("devB unread should still be 10, got %d", uB)
+		}
+
+		ackMsg(devB, msgIDs[9])
+		if uB := getUnread(devB); uB != 0 {
+			t.Fatalf("devB unread expected 0, got %d", uB)
+		}
+		if uA := getUnread(devA); uA != 5 {
+			t.Fatalf("devA unread should still be 5, got %d", uA)
+		}
+
+		ackMsg(devA, msgIDs[9])
+		if uA := getUnread(devA); uA != 0 {
+			t.Fatalf("devA unread expected 0, got %d", uA)
+		}
+		t.Log("MySQL per-device independent unread & ACK verified successfully")
+	})
+
+	t.Run("MySQL_RemovalAndReinviteAdvance", func(t *testing.T) {
+		tag := fmt.Sprintf("%d", time.Now().UnixNano())
+		_, tok1 := registerUserWithPeer(t, h, "my_rem_u1_"+tag, 1)
+		u2ID, tok2 := registerUserWithPeer(t, h, "my_rem_u2_"+tag, 2)
+
+		grp := createGroupWithPeer(t, h, tok1, "MySQL Removal Group")
+		addMemberWithPeer(t, h, tok1, grp.ID, u2ID)
+
+		sock1 := newGroupWsSocket(t, wsURL, tok1, testUUID(301))
+		defer sock1.conn.Close()
+
+		// Remove member
+		reqDel, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s/api/groups/%d/members/%d", ts.URL, grp.ID, u2ID), nil)
+		reqDel.Header.Set("Authorization", "Bearer "+tok1)
+		resDel, _ := http.DefaultClient.Do(reqDel)
+		if resDel.StatusCode != http.StatusOK {
+			t.Fatalf("remove member failed: %d", resDel.StatusCode)
+		}
+		resDel.Body.Close()
+
+		// Removed member gets 404
+		reqCheck, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/groups/%d/messages", ts.URL, grp.ID), nil)
+		reqCheck.Header.Set("Authorization", "Bearer "+tok2)
+		resCheck, _ := http.DefaultClient.Do(reqCheck)
+		if resCheck.StatusCode != http.StatusNotFound {
+			t.Fatalf("expected 404 for removed member, got %d", resCheck.StatusCode)
+		}
+		resCheck.Body.Close()
+
+		// Owner sends 5 absence messages
+		for i := 0; i < 5; i++ {
+			_ = sock1.writeJSON(map[string]any{"type": "group_message", "group_id": grp.ID, "client_id": fmt.Sprintf("my-abs-%s-%02d", tag, i), "body": "absence"})
+			_ = sock1.next(t, "ack", 5*time.Second)
+		}
+
+		// Re-invite member
+		addMemberWithPeer(t, h, tok1, grp.ID, u2ID)
+
+		// Unread count must be 0 (cursor auto-advanced)
+		reqU, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/api/groups/%d/unread", ts.URL, grp.ID), nil)
+		reqU.Header.Set("Authorization", "Bearer "+tok2)
+		resU, _ := http.DefaultClient.Do(reqU)
+		var unread struct {
+			UnreadCount int64 `json:"unread_count"`
+		}
+		_ = json.NewDecoder(resU.Body).Decode(&unread)
+		resU.Body.Close()
+		if unread.UnreadCount != 0 {
+			t.Fatalf("expected 0 unread for re-invited member in MySQL, got %d", unread.UnreadCount)
+		}
+		t.Log("MySQL member removal and re-invitation cursor advance verified successfully")
+	})
+
+	t.Run("MySQL_20ClientFanoutMatrix", func(t *testing.T) {
+		const clientCount = 20
+		const msgsPerClient = 5 // 100 total messages -> 100 * 19 = 1900 deliveries
+		const totalMessages = clientCount * msgsPerClient
+		const expectedDeliveries = totalMessages * (clientCount - 1)
+
+		type clientInfo struct {
+			ID     uint
+			Token  string
+			Device string
+			Socket *groupWsSocket
+		}
+
+		tag := fmt.Sprintf("%d", time.Now().UnixNano())
+		clients := make([]clientInfo, clientCount)
+		for i := 0; i < clientCount; i++ {
+			uid, tok := registerUserWithPeer(t, h, fmt.Sprintf("my_fan_%s_%02d", tag, i), i)
+			dev := testUUID(400 + i)
+			sock := newGroupWsSocket(t, wsURL, tok, dev)
+			defer sock.conn.Close()
+			clients[i] = clientInfo{ID: uid, Token: tok, Device: dev, Socket: sock}
+		}
+
+		grp := createGroupWithPeer(t, h, clients[0].Token, "MySQL 20-Client Matrix")
+		for i := 1; i < clientCount; i++ {
+			addMemberWithPeer(t, h, clients[0].Token, grp.ID, clients[i].ID)
+		}
+
+		type msgTrack struct {
+			Key        string
+			SenderIdx  int
+			ID         uint
+			Acked      bool
+			Deliveries map[int]bool
+		}
+		var mu sync.Mutex
+		messages := make(map[string]*msgTrack, totalMessages)
+		for i := 0; i < clientCount; i++ {
+			for j := 0; j < msgsPerClient; j++ {
+				k := fmt.Sprintf("my-mat-%s-c%02d-m%02d", tag, i, j)
+				messages[k] = &msgTrack{
+					Key:        k,
+					SenderIdx:  i,
+					Deliveries: make(map[int]bool, clientCount-1),
+				}
+			}
+		}
+
+		var wg sync.WaitGroup
+		totalDeliveriesReceived := 0
+		duplicateDeliveries := 0
+		duplicateACKs := 0
+		doneCh := make(chan struct{})
+
+		for i := 0; i < clientCount; i++ {
+			idx := i
+			sock := clients[i].Socket
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for {
+					select {
+					case <-doneCh:
+						return
+					case frame, ok := <-sock.read:
+						if !ok {
+							return
+						}
+						switch frame["type"] {
+						case "ack":
+							cid, _ := frame["client_id"].(string)
+							mu.Lock()
+							if m, exists := messages[cid]; exists {
+								if m.Acked {
+									duplicateACKs++
+								} else {
+									m.Acked = true
+									if mid, ok := frame["message_id"].(float64); ok {
+										m.ID = uint(mid)
+									}
+								}
+							}
+							mu.Unlock()
+						case "group_message":
+							msgData, _ := frame["message"].(map[string]any)
+							if msgData != nil {
+								cid, _ := msgData["client_id"].(string)
+								mu.Lock()
+								if m, exists := messages[cid]; exists {
+									if m.Deliveries[idx] {
+										duplicateDeliveries++
+									} else {
+										m.Deliveries[idx] = true
+										totalDeliveriesReceived++
+										if m.ID == 0 {
+											if mid, ok := msgData["id"].(float64); ok {
+												m.ID = uint(mid)
+											}
+										}
+									}
+								}
+								mu.Unlock()
+							}
+						}
+					}
+				}
+			}()
+		}
+
+		// Launch concurrent sends
+		var sendWg sync.WaitGroup
+		for i := 0; i < clientCount; i++ {
+			idx := i
+			sock := clients[i].Socket
+			sendWg.Add(1)
+			go func() {
+				defer sendWg.Done()
+				for j := 0; j < msgsPerClient; j++ {
+					k := fmt.Sprintf("my-mat-%s-c%02d-m%02d", tag, idx, j)
+					_ = sock.writeJSON(map[string]any{
+						"type":      "group_message",
+						"group_id":  grp.ID,
+						"client_id": k,
+						"body":      fmt.Sprintf("MySQL fanout msg c%02d m%02d", idx, j),
+					})
+					time.Sleep(1 * time.Millisecond)
+				}
+			}()
+		}
+		sendWg.Wait()
+
+		// Wait for all deliveries
+		deadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(deadline) {
+			mu.Lock()
+			count := totalDeliveriesReceived
+			mu.Unlock()
+			if count == expectedDeliveries {
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		close(doneCh)
+		wg.Wait()
+
+		mu.Lock()
+		defer mu.Unlock()
+
+		if totalDeliveriesReceived != expectedDeliveries {
+			t.Fatalf("expected %d deliveries, got %d", expectedDeliveries, totalDeliveriesReceived)
+		}
+		if duplicateACKs > 0 || duplicateDeliveries > 0 {
+			t.Fatalf("duplicates detected: acks=%d deliveries=%d", duplicateACKs, duplicateDeliveries)
+		}
+
+		// Mathematical verification of E(k)
+		for k := 0; k < clientCount; k++ {
+			expectedRecv := totalMessages - msgsPerClient
+			actualRecv := 0
+			for _, m := range messages {
+				if m.SenderIdx == k {
+					if m.Deliveries[k] {
+						t.Fatalf("client %d received its own message %s", k, m.Key)
+					}
+				} else {
+					if !m.Deliveries[k] {
+						t.Fatalf("client %d missing expected delivery for %s", k, m.Key)
+					}
+					actualRecv++
+				}
+			}
+			if actualRecv != expectedRecv {
+				t.Fatalf("client %d received %d != %d expected deliveries", k, actualRecv, expectedRecv)
+			}
+		}
+		t.Logf("MySQL 20-client fanout matrix: 100 messages, %d deliveries, 0 dups, E(k) mathematically 100%% verified", totalDeliveriesReceived)
+	})
+}
+
