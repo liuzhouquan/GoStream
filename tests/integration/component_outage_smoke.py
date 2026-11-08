@@ -35,9 +35,79 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests/integration"))
+from acceptance_config import resolve_acceptance_target
 from launcher_lifecycle import LauncherInterrupted, cleanup_on_interrupt
 
 SAMPLE_MP4 = bytes([0, 0, 0, 24]) + b"ftypisom" + bytes(4) + b"isommp42"
+
+
+def find_default_ffmpeg() -> str | None:
+    if "FFMPEG_BIN" in os.environ and shutil.which(os.environ["FFMPEG_BIN"]):
+        return os.environ["FFMPEG_BIN"]
+    system = shutil.which("ffmpeg")
+    if system:
+        return system
+    candidates = [
+        "/home/lzq/.vscode-server/extensions/kilocode.kilo-code-7.8.27-linux-x64/bin/ffmpeg",
+        "/home/lzq/.vscode-server/extensions/kilocode.kilo-code-7.8.18-linux-x64/bin/ffmpeg",
+        "/usr/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+    ]
+    for c in candidates:
+        if os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return None
+
+
+def generate_valid_mp4() -> bytes:
+    ffmpeg = find_default_ffmpeg()
+    if ffmpeg:
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tf:
+            tmp_path = tf.name
+        try:
+            subprocess.run([
+                ffmpeg, "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=25",
+                "-f", "lavfi", "-i", "sine=frequency=1000:duration=1",
+                "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-y", tmp_path,
+            ], check=True)
+            with open(tmp_path, "rb") as f:
+                return f.read()
+        except Exception:
+            pass
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+    return SAMPLE_MP4 + b"gostream-outage-valid-fallback"
+
+
+class ComposeStackController:
+    """Controls container states on an existing Compose project without destroying it."""
+
+    def __init__(self, project_name: str, root_dir: Path | None = None):
+        self.project_name = project_name
+        self.root = Path(root_dir or ROOT).resolve()
+        self.compose_files = [
+            self.root / "docker-compose.yml",
+            self.root / "docker-compose.object.yml",
+            self.root / "tests/integration/object-test.compose.yml",
+        ]
+
+    def compose_cmd(self, *args):
+        cmd = ["docker", "compose", "-p", self.project_name]
+        for f in self.compose_files:
+            cmd.extend(["-f", str(f)])
+        cmd.extend(args)
+        return cmd
+
+    def run_compose(self, *args, check=True, capture_output=True):
+        cmd = self.compose_cmd(*args)
+        return subprocess.run(
+            cmd, cwd=self.root, check=check,
+            capture_output=capture_output, text=True
+        )
 
 
 def find_free_port() -> int:
@@ -240,12 +310,21 @@ class ComponentOutageRunner:
 
     def query_sql(self, query: str):
         if self.mode == "compose":
-            cmd = [
-                "docker", "compose", "-p", self.project_name or "gostream-acc",
-                "exec", "-T", "mysql", "sh", "-c",
-                f'MYSQL_PWD="gostream-local" mysql -ugostream -D gostream --batch --skip-column-names -e "{query}"'
-            ]
-            res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            if self.stack is not None and hasattr(self.stack, "compose_cmd"):
+                cmd = self.stack.compose_cmd(
+                    "exec", "-T", "mysql", "sh", "-c",
+                    f'MYSQL_PWD="gostream-local" mysql -ugostream -D gostream --batch --skip-column-names -e "{query}"'
+                )
+            else:
+                cmd = [
+                    "docker", "compose", "-p", self.project_name or "gostream-acc",
+                    "-f", str(ROOT / "docker-compose.yml"),
+                    "-f", str(ROOT / "docker-compose.object.yml"),
+                    "-f", str(ROOT / "tests/integration/object-test.compose.yml"),
+                    "exec", "-T", "mysql", "sh", "-c",
+                    f'MYSQL_PWD="gostream-local" mysql -ugostream -D gostream --batch --skip-column-names -e "{query}"'
+                ]
+            res = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, check=True)
             return res.stdout.strip()
         else:
             conn = sqlite3.connect(self.db_path)
@@ -399,13 +478,13 @@ class ComponentOutageRunner:
         # ------------------------------------------------------------------
         print("Testing Checkpoint 3: RabbitMQ Outage, Outbox Retention & Delivery...")
         # Upload a video by author for interaction
-        dummy_chunk = SAMPLE_MP4 + b"video-interaction-fixture"
+        video_bytes = generate_valid_mp4()
         v_sess = json_call(self.api_a, "/api/uploads/sessions", "POST", token=author_token, body={
-            "filename": "interaction_video.mp4", "size": len(dummy_chunk)
+            "filename": "interaction_video.mp4", "size": len(video_bytes)
         }, expected=201)
         v_sess_id = v_sess["id"]
         v_stat, _, _ = call_api(self.api_a, f"/api/uploads/sessions/{v_sess_id}/chunks/0", "PUT", token=author_token,
-                                body=dummy_chunk, content_type="application/octet-stream")
+                                body=video_bytes, content_type="application/octet-stream")
         assert v_stat == 200, f"chunk upload failed: {v_stat}"
         v_comp = json_call(self.api_a, f"/api/uploads/sessions/{v_sess_id}/complete", "POST", token=author_token, expected=200)
         video_url = v_comp["url"]
@@ -415,10 +494,19 @@ class ComponentOutageRunner:
         }, expected=201)
         target_video_id = video_resp["id"]
 
+        # Wait for video processing to reach published if ffmpeg/video processing is active
+        if self.mode == "compose" or video_resp.get("status") == "processing":
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                curr = json_call(self.api_a, f"/api/videos/{target_video_id}", "GET", token=author_token)
+                if curr.get("status") == "published":
+                    break
+                time.sleep(0.4)
+
         # 3a. Stop RabbitMQ in compose mode
         if self.mode == "compose":
             self.stack.run_compose("stop", "rabbitmq")
-            time.sleep(1)
+            time.sleep(2)
 
         # 3b. Verify /ready remains 200 during broker outage
         r_stat, _, _ = call_api(self.api_a, "/ready")
@@ -473,7 +561,7 @@ class ComponentOutageRunner:
         # Checkpoint 4: MinIO Outage, Isolation & Resumable Recovery
         # ------------------------------------------------------------------
         print("Testing Checkpoint 4: MinIO Outage, Isolation & Recovery...")
-        chunk_data = SAMPLE_MP4 + b"resumable-outage-sample-data"
+        chunk_data = generate_valid_mp4()
         outage_sess = json_call(self.api_a, "/api/uploads/sessions", "POST", token=author_token, body={
             "filename": "minio_outage.mp4", "size": len(chunk_data)
         }, expected=201)
@@ -485,7 +573,7 @@ class ComponentOutageRunner:
         chunks_dir = ""
         if self.mode == "compose":
             self.stack.run_compose("stop", "minio")
-            time.sleep(1)
+            time.sleep(2)
         elif media_dir:
             chunks_dir = f"{media_dir}.chunks"
             os.makedirs(chunks_dir, exist_ok=True)
@@ -578,25 +666,16 @@ def main():
     parser.add_argument("--mode", choices=["auto", "sqlite", "compose"], default="auto")
     parser.add_argument("--api-a", help="API A URL")
     parser.add_argument("--api-b", help="API B URL")
-    parser.add_argument("--report-file", type=Path, default=ROOT / "data/diagnostics/component_outage_smoke.json")
+    parser.add_argument("--report", "--report-file", dest="report_file", type=Path,
+                        default=ROOT / "data/diagnostics/component_outage_smoke.json")
     parser.add_argument("--go-bin", default="/usr/local/go/bin/go")
     args = parser.parse_args()
-
-    env_api_a = os.environ.get("GOSTREAM_API_A")
-    env_api_b = os.environ.get("GOSTREAM_API_B")
-    compose_active = os.environ.get("GOSTREAM_COMPOSE_ACTIVE") == "1"
-
-    if args.mode == "compose" or (args.mode == "auto" and (args.api_a or env_api_a or compose_active)):
-        mode = "compose"
-        api_a = (args.api_a or env_api_a or "http://127.0.0.1:18080").rstrip("/")
-        api_b = (args.api_b or env_api_b or "http://127.0.0.1:18081").rstrip("/")
-    else:
-        mode = "sqlite"
-        api_a = api_b = None
 
     report_path = args.report_file.resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.unlink(missing_ok=True)
+
+    mode, external_api_a, external_api_b = resolve_acceptance_target(args.mode)
 
     if mode == "sqlite":
         with tempfile.TemporaryDirectory(prefix="gostream_outage_") as tmpdir:
@@ -664,7 +743,9 @@ def main():
                         p.kill()
     else:
         project_name = os.environ.get("GOSTREAM_STACK_PROJECT", "gostream-acc")
-        runner = ComponentOutageRunner(mode="compose", api_a=api_a, api_b=api_b, project_name=project_name)
+        stack = ComposeStackController(project_name=project_name)
+        runner = ComponentOutageRunner(mode="compose", api_a=external_api_a, api_b=external_api_b,
+                                       stack=stack, project_name=project_name)
         report = runner.run_all()
         report_path.write_text(json.dumps(report, indent=2))
         print(f"Report written to: {report_path}")
