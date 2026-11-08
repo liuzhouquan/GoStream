@@ -2,6 +2,14 @@
 
 Last updated: 2026-11-08
 
+2026-11-08 Third Acceptance Recheck and Resolution (T-Q1, T-Q2, T-S1, T-Q3):
+- Addressed all findings in `ACCEPTANCE_RECHECK_THIRD_2026-11-08.md`:
+- T-Q1 fixed: Defined global `ROOT` constant in `feed_warm_cache_continuous.py`, fixing `NameError` on Compose dataset check. Implemented upfront scale verification in `main()` before launching long 30s/60s load runs; `--formal-dataset` immediately rejects insufficient scale without wasteful long execution. Added unit tests for command construction and upfront rejection without Docker dependency.
+- T-Q2 fixed: Fully aligned formal gate requirements with `TEST_STANDARD.md:111` & `:115`: scale check now counts published videos (>= 20,000), users (>= 2,000), follows (>= 10,000), interactions (>= 50,000 from `video_actions` + `comments`), and authors across hybrid threshold. Formal gate additionally enforces 3 repeated rounds across all 4 scenarios (`following` 1st page, `following_deep` cursor page, `recommend_logged_in`, and `hot`). Runs lacking any requirement strictly stay `component_smoke` and cannot claim formal release gate.
+- T-S1 fixed: Closed outage cleanup responsibility loss in `component_outage_smoke.py`. Registered services in `managed_stopped_services` *before* invoking `stop` (ensuring cleanup if stop fails or times out after partial effect), and discarded from tracking *only* after `start` succeeds (ensuring outer retry in `main()` can recover services if inner start fails). Added `initial_running_services` tracking to prevent altering unstarted services. Added behavioral tests verifying all recovery paths.
+- T-Q3 fixed: Synchronized task status in `docs/tasks/G12.md` table, `docs/tasks/G06.md`, `docs/tasks/G07.md`, `docs/tasks/G08.md`, and `docs/tasks/G10.md` to "阶段性完成", preserving historical small-fixture results while explicitly keeping formal production scale items open.
+- All 93 diagnostics unit tests PASS, all Go tests PASS, and zero resource leaks.
+
 2026-11-08 Second Acceptance Recheck and Resolution (S1–S3, Q1–Q3):
 - Addressed all findings in `ACCEPTANCE_RECHECK_SECOND_2026-11-08.md`:
 - S1 fixed: Replaced string-chopping DSN sanitizer in `seed_feed_benchmark.go` and `seed_group_im_benchmark.go` with robust MySQL driver DSN parser (`mysqlDriver.ParseDSN`), preventing credential leak when password contains `://` or special characters. Added regression tests.

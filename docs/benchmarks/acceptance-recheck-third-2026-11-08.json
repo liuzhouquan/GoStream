@@ -1,0 +1,110 @@
+{
+  "candidate": "4bea081b25169f14ab6627a655f753d22ef01b25",
+  "baseline": "2ef80fd1a4a61b946b1cda8f0cdef214c9c332fc",
+  "conclusion": "not_accepted",
+  "checks": [
+    {
+      "label": "recheck3-go",
+      "exit_code": 0,
+      "elapsed_seconds": 51.565,
+      "timed_out": false
+    },
+    {
+      "label": "recheck3-diagnostics",
+      "exit_code": 0,
+      "elapsed_seconds": 44.629,
+      "timed_out": false
+    },
+    {
+      "label": "recheck3-feed-smoke",
+      "exit_code": 0,
+      "elapsed_seconds": 7.739,
+      "timed_out": false
+    }
+  ],
+  "diagnostic_tests_passed": 88,
+  "skipped_go_test_events": 54,
+  "static_checks_exit_code": 0,
+  "compose_scale_error": {
+    "function": "check_dataset_scale(compose)",
+    "exception": "NameError",
+    "message": "name 'ROOT' is not defined",
+    "docker_started": false
+  },
+  "synthetic_dsn_checks": [
+    {
+      "tool": "seed_feed_benchmark.go",
+      "case": "password_contains_scheme",
+      "exit_code": 1,
+      "password_leaked": false
+    },
+    {
+      "tool": "seed_feed_benchmark.go",
+      "case": "password_contains_at",
+      "exit_code": 1,
+      "password_leaked": false
+    },
+    {
+      "tool": "seed_group_im_benchmark.go",
+      "case": "password_contains_scheme",
+      "exit_code": 1,
+      "password_leaked": false
+    },
+    {
+      "tool": "seed_group_im_benchmark.go",
+      "case": "password_contains_at",
+      "exit_code": 1,
+      "password_leaked": false
+    }
+  ],
+  "smoke": {
+    "status": "PASS",
+    "release_gate_passed": false,
+    "validation_scope": "component_smoke",
+    "dataset_scale": {
+      "users": 12,
+      "videos": 121,
+      "follows": 11,
+      "meets_formal_scale": false
+    },
+    "unverified_requirements": [
+      "real Compose stack with MySQL 8.4 and Redis 8.2 required for formal gate",
+      "production scale dataset (minimum 2,000 users, 20,000 videos, 10,000 follows) required for formal gate; observed users=12, videos=121, follows=11",
+      "warmup_seconds (0.0s) < required 30s",
+      "duration_seconds (0.2s) < required 60s"
+    ]
+  },
+  "outage_boundary_counterexamples": {
+    "scope": "actual runner with synthetic dependencies; no Docker/network services",
+    "cases": [
+      {
+        "case": "stop_reports_failure_after_side_effect",
+        "actions": [
+          [
+            "stop",
+            "redis"
+          ]
+        ],
+        "running_after_failure": false,
+        "tracked_for_outer_retry": [],
+        "error": "injected stop return failure after state changed"
+      },
+      {
+        "case": "start_failure",
+        "actions": [
+          [
+            "stop",
+            "redis"
+          ],
+          [
+            "start",
+            "redis"
+          ]
+        ],
+        "running_after_failure": false,
+        "tracked_for_outer_retry": [],
+        "error": "injected start failure"
+      }
+    ]
+  }
+}

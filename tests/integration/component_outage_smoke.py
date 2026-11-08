@@ -109,6 +109,15 @@ class ComposeStackController:
             capture_output=capture_output, text=True
         )
 
+    def get_running_services(self) -> set[str]:
+        try:
+            res = self.run_compose("ps", "--services", "--filter", "status=running", check=False)
+            if res.returncode == 0:
+                return set(line.strip() for line in res.stdout.splitlines() if line.strip())
+        except Exception:
+            pass
+        return set()
+
 
 def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -308,6 +317,34 @@ class ComponentOutageRunner:
         self.checkpoints = {}
         self.broker_event_ids = []
         self.managed_stopped_services: set[str] = set()
+        self.initial_running_services: set[str] = set()
+
+    def stop_managed_service(self, service: str):
+        """Registers intent and stops the specified service in Compose mode.
+
+        Registers the service in self.managed_stopped_services BEFORE executing stop,
+        so that if stop fails or times out after taking effect, finally recovery can still
+        attempt to restore it. If initial running state was tracked, verifies the service was
+        running initially.
+        """
+        if self.mode != "compose":
+            return
+        if self.initial_running_services and service not in self.initial_running_services:
+            raise RuntimeError(f"Cannot stop service '{service}': service was not running initially")
+        self.managed_stopped_services.add(service)
+        if self.stack is not None:
+            self.stack.run_compose("stop", service)
+
+    def recover_managed_service(self, service: str, sleep_sec: float = 0):
+        """Restores a stopped service and unregisters it ONLY after start succeeds."""
+        if self.mode != "compose" or service not in self.managed_stopped_services:
+            return
+        if self.stack is not None:
+            self.stack.run_compose("start", service)
+            if sleep_sec > 0:
+                time.sleep(sleep_sec)
+        # ONLY discard after successful start without exception!
+        self.managed_stopped_services.discard(service)
 
     def query_sql(self, query: str):
         if self.mode == "compose":
@@ -375,8 +412,13 @@ class ComponentOutageRunner:
                 time.sleep(0.2)
 
     def run_all(self, miniredis_proc=None, media_dir: str = "", restart_cb=None) -> dict:
-        if self.mode == "compose" and self.stack is None:
-            raise NotImplementedError("Compose outage testing requires an owned AcceptanceStack instance")
+        if self.mode == "compose":
+            if self.stack is None:
+                raise NotImplementedError("Compose outage testing requires an owned AcceptanceStack instance")
+            if hasattr(self.stack, "get_running_services"):
+                services = self.stack.get_running_services()
+                if isinstance(services, (set, list, tuple)):
+                    self.initial_running_services = set(services)
         print("============================================================")
         print("GoStream Component Outage & Persistence Runner (G09 / A01-A10)")
         print(f"Mode: {self.mode}, API A: {self.api_a}, API B: {self.api_b}")
@@ -427,12 +469,9 @@ class ComponentOutageRunner:
         assert ready_frame is not None, "ws_author did not receive ready frame"
 
         # 2b. Trigger Redis outage
-        stopped_redis = False
         try:
             if self.mode == "compose":
-                self.stack.run_compose("stop", "redis")
-                stopped_redis = True
-                self.managed_stopped_services.add("redis")
+                self.stop_managed_service("redis")
             elif miniredis_proc is not None:
                 miniredis_proc.send_signal(signal.SIGTERM)
                 miniredis_proc.wait(timeout=5)
@@ -474,13 +513,8 @@ class ComponentOutageRunner:
                 pass
 
             # 2f. Restore Redis
-            if stopped_redis:
-                try:
-                    if self.mode == "compose":
-                        self.stack.run_compose("start", "redis")
-                        time.sleep(2)
-                finally:
-                    self.managed_stopped_services.discard("redis")
+            if self.mode == "compose":
+                self.recover_managed_service("redis", sleep_sec=2)
 
         self.checkpoints["redis_outage_fallback_and_recovery"] = True
         print("  redis_outage_fallback_and_recovery: PASS")
@@ -516,12 +550,9 @@ class ComponentOutageRunner:
                 time.sleep(0.4)
 
         # 3a. Stop RabbitMQ in compose mode
-        stopped_rabbitmq = False
         try:
             if self.mode == "compose":
-                self.stack.run_compose("stop", "rabbitmq")
-                stopped_rabbitmq = True
-                self.managed_stopped_services.add("rabbitmq")
+                self.stop_managed_service("rabbitmq")
                 time.sleep(2)
 
             # 3b. Verify /ready remains 200 during broker outage
@@ -553,12 +584,8 @@ class ComponentOutageRunner:
                 self.require_broker_event_state(self.broker_event_ids, recovered=False)
         finally:
             # 3e. Restore RabbitMQ in compose mode
-            if stopped_rabbitmq:
-                try:
-                    if self.mode == "compose":
-                        self.stack.run_compose("start", "rabbitmq")
-                finally:
-                    self.managed_stopped_services.discard("rabbitmq")
+            if self.mode == "compose":
+                self.recover_managed_service("rabbitmq")
 
         if self.mode == "compose":
             self.wait_for_broker_event_recovery(self.broker_event_ids)
@@ -592,14 +619,11 @@ class ComponentOutageRunner:
         assets_before = int(self.query_sql("SELECT count(*) FROM media_assets"))
 
         # 4a. Stop MinIO in compose mode or write-protect upload chunks directory in sqlite mode
-        stopped_minio = False
         chunks_protected = False
         chunks_dir = ""
         try:
             if self.mode == "compose":
-                self.stack.run_compose("stop", "minio")
-                stopped_minio = True
-                self.managed_stopped_services.add("minio")
+                self.stop_managed_service("minio")
                 time.sleep(2)
             elif media_dir:
                 chunks_dir = f"{media_dir}.chunks"
@@ -623,13 +647,8 @@ class ComponentOutageRunner:
             assert assets_during == assets_before, f"failed upload created orphan media_asset: {assets_during} != {assets_before}"
         finally:
             # 4c. Restore MinIO / write permissions
-            if stopped_minio:
-                try:
-                    if self.mode == "compose":
-                        self.stack.run_compose("start", "minio")
-                        time.sleep(3)
-                finally:
-                    self.managed_stopped_services.discard("minio")
+            if self.mode == "compose":
+                self.recover_managed_service("minio", sleep_sec=3)
             if chunks_protected:
                 try:
                     os.chmod(chunks_dir, 0o755)
@@ -789,6 +808,7 @@ def main():
             for svc in list(runner.managed_stopped_services):
                 try:
                     stack.run_compose("start", svc)
+                    runner.managed_stopped_services.discard(svc)
                 except Exception:
                     pass
 
