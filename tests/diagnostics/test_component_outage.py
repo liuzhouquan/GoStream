@@ -65,20 +65,23 @@ class ComponentOutageDiagnosticUnitTest(unittest.TestCase):
             component_outage_smoke.json_call("http://127.0.0.1:9", "/test", expected=200)
 
     def test_seed_feed_benchmark_dsn_redaction(self):
-        cmd = ["/usr/local/go/bin/go", "run", "./tools/seed_feed_benchmark.go", "-driver", "mysql", "-dsn", "fake_user:my_secret_token@tcp(127.0.0.1:99999)/gostream"]
-        res = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        self.assertNotEqual(res.returncode, 0)
-        output = res.stdout + res.stderr
-        self.assertNotIn("my_secret_token", output)
-        self.assertIn("fake_user:***@tcp(127.0.0.1:99999)/gostream", output)
+        # Test standard password and complex password with :// special characters
+        for secret in ["my_secret_token", "sentinel_secret://tail", "pw@with!chars"]:
+            cmd = ["/usr/local/go/bin/go", "run", "./tools/seed_feed_benchmark.go", "-driver", "mysql", "-dsn", f"fake_user:{secret}@tcp(127.0.0.1:99999)/gostream"]
+            res = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.assertNotEqual(res.returncode, 0)
+            output = res.stdout + res.stderr
+            self.assertNotIn(secret, output)
+            self.assertIn("fake_user:***@tcp(127.0.0.1:99999)/gostream", output)
 
     def test_seed_group_im_benchmark_dsn_redaction(self):
-        cmd = ["/usr/local/go/bin/go", "run", "./tools/seed_group_im_benchmark.go", "-driver", "mysql", "-dsn", "fake_user:my_secret_token@tcp(127.0.0.1:99999)/gostream"]
-        res = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        self.assertNotEqual(res.returncode, 0)
-        output = res.stdout + res.stderr
-        self.assertNotIn("my_secret_token", output)
-        self.assertIn("fake_user:***@tcp(127.0.0.1:99999)/gostream", output)
+        for secret in ["my_secret_token", "sentinel_secret://tail", "pw@with!chars"]:
+            cmd = ["/usr/local/go/bin/go", "run", "./tools/seed_group_im_benchmark.go", "-driver", "mysql", "-dsn", f"fake_user:{secret}@tcp(127.0.0.1:99999)/gostream"]
+            res = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.assertNotEqual(res.returncode, 0)
+            output = res.stdout + res.stderr
+            self.assertNotIn(secret, output)
+            self.assertIn("fake_user:***@tcp(127.0.0.1:99999)/gostream", output)
 
     def test_source_contains_finally_blocks_for_all_outages(self):
         source = (ROOT / "tests/integration/component_outage_smoke.py").read_text()
