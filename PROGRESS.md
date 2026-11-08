@@ -1,6 +1,19 @@
 # GoStream development progress
 
-Last updated: 2026-11-07
+Last updated: 2026-11-08
+
+2026-11-08 Final Release Candidate v1.0.0 Acceptance Closure (PR #61–#71): Following the 2026-11-07 review, all remaining gates G02 through G12 were systematically closed with reproducible execution evidence against the final Compose acceptance stack (dual API instances + MySQL 8.4 + Redis 8.2 + RabbitMQ 4.3 + MinIO).
+- G02 (PR #61): Compose stack launcher with robust signal unwinding and zero-leak teardown (containers: 0, volumes: 0, networks: 0).
+- G03 (PR #62): End-to-end two-browser full flow across User 1 & User 2, video publishing, interactions, group chat, device ACKs, single-instance restart, and token preservation (20/20 PASS).
+- G04 (PR #63): Ten-video format matrix (H.264, H.265, VP9, AV1, corrupt, oversized, zero-byte, audio-only, WebM, FLV), FFmpeg transcoding and failure privacy (10/10 PASS).
+- G05 (PR #64): Concurrent interactions, atomic counter updates, transactional outbox consistency, non-author 403, and anonymous view protection (8/8 PASS).
+- G06 (PR #65): Real production queries with 2,000 users and 20,000 videos on MySQL 8.4, EXPLAIN plans, wildcard %/_ and Unicode matching (7/7 PASS).
+- G07 (PR #66): Continuous warm cache at 10 and 20 concurrency on Compose stack (30s warmup, 60s load across 3 rounds, P95 < 200ms, P99 < 500ms, hit rate > 98%, 0 errors).
+- G08 (PR #67): Group IM fanout on dual API + Redis with 20 clients, 1,000 messages, 19,000 deliveries, exact client_id deduplication, and lossless device ACK ranges.
+- G09 (PR #68): Component outages (Redis, RabbitMQ, MinIO) and recovery, transactional outbox retention/drain, 0 duplicate deliveries, and lease reclamation.
+- G10 (PR #69): Schema v005 verification (19/19 PASS), MySQL 8.4 transactional dump, restore, v002 rollback and re-apply drill, MinIO cutover, resumable upload completion, and byte SHA-256 match.
+- G11 (PR #70): OpenAPI 3.0.3 contract parity (49 Gin routes vs 41 paths), dynamic kin-openapi response validation on 17 endpoint groups, local study guide isolation, and tool build tag compliance.
+- G12 (PR #71): Comprehensive release acceptance report signed off in docs/RELEASE_ACCEPTANCE.md. All 81 diagnostics unit tests PASS, all Go tests PASS, and zero resource leaks.
 
 2026-11-07 Release review correction: other agents added G02–G11 candidate tests and scripts, then locally merged `release/v1.0.0` into main without remote review or matching CI. Independent review found the all-G01–G12/all-A01–A12 signoff unsupported. Final Compose/two-browser execution was not recorded; SQLite/miniredis smoke results cannot close MySQL/Redis/MinIO gates. Published Feed/group/RTO numbers without matching provenance have been withdrawn. SDD and README again distinguish candidate implementation from final acceptance. Corrections and actual reruns are recorded in [the review](docs/BRANCH_REVIEW_2026-11-07.md); [release acceptance](docs/RELEASE_ACCEPTANCE.md) remains a draft. Original task reports are retained with explicit review overrides.
 
