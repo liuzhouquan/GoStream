@@ -307,6 +307,7 @@ class ComponentOutageRunner:
         self.project_name = project_name
         self.checkpoints = {}
         self.broker_event_ids = []
+        self.managed_stopped_services: set[str] = set()
 
     def query_sql(self, query: str):
         if self.mode == "compose":
@@ -426,13 +427,16 @@ class ComponentOutageRunner:
         assert ready_frame is not None, "ws_author did not receive ready frame"
 
         # 2b. Trigger Redis outage
-        if self.mode == "compose":
-            self.stack.run_compose("stop", "redis")
-        elif miniredis_proc is not None:
-            miniredis_proc.send_signal(signal.SIGTERM)
-            miniredis_proc.wait(timeout=5)
-
+        stopped_redis = False
         try:
+            if self.mode == "compose":
+                self.stack.run_compose("stop", "redis")
+                stopped_redis = True
+                self.managed_stopped_services.add("redis")
+            elif miniredis_proc is not None:
+                miniredis_proc.send_signal(signal.SIGTERM)
+                miniredis_proc.wait(timeout=5)
+
             # 2c. During Redis outage: /ready must remain 200
             for name, url in [("API A", self.api_a), ("API B", self.api_b)]:
                 r_stat, r_body, _ = call_api(url, "/ready")
@@ -470,9 +474,13 @@ class ComponentOutageRunner:
                 pass
 
             # 2f. Restore Redis
-            if self.mode == "compose":
-                self.stack.run_compose("start", "redis")
-                time.sleep(2)
+            if stopped_redis:
+                try:
+                    if self.mode == "compose":
+                        self.stack.run_compose("start", "redis")
+                        time.sleep(2)
+                finally:
+                    self.managed_stopped_services.discard("redis")
 
         self.checkpoints["redis_outage_fallback_and_recovery"] = True
         print("  redis_outage_fallback_and_recovery: PASS")
@@ -508,11 +516,14 @@ class ComponentOutageRunner:
                 time.sleep(0.4)
 
         # 3a. Stop RabbitMQ in compose mode
-        if self.mode == "compose":
-            self.stack.run_compose("stop", "rabbitmq")
-            time.sleep(2)
-
+        stopped_rabbitmq = False
         try:
+            if self.mode == "compose":
+                self.stack.run_compose("stop", "rabbitmq")
+                stopped_rabbitmq = True
+                self.managed_stopped_services.add("rabbitmq")
+                time.sleep(2)
+
             # 3b. Verify /ready remains 200 during broker outage
             r_stat, _, _ = call_api(self.api_a, "/ready")
             assert r_stat == 200, f"/ready altered during RabbitMQ outage: {r_stat}"
@@ -542,8 +553,12 @@ class ComponentOutageRunner:
                 self.require_broker_event_state(self.broker_event_ids, recovered=False)
         finally:
             # 3e. Restore RabbitMQ in compose mode
-            if self.mode == "compose":
-                self.stack.run_compose("start", "rabbitmq")
+            if stopped_rabbitmq:
+                try:
+                    if self.mode == "compose":
+                        self.stack.run_compose("start", "rabbitmq")
+                finally:
+                    self.managed_stopped_services.discard("rabbitmq")
 
         if self.mode == "compose":
             self.wait_for_broker_event_recovery(self.broker_event_ids)
@@ -577,16 +592,21 @@ class ComponentOutageRunner:
         assets_before = int(self.query_sql("SELECT count(*) FROM media_assets"))
 
         # 4a. Stop MinIO in compose mode or write-protect upload chunks directory in sqlite mode
+        stopped_minio = False
+        chunks_protected = False
         chunks_dir = ""
-        if self.mode == "compose":
-            self.stack.run_compose("stop", "minio")
-            time.sleep(2)
-        elif media_dir:
-            chunks_dir = f"{media_dir}.chunks"
-            os.makedirs(chunks_dir, exist_ok=True)
-            os.chmod(chunks_dir, 0o555)
-
         try:
+            if self.mode == "compose":
+                self.stack.run_compose("stop", "minio")
+                stopped_minio = True
+                self.managed_stopped_services.add("minio")
+                time.sleep(2)
+            elif media_dir:
+                chunks_dir = f"{media_dir}.chunks"
+                os.makedirs(chunks_dir, exist_ok=True)
+                os.chmod(chunks_dir, 0o555)
+                chunks_protected = True
+
             # /ready remains 200 during storage outage
             r_stat, _, _ = call_api(self.api_a, "/ready")
             assert r_stat == 200, f"/ready altered during MinIO outage: {r_stat}"
@@ -603,10 +623,14 @@ class ComponentOutageRunner:
             assert assets_during == assets_before, f"failed upload created orphan media_asset: {assets_during} != {assets_before}"
         finally:
             # 4c. Restore MinIO / write permissions
-            if self.mode == "compose":
-                self.stack.run_compose("start", "minio")
-                time.sleep(3)
-            elif chunks_dir:
+            if stopped_minio:
+                try:
+                    if self.mode == "compose":
+                        self.stack.run_compose("start", "minio")
+                        time.sleep(3)
+                finally:
+                    self.managed_stopped_services.discard("minio")
+            if chunks_protected:
                 try:
                     os.chmod(chunks_dir, 0o755)
                 except Exception:
@@ -762,7 +786,7 @@ def main():
             report_path.write_text(json.dumps(report, indent=2))
             print(f"Report written to: {report_path}")
         finally:
-            for svc in ("redis", "rabbitmq", "minio"):
+            for svc in list(runner.managed_stopped_services):
                 try:
                     stack.run_compose("start", svc)
                 except Exception:

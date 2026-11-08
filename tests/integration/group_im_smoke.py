@@ -287,6 +287,32 @@ def get_process_metrics(pid: int) -> dict:
         return {"rss_bytes": 0, "cpu_seconds": 0.0}
 
 
+def verify_group_im_sql_facts(group_id: int, total_persisted: int, db_path: str = "", mysql_verify_fn=None) -> bool:
+    """Verifies that persisted group messages have strictly increasing ID, 0 duplicate client_ids, and exact row count."""
+    if db_path and os.path.exists(db_path):
+        conn = sqlite3.connect(db_path)
+        cur = conn.cursor()
+        cur.execute("SELECT id, client_id FROM group_messages WHERE group_id=? ORDER BY id", (group_id,))
+        rows = cur.fetchall()
+        conn.close()
+        seen = set()
+        prev_id = 0
+        for rid, rcid in rows:
+            assert rid > prev_id, f"non strictly increasing id: {rid} <= {prev_id}"
+            prev_id = rid
+            assert rcid not in seen, f"duplicate client_id in db: {rcid}"
+            seen.add(rcid)
+        assert len(rows) == total_persisted, f"expected {total_persisted} rows in SQL, got {len(rows)}"
+        print(f"SQL verified: {len(rows)} messages persisted with strict ordering and zero duplicates.")
+        return True
+    elif mysql_verify_fn:
+        mysql_verify_fn(group_id, total_persisted)
+        return True
+    else:
+        print("WARNING: Neither SQLite db_path nor mysql_verify_fn was provided; SQL verification not performed.")
+        return False
+
+
 def run_group_fanout_matrix(
     api_a: str,
     api_b: str,
@@ -666,29 +692,7 @@ def run_group_fanout_matrix(
 
     total_persisted = total_messages + 125 + 10 + 10
 
-    sql_verified = False
-    if db_path and os.path.exists(db_path):
-        conn = sqlite3.connect(db_path)
-        cur = conn.cursor()
-        cur.execute("SELECT id, client_id FROM group_messages WHERE group_id=? ORDER BY id", (group_id,))
-        rows = cur.fetchall()
-        conn.close()
-        seen = set()
-        prev_id = 0
-        for rid, rcid in rows:
-            assert rid > prev_id, f"non strictly increasing id: {rid} <= {prev_id}"
-            prev_id = rid
-            assert rcid not in seen, f"duplicate client_id in db: {rcid}"
-            seen.add(rcid)
-        assert len(rows) == total_persisted, f"expected {total_persisted} rows in SQL, got {len(rows)}"
-        print(f"SQL verified: {len(rows)} messages persisted with strict ordering and zero duplicates.")
-        sql_verified = True
-    elif mysql_verify_fn:
-        mysql_verify_fn(group_id, total_persisted)
-        sql_verified = True
-    else:
-        print("WARNING: Neither SQLite db_path nor mysql_verify_fn was provided; SQL verification not performed.")
-        sql_verified = False
+    sql_verified = verify_group_im_sql_facts(group_id, total_persisted, db_path=db_path, mysql_verify_fn=mysql_verify_fn)
 
     checkpoints = {
         "fanout_matrix_20_clients": True,

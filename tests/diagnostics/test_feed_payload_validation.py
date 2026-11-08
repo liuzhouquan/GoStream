@@ -47,8 +47,22 @@ class FeedPayloadValidationTest(unittest.TestCase):
             continuous.run_continuous_feed_matrix("http://a", "http://b", warmup_sec=5, test_sec=10, rounds=-1)
 
     def test_continuous_feed_empty_samples_returns_none_latencies(self):
-        def response(*args, **kwargs):
-            return 500, {"error": "down"}, 10.0
+        valid_items = [{"id": i + 1} for i in range(20)]
+        call_count = 0
+
+        def response(base_url, path, method="GET", token="", **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Baseline call succeeds
+                return 200, {"items": valid_items, "next_cursor": None}, 5.0
+            # Subsequent measurement calls return 500 (no successful samples in window)
+            return 500, {"error": "internal error"}, 10.0
+
         with patch.object(continuous, "call_api", side_effect=response):
-            with self.assertRaises(ValueError):
-                continuous.run_load_burst(["http://fixture"], "/api/feed", "", 1, 0.01)
+            res = continuous.run_load_burst(["http://fixture"], "/api/feed", "", 1, 0.05)
+            self.assertEqual(res["successes"], 0)
+            self.assertGreater(res["failures"], 0)
+            self.assertIsNone(res["p50_ms"])
+            self.assertIsNone(res["p95_ms"])
+            self.assertIsNone(res["p99_ms"])

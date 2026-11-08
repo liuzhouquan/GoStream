@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch, MagicMock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests/integration"))
@@ -83,12 +84,49 @@ class ComponentOutageDiagnosticUnitTest(unittest.TestCase):
             self.assertNotIn(secret, output)
             self.assertIn("fake_user:***@tcp(127.0.0.1:99999)/gostream", output)
 
-    def test_source_contains_finally_blocks_for_all_outages(self):
-        source = (ROOT / "tests/integration/component_outage_smoke.py").read_text()
-        # Ensure restore calls are executed in finally blocks
-        self.assertIn('finally:\n            # Clean up author WebSocket\n            try:\n                ws_author.close()\n            except Exception:\n                pass\n\n            # 2f. Restore Redis\n            if self.mode == "compose":\n                self.stack.run_compose("start", "redis")', source)
-        self.assertIn('finally:\n            # 3e. Restore RabbitMQ in compose mode\n            if self.mode == "compose":\n                self.stack.run_compose("start", "rabbitmq")', source)
-        self.assertIn('finally:\n            # 4c. Restore MinIO / write permissions\n            if self.mode == "compose":\n                self.stack.run_compose("start", "minio")', source)
+    def test_outage_guarantees_cleanup_on_injected_failure(self):
+        # Behavioral test: verify that if an assertion or error occurs inside an outage window,
+        # runner.managed_stopped_services tracks the stopped service and start is executed in finally.
+        class MockStack:
+            def __init__(self):
+                self.actions = []
+
+            def run_compose(self, action, service):
+                self.actions.append((action, service))
+                return ""
+
+        stack = MockStack()
+        runner = component_outage_smoke.ComponentOutageRunner(
+            mode="compose", api_a="http://fake-a", api_b="http://fake-b", stack=stack
+        )
+
+        def fake_call_api(url, path, method="GET", **kwargs):
+            if path in ("/health", "/ready") and ("stop", "redis") not in stack.actions:
+                return 200, {"status": "ok" if path == "/health" else "ready"}, 1.0
+            if ("stop", "redis") in stack.actions:
+                raise RuntimeError("simulated failure inside redis outage window")
+            return 200, {}, 1.0
+
+        def fake_json_call(url, path, method="GET", **kwargs):
+            if path == "/api/users":
+                return {"access_token": "fake-jwt", "user": {"id": 1}}
+            return {}
+
+        with patch.object(component_outage_smoke, "call_api", side_effect=fake_call_api), \
+             patch.object(component_outage_smoke, "json_call", side_effect=fake_json_call), \
+             patch.object(component_outage_smoke, "SimpleWebSocket") as mock_ws:
+            ws_inst = MagicMock()
+            ws_inst.next_of_type.return_value = {"type": "ready"}
+            mock_ws.return_value = ws_inst
+
+            with self.assertRaises(RuntimeError):
+                runner.run_all()
+
+        # Verify that start redis was executed despite the error in outage, and tracking is clean
+        self.assertIn(("stop", "redis"), stack.actions)
+        self.assertIn(("start", "redis"), stack.actions)
+        self.assertEqual(len(runner.managed_stopped_services), 0)
+
 
 
 
