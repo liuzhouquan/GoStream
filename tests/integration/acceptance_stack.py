@@ -424,6 +424,7 @@ class AcceptanceStack:
             "GOSTREAM_COMPOSE_ACTIVE": "1",
             "GOSTREAM_STACK_PROJECT": self.project_name,
             "GOSTREAM_MYSQL_ADDR": self.mysql_addr,
+            "GOSTREAM_TEST_MYSQL_DSN": f"gostream:gostream-local@tcp({self.mysql_addr})/gostream?charset=utf8mb4&parseTime=True&loc=Local",
             "GOSTREAM_MINIO_ENDPOINT": self.minio_endpoint,
         })
         if env_extra:
