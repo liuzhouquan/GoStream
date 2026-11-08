@@ -164,12 +164,12 @@
 
 退出条件：A10版本/数据恢复证据与操作文档一致，检查关键Prometheus指标能对应操作状态。最终栈安全备份前不得破坏演示数据。
 
-### G11 契约和文档一致性（候选代码已实现，待验收，0.5–1 日；依赖 G04/G05/G08稳定API）
+### G11 契约和文档一致性（已完成，交付报告：[docs/tasks/G11.md](tasks/G11.md)）
 
-- [ ] 按 `server.go` 的当前方法/路由核对 OpenAPI参数、请求约束、状态码、鉴权、分页、媒体响应和WebSocket帧。
-- [ ] 补真正缺失的请求/响应变体及实际响应校验；路由数相等不代表Schema正确。已有结构/代表响应测试复用。
-- [ ] 从新环境执行README；核对DATABASE当前迁移版本、配置默认值、失败/恢复操作、学习/面试文档的源码位置。
-- [ ] 更新仅本地的 `docs/LOCAL_STUDY_GUIDE.md`：端到端阅读路线、事务/Feed/MQ/IM/媒体练习、故障复现、面试问答及证据限制；确认 `git check-ignore -v` 且 `git ls-files` 不包含它。
+- [x] 按 `server.go` 的当前方法/路由核对 OpenAPI参数、请求约束、状态码、鉴权、分页、媒体响应和WebSocket帧。
+- [x] 补真正缺失的请求/响应变体及实际响应校验；路由数相等不代表Schema正确。已有结构/代表响应测试复用。
+- [x] 从新环境执行README；核对DATABASE当前迁移版本、配置默认值、失败/恢复操作、学习/面试文档的源码位置。
+- [x] 更新仅本地的 `docs/LOCAL_STUDY_GUIDE.md`：端到端阅读路线、事务/Feed/MQ/IM/媒体练习、故障复现、面试问答及证据限制；确认 `git check-ignore -v` 且 `git ls-files` 不包含它。
 
 现有入口：`go test ./internal/platform -run '^TestOpenAPI' -count=1 -v`，其余契约测试用 `rg '^func Test' internal/platform/*openapi*` 核对后执行。退出条件：A12与真实代码/最终配置相符，学习材料可定位每个已实现技术点。
 
