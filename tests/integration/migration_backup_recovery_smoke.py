@@ -40,7 +40,7 @@ import bcrypt
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests/integration"))
 from launcher_lifecycle import LauncherInterrupted, cleanup_on_interrupt
-from acceptance_config import has_external_acceptance_target
+from acceptance_config import has_external_acceptance_target, open_api_request
 
 SAMPLE_MP4 = bytes([0, 0, 0, 24]) + b"ftypisom" + bytes(4) + b"isommp42"
 
@@ -61,7 +61,7 @@ def call_api(base: str, path: str, method: str = "GET", token: str = "", body: b
         headers["Content-Type"] = content_type
     req = Request(url, data=body, headers=headers, method=method)
     try:
-        with urlopen(req, timeout=30) as resp:
+        with open_api_request(req, timeout=30) as resp:
             data = resp.read()
             ct = resp.headers.get("Content-Type", "")
             if "application/json" in ct:

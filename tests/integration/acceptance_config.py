@@ -1,7 +1,9 @@
 """Resolve the shared external acceptance-stack target without unsafe defaults."""
 
+import ipaddress
 import os
 from urllib.parse import urlsplit
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 
 TARGET_ENV_NAMES = (
@@ -9,10 +11,31 @@ TARGET_ENV_NAMES = (
     "API_A", "API_B", "BASE",
 )
 
+# Local acceptance traffic must not queue behind a developer's outbound proxy.
+_DIRECT_API_OPENER = build_opener(ProxyHandler({}))
+
 
 def has_external_acceptance_target(environ=None):
     env = os.environ if environ is None else environ
     return any(env.get(name) for name in TARGET_ENV_NAMES)
+
+
+def is_loopback_host(host: str) -> bool:
+    if not host:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
+def open_api_request(request: Request | str, timeout: float | None = 15):
+    req = Request(request) if isinstance(request, str) else request
+    host = urlsplit(req.full_url).hostname or ""
+    opener = _DIRECT_API_OPENER.open if is_loopback_host(host) else urlopen
+    return opener(req, timeout=timeout) if timeout is not None else opener(req)
 
 
 def _origin(value):

@@ -58,6 +58,12 @@
 
 TEST_STANDARD 要求冷/暖路径分开，完整 A04 还包括混合推拉收益与读写混合。此脚本只负责暖缓存持续负载。本轮报告增加 `acceptance_scope=G07_warm_cache_only`、`full_a04_accepted=false`。即便未来 `release_gate_passed=true`，也仅表示该暖缓存子项通过；完整 A04 必须关联其他真实结果。
 
+### P2 · 工具可靠性与测试夹具卫生后续【已修复并验证】
+
+1. **统一 Loopback 代理策略**：在 `tests/integration/acceptance_config.py` 中抽象 `is_loopback_host` 与 `open_api_request`，基于局部空代理池 `ProxyHandler({})` 确保回环 HTTP 流量（包括 127.0.0.1、localhost、IPv6 loopback）绝不经过系统/环境变量代理；统一应用到全部 10 个验收 runner。
+2. **结构化失败报告**：在 Feed、Group IM、Component Outage 等 runner 中捕获网络传输、超时、连接拒绝与断言异常，统一写入 `status="FAIL"`, `release_gate_passed=false`, `validation_scope="execution_failure"`, `execution_error={"type": ..., "message": ...}` 并确保非零退出（exit 1 或 re-raise），杜绝假阳性与将异常静默当作无样本。已在 `tests/diagnostics/test_acceptance_target_contract.py` 新增 4 个针对性诊断用例。
+3. **MySQL 测试夹具卫生清理**：在 `internal/platform/group_fanout_continuous_test.go` 的 `TestMySQLGroupFanout_AllGates` 中建立统一跟踪与 `t.Cleanup` 机制，按逆序外键依赖清除 7 张关联表（`group_device_reads`, `group_reads`, `group_messages`, `group_members`, `chat_groups`, `message_devices`, `users`）中本测试创建的记录，并显式关闭数据库连接池，杜绝夹具残留污染后续用例。
+
 ## 本轮验证
 
 结构化真实结果见 [本轮证据](benchmarks/branch-review-2026-11-09.json)。原始日志与代理定位探针在忽略目录 `data/diagnostics/`，不上传原始认证/夹具输出。
@@ -80,7 +86,7 @@ TEST_STANDARD 要求冷/暖路径分开，完整 A04 还包括混合推拉收益
 | 发布必做 · G09 / A06 | 对最终联合栈复验 Redis/RabbitMQ/MinIO 短暂离线和恢复，保留逐 source/delivery 事件与业务终态 | 与最终版本关联的业务 checkpoint、SQL事实与恢复后收敛；launcher 元数据不能代替故障结果 |
 | 发布必做 · G10 / A10 | 在声明的停写窗口完成 MySQL + 对象一致快照/恢复，核对关键身份集合与对象摘要，量测空间和完整恢复时间 | RPO/RTO有明确起止点与原始量测；文件复制阶段耗时不能替代端到端RTO，不承诺未验证热备 |
 | 发布必做 · G03/G04/G12 | 核对现有两浏览器、10视频媒体矩阵证据适用的版本和变化，必要时补测；最终README/迁移/API/学习材料与代码一致 | 不机械重跑全部历史测试；用适用性说明和必要回归补齐同版证据。所有必做项通过后才签发 v1.0.0 |
-| P2 · 工具可靠性后续 | 将 API 传输异常/断言失败也写成结构化失败报告，包含失败阶段和清理结果；统一其他验收脚本对 loopback 代理的策略，复查其他直接提交数据的 MySQL 测试（如群聊扇出）的夹具清理 | 模拟超时、连接拒绝、中断均非零退出且有可定位失败记录；不得把异常当成成功或无样本 |
+| P2 · 工具可靠性后续【已完成】 | 统一验收脚本对 loopback 代理策略；API 传输异常/断言失败输出结构化失败报告并保证非零退出；MySQL 群聊扇出连续测试实施完整逆序外键清理与连接池释放 | 10 个验收脚本统一走局部无代理 opener；模拟超时/断言失败均产生 FAIL+execution_error 并退出 1；MySQL 群聊扇出用例清理全部 7 张关联表，已通过单元/诊断全量回归 |
 
 从这里开始，不再新增无依据的业务功能或延长产品边界。项目已处于集成与交付收尾，但“功能大体具备”与“按标准验收完成”仍需区分。
 

@@ -43,7 +43,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from launcher_lifecycle import cleanup_on_interrupt
-from acceptance_config import resolve_acceptance_target
+from acceptance_config import open_api_request, resolve_acceptance_target
 
 
 def free_port():
@@ -60,7 +60,7 @@ def call_api(base, path, method="GET", token="", body=None, content_type="applic
         headers["Content-Type"] = content_type
     req = Request(base + path, data=body, headers=headers, method=method)
     try:
-        with urlopen(req, timeout=15) as resp:
+        with open_api_request(req, timeout=15) as resp:
             data = resp.read()
             ct = resp.headers.get_content_type()
             parsed = json.loads(data) if ct == "application/json" else data
@@ -88,7 +88,7 @@ def wait_url_ready(url, timeout=15):
     while time.time() - start < timeout:
         try:
             req = Request(url + "/ready", method="GET")
-            with urlopen(req, timeout=1) as resp:
+            with open_api_request(req, timeout=1) as resp:
                 if resp.status == 200:
                     return
         except Exception:

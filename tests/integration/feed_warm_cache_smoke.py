@@ -45,7 +45,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from launcher_lifecycle import cleanup_on_interrupt
-from acceptance_config import resolve_acceptance_target
+from acceptance_config import open_api_request, resolve_acceptance_target
 
 
 def free_port() -> int:
@@ -63,7 +63,7 @@ def call_api(base: str, path: str, method: str = "GET", token: str = "", body: b
     req = Request(base + path, data=body, headers=headers, method=method)
     t0 = time.monotonic()
     try:
-        with urlopen(req, timeout=15) as resp:
+        with open_api_request(req, timeout=15) as resp:
             data = resp.read()
             elapsed_ms = (time.monotonic() - t0) * 1000
             ct = resp.headers.get_content_type()
@@ -93,7 +93,7 @@ def wait_url_ready(url: str, timeout: float = 15.0):
     while time.monotonic() - start < timeout:
         try:
             req = Request(url + "/ready", method="GET")
-            with urlopen(req, timeout=1) as resp:
+            with open_api_request(req, timeout=1) as resp:
                 if resp.status == 200:
                     return
         except Exception:

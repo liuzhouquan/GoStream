@@ -2,6 +2,12 @@
 
 Last updated: 2026-11-09
 
+2026-11-09 Tool reliability, fixture hygiene, and structured failure reporting (P2 closure):
+- Unified loopback proxy policy: extracted `is_loopback_host` and `open_api_request` with direct opener in `acceptance_config.py`; applied to all 10 acceptance runners (`feed_warm_cache_continuous.py`, `group_im_smoke.py`, `component_outage_smoke.py`, `search_query_smoke.py`, `media_matrix_smoke.py`, `migration_backup_recovery_smoke.py`, `interactions_security_smoke.py`, `web_full_flow.py`, `acceptance_stack.py`, `feed_warm_cache_smoke.py`), ensuring loopback test traffic never blocks on developer proxies while preserving external proxy routing.
+- Structured execution failure reporting: intercepted timeout, connection refused, transmission errors, and assertion failures across continuous and smoke runners; runners record `status="FAIL"`, `release_gate_passed=false`, `validation_scope="execution_failure"`, and `execution_error={"type": ..., "message": ...}` with non-zero exit code (exit 1 or re-raise), preventing false positives or silent loss of test execution. Added 4 unit test cases in `test_acceptance_target_contract.py`.
+- MySQL fixture hygiene: implemented user/group tracking and clean-up in `TestMySQLGroupFanout_AllGates` in `internal/platform/group_fanout_continuous_test.go`, deleting across 7 related tables in reverse foreign-key order (`group_device_reads`, `group_reads`, `group_messages`, `group_members`, `chat_groups`, `message_devices`, `users`) and closing the DB pool in `t.Cleanup`.
+- Full verification: all 108 diagnostic tests PASS, all Go tests PASS (`go test -count=1 ./...`), `go vet ./...` PASS, `go build ./cmd/...` PASS, and smoke runs for Feed, Group IM, and Outage PASS.
+
 2026-11-09 Pending branch reconciliation and Feed verification reliability:
 - Verified all local/remote refs against main and actual GitHub PR head/merge SHAs: bd3894f was already integrated by aa976db; nine apparent leftovers are historical squash merges, two superseded proposals remain excluded, no overlooked independent candidate remained.
 - Fixed formal Feed preflight followed by destructive smoke seeding/stale scale: formal mode preserves prepared data, records scale before/after load, rejects scale regression. New actual-main regressions cover both paths.

@@ -43,6 +43,7 @@ ROOT = Path(__file__).resolve().parents[2]
 WEB_ROOT = ROOT / "web"
 sys.path.insert(0, str(ROOT / "tests/integration"))
 from im_smoke import stop_test_group
+from acceptance_config import open_api_request
 
 
 def find_free_port():
@@ -112,7 +113,7 @@ def wait_for_ready(url, timeout=45):
     while time.monotonic() < deadline:
         try:
             req = Request(endpoint, headers={"User-Agent": "GoStream-E2E"})
-            with urlopen(req, timeout=2) as resp:
+            with open_api_request(req, timeout=2) as resp:
                 if resp.status == 200:
                     return
         except (OSError, HTTPError, URLError):

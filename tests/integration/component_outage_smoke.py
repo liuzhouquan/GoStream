@@ -35,7 +35,7 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests/integration"))
-from acceptance_config import resolve_acceptance_target
+from acceptance_config import open_api_request, resolve_acceptance_target
 from launcher_lifecycle import LauncherInterrupted, cleanup_on_interrupt
 
 SAMPLE_MP4 = bytes([0, 0, 0, 24]) + b"ftypisom" + bytes(4) + b"isommp42"
@@ -268,7 +268,7 @@ def call_api(base: str, path: str, method: str = "GET", token: str = "", body: b
         headers["Content-Type"] = content_type
     req = Request(url, data=body, headers=headers, method=method)
     try:
-        with urlopen(req, timeout=30) as resp:
+        with open_api_request(req, timeout=30) as resp:
             data = resp.read()
             ct = resp.headers.get("Content-Type", "")
             if "application/json" in ct:
@@ -722,7 +722,7 @@ def main():
     parser.add_argument("--api-b", help="API B URL")
     parser.add_argument("--report", "--report-file", dest="report_file", type=Path,
                         default=ROOT / "data/diagnostics/component_outage_smoke.json")
-    parser.add_argument("--go-bin", default="/usr/local/go/bin/go")
+    parser.add_argument("--go-bin", default=os.environ.get("GOSTREAM_GO_BIN") or shutil.which("go") or "/usr/local/go/bin/go")
     args = parser.parse_args()
 
     report_path = args.report_file.resolve()
@@ -783,11 +783,26 @@ def main():
                     p_api_a.kill()
                 p_api_a = subprocess.Popen([server_bin], env=env_a, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+            runner = ComponentOutageRunner(mode="sqlite", api_a=api_a, api_b=api_b, db_path=db_path)
             try:
-                runner = ComponentOutageRunner(mode="sqlite", api_a=api_a, api_b=api_b, db_path=db_path)
                 report = runner.run_all(miniredis_proc=mr_proc, media_dir=media_dir, restart_cb=restart_api_a)
                 report_path.write_text(json.dumps(report, indent=2))
                 print(f"Report written to: {report_path}")
+            except Exception as err:
+                fail_report = {
+                    "status": "FAIL",
+                    "mode": "sqlite",
+                    "release_gate_passed": False,
+                    "validation_scope": "execution_failure",
+                    "execution_error": {
+                        "type": err.__class__.__name__,
+                        "message": str(err),
+                    },
+                    "checkpoints": getattr(runner, "checkpoints", {}),
+                }
+                report_path.write_text(json.dumps(fail_report, indent=2))
+                print(f"Execution failed: [{err.__class__.__name__}] {err}", file=sys.stderr)
+                raise
             finally:
                 for p in [p_api_a, p_api_b, mr_proc]:
                     try:
@@ -804,6 +819,21 @@ def main():
             report = runner.run_all()
             report_path.write_text(json.dumps(report, indent=2))
             print(f"Report written to: {report_path}")
+        except Exception as err:
+            fail_report = {
+                "status": "FAIL",
+                "mode": "compose",
+                "release_gate_passed": False,
+                "validation_scope": "execution_failure",
+                "execution_error": {
+                    "type": err.__class__.__name__,
+                    "message": str(err),
+                },
+                "checkpoints": getattr(runner, "checkpoints", {}),
+            }
+            report_path.write_text(json.dumps(fail_report, indent=2))
+            print(f"Execution failed: [{err.__class__.__name__}] {err}", file=sys.stderr)
+            raise
         finally:
             for svc in list(runner.managed_stopped_services):
                 try:
