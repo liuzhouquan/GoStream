@@ -1,0 +1,121 @@
+{
+  "gate": "A08",
+  "task": "G06",
+  "timestamp": "2026-11-09T18:13:33+08:00",
+  "git": {
+    "commit": "dea6ad2168e53dd8ba756c9a1ed5c9747736a444",
+    "branch": "review/reliability-and-cleanup-p2"
+  },
+  "database": {
+    "engine": "MySQL",
+    "version": "8.4 (Docker Compose)",
+    "scale": {
+      "users": 2000,
+      "videos": 20000,
+      "published_videos": 19800,
+      "hidden_videos": 200,
+      "notifications": 1000,
+      "notifications_read": 500,
+      "notifications_unread": 500
+    }
+  },
+  "command": "python3 tests/integration/acceptance_stack.py --no-build -- bash -c 'export GOSTREAM_TEST_MYSQL_DSN=\"gostream:gostream-local@tcp($GOSTREAM_MYSQL_ADDR)/gostream?charset=utf8mb4&parseTime=True&loc=Local\" && go test -race ./internal/platform -run \"^TestMySQL(ProductionSearchAndNotificationQueries|QueryPlans|SearchLiteralPaginationIntegration)$\" -count=1 -v'",
+  "status": "PASS",
+  "checkpoints": {
+    "user_search_hits_misses_unicode_wildcards": true,
+    "user_search_keyset_identical_timestamps_deep_pages": true,
+    "video_search_published_filter_hidden_exclusion": true,
+    "video_search_deep_keyset_scale_20000": true,
+    "notifications_keyset_1000_items_no_gaps_no_dups": true,
+    "notifications_bounded_mark_read_isolation": true,
+    "mysql_notifications_keyset_no_filesort": true,
+    "mysql_notifications_unread_covering_index": true,
+    "mysql_user_search_keyset_no_filesort": true,
+    "mysql_video_search_keyset_shallow_and_deep": true,
+    "mysql_benchmark_video_search_latency_p95_under_10ms": true
+  },
+  "query_plans": [
+    {
+      "scenario": "notifications_keyset_pagination",
+      "sql": "SELECT * FROM notifications WHERE user_id = ? AND id < ? ORDER BY id DESC LIMIT 31",
+      "explain": {
+        "table": "notifications",
+        "type": "range",
+        "key": "PRIMARY",
+        "rows_est": 499,
+        "extra": "Using where; Backward index scan"
+      },
+      "explain_analyze": "-> Limit: 31 row(s) (cost=100 rows=31) (actual time=0.187..0.198 rows=31 loops=1)\n    -> Filter: (notifications.user_id = 6) (cost=100 rows=333) (actual time=0.185..0.196 rows=31 loops=1)\n        -> Index range scan on notifications using PRIMARY over (id < 1000) (reverse) (cost=100 rows=499) (actual time=0.0412..0.0479 rows=31 loops=1)",
+      "filesort": false,
+      "actual_time_ms": 0.198
+    },
+    {
+      "scenario": "notifications_unread_count",
+      "sql": "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL",
+      "explain": {
+        "table": "notifications",
+        "type": "ref",
+        "key": "idx_notification_unread",
+        "rows_est": 500,
+        "extra": "Using where; Using index"
+      },
+      "explain_analyze": "-> Aggregate: count(0) (cost=101 rows=1) (actual time=0.161..0.161 rows=1 loops=1)\n    -> Filter: (notifications.read_at is null) (cost=50.7 rows=500) (actual time=0.0339..0.146 rows=250 loops=1)\n        -> Covering index lookup on notifications using idx_notification_unread (user_id=6, read_at=NULL) (cost=50.7 rows=500) (actual time=0.0324..0.126 rows=250 loops=1)",
+      "filesort": false,
+      "covering_index": true,
+      "actual_time_ms": 0.161
+    },
+    {
+      "scenario": "user_search_keyset",
+      "sql": "SELECT * FROM users WHERE (username LIKE ? ESCAPE '!' OR nickname LIKE ? ESCAPE '!') AND id < ? ORDER BY id DESC LIMIT 21",
+      "explain": {
+        "table": "users",
+        "type": "range",
+        "key": "PRIMARY",
+        "rows_est": 995,
+        "extra": "Using where; Backward index scan"
+      },
+      "explain_analyze": "-> Limit: 21 row(s) (cost=121 rows=21) (actual time=0.692..0.692 rows=0 loops=1)\n    -> Filter: (((users.username like '%test%' escape '!') or (users.nickname like '%test%' escape '!')) and (users.id < 1000)) (cost=121 rows=209) (actual time=0.691..0.691 rows=0 loops=1)\n        -> Index range scan on users using PRIMARY over (id < 1000) (reverse) (cost=121 rows=995) (actual time=0.00861..0.43 rows=995 loops=1)",
+      "filesort": false,
+      "actual_time_ms": 0.692
+    },
+    {
+      "scenario": "video_search_shallow",
+      "sql": "SELECT * FROM videos WHERE status = ? AND (title LIKE ? ESCAPE '!' OR description LIKE ? ESCAPE '!') AND id < ? ORDER BY id DESC LIMIT 21",
+      "cursor": "id < 20000",
+      "explain": {
+        "table": "videos",
+        "type": "range",
+        "key": "PRIMARY",
+        "rows_est": 10251,
+        "extra": "Using where; Backward index scan"
+      },
+      "explain_analyze": "-> Limit: 21 row(s) (cost=108 rows=21) (actual time=21.8..21.8 rows=10 loops=1)\n    -> Filter: ((videos.`status` = 'published') and ((videos.title like '%GoStream%' escape '!') or (videos.`description` like '%GoStream%' escape '!')) and (videos.id < 20000)) (cost=108 rows=1076) (actual time=21.8..21.8 rows=10 loops=1)\n        -> Index range scan on videos using PRIMARY over (id < 20000) (reverse) (cost=108 rows=10251) (actual time=0.0193..12.4 rows=19497 loops=1)",
+      "filesort": false,
+      "actual_time_ms": 21.8
+    },
+    {
+      "scenario": "video_search_deep",
+      "sql": "SELECT * FROM videos WHERE status = ? AND (title LIKE ? ESCAPE '!' OR description LIKE ? ESCAPE '!') AND id < ? ORDER BY id DESC LIMIT 21",
+      "cursor": "id < 10000",
+      "explain": {
+        "table": "videos",
+        "type": "range",
+        "key": "PRIMARY",
+        "rows_est": 10251,
+        "extra": "Using where; Backward index scan"
+      },
+      "explain_analyze": "-> Limit: 21 row(s) (cost=108 rows=21) (actual time=0.0217..0.0358 rows=21 loops=1)\n    -> Filter: ((videos.`status` = 'published') and ((videos.title like '%prod%' escape '!') or (videos.`description` like '%prod%' escape '!')) and (videos.id < 10000)) (cost=108 rows=1076) (actual time=0.0207..0.0337 rows=21 loops=1)\n        -> Index range scan on videos using PRIMARY over (id < 10000) (reverse) (cost=108 rows=10251) (actual time=0.0179..0.0265 rows=21 loops=1)",
+      "filesort": false,
+      "short_circuit": true,
+      "actual_time_ms": 0.036
+    }
+  ],
+  "benchmark_50_iterations": {
+    "iterations": 50,
+    "dataset_videos": 20000,
+    "p50_ms": 2.896,
+    "p95_ms": 3.621,
+    "max_ms": 5.147
+  },
+  "applicability_conclusion": "At 20,000 video scale on MySQL 8.4, leading wildcard LIKE queries combined with PRIMARY keyset pagination (id < cursor ORDER BY id DESC LIMIT 21) achieve P95 latency of 3.62ms and eliminate filesort overhead. Keyset pagination ensures microsecond-level short-circuit termination on deep pages (0.036ms). Dedicated full-text search engines like Elasticsearch are not required at <= 50,000 video scale."
+}

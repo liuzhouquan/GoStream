@@ -2,6 +2,17 @@
 
 Last updated: 2026-11-09
 
+2026-11-09 G06 / A08 MySQL production queries and execution plan verification:
+- Executed `TestMySQLProductionSearchAndNotificationQueries`, `TestMySQLQueryPlans`, and `TestMySQLSearchLiteralPaginationIntegration` against real MySQL 8.4 on the Compose acceptance stack with 2,000 users, 20,000 videos, and 1,000 notifications in a rollback transaction.
+- Verified functional correctness: exact substring user hits/misses, wildcard escaping (`literal%`, `literal_`), Unicode Chinese and Emoji, 20 same-timestamp users keyset pagination (strict monotonic cursor, 0 duplicates, 0 gaps), published video filter (excluding draft/processing/failed/deleted), 1,000 notifications traversal, and bounded mark-read idempotency.
+- Confirmed MySQL 8.4 query execution plans and trees (EXPLAIN / EXPLAIN ANALYZE):
+  - Notifications keyset pagination: reverse range scan on PRIMARY over `id < cursor`, zero filesort, actual execution time 0.198ms.
+  - Notifications unread count: pure covering index lookup on `idx_notification_unread` (`user_id, read_at`), zero table reads, actual execution time 0.161ms.
+  - User search keyset: reverse range scan on PRIMARY over `id < cursor`, zero filesort, actual execution time 0.692ms.
+  - Video search: shallow search (20k rows) actual time 21.8ms; deep search with `id < 10000` short-circuits after LIMIT 21 in 0.036ms (36μs).
+  - 50-iteration benchmark on 20,000 videos: P50=2.90ms, P95=3.62ms, Max=5.15ms.
+- Recorded structured evidence to `docs/benchmarks/mysql-production-queries-2026-11-09.json` and updated `docs/tasks/G06.md` and `docs/BRANCH_REVIEW_2026-11-09.md`.
+
 2026-11-09 Tool reliability, fixture hygiene, and structured failure reporting (P2 closure):
 - Unified loopback proxy policy: extracted `is_loopback_host` and `open_api_request` with direct opener in `acceptance_config.py`; applied to all 10 acceptance runners (`feed_warm_cache_continuous.py`, `group_im_smoke.py`, `component_outage_smoke.py`, `search_query_smoke.py`, `media_matrix_smoke.py`, `migration_backup_recovery_smoke.py`, `interactions_security_smoke.py`, `web_full_flow.py`, `acceptance_stack.py`, `feed_warm_cache_smoke.py`), ensuring loopback test traffic never blocks on developer proxies while preserving external proxy routing.
 - Structured execution failure reporting: intercepted timeout, connection refused, transmission errors, and assertion failures across continuous and smoke runners; runners record `status="FAIL"`, `release_gate_passed=false`, `validation_scope="execution_failure"`, and `execution_error={"type": ..., "message": ...}` with non-zero exit code (exit 1 or re-raise), preventing false positives or silent loss of test execution. Added 4 unit test cases in `test_acceptance_target_contract.py`.
