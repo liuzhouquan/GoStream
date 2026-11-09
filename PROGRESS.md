@@ -2,6 +2,15 @@
 
 Last updated: 2026-11-09
 
+2026-11-09 G08 / A07 Group IM 20-client 1,000-message continuous verification closure:
+- Executed `group_im_smoke.py` under standard duration mode against the Compose dual-API stack (`api_a` http://127.0.0.1:18080 and `api_b` http://127.0.0.1:18081 with Redis 8.2 and MySQL 8.4) via `acceptance_stack.py`.
+- Verified 20 concurrent WebSocket clients across dual APIs sending 1,000 messages (50 msgs/client), generating exactly 19,000 deliveries (100% reception) with zero duplicate deliveries and zero duplicate ACKs.
+- Measured latencies meeting Gate A07 thresholds: Sender ACK P50=121.69ms, P95=162.63ms, P99=186.85ms (gate <= 250ms); Delivery latency P50=125.21ms, P95=167.57ms, P99=194.88ms (gate <= 300ms).
+- Validated all 9 Gate A07 checkpoints: mathematical set $E(k)$ exact match, duplicate client_id idempotency, offline 125 backlog sync/backfill with unread convergence, member removal 404 & re-invitation cursor advance past backlog, per-device independent unread & ACK isolation, and MySQL 8.4 persistence (1,145 messages monotonically strictly ordered with 0 duplicates).
+- Fixed MySQL fixture cleanup in `internal/platform/group_fanout_continuous_test.go`: added cascading cleanup of user notifications prior to user deletion, eliminating foreign key constraint error (`fk_notifications_actor`).
+- Ran `TestMySQLGroupFanout_AllGates` on MySQL 8.4: all 4 subtests passed cleanly with zero fixture residue.
+- Recorded structured benchmark evidence to `docs/benchmarks/group-im-load-continuous-2026-11-09.json` and updated `docs/tasks/G08.md` and `docs/BRANCH_REVIEW_2026-11-09.md`.
+
 2026-11-09 G06 / A08 MySQL production queries and execution plan verification:
 - Executed `TestMySQLProductionSearchAndNotificationQueries`, `TestMySQLQueryPlans`, and `TestMySQLSearchLiteralPaginationIntegration` against real MySQL 8.4 on the Compose acceptance stack with 2,000 users, 20,000 videos, and 1,000 notifications in a rollback transaction.
 - Verified functional correctness: exact substring user hits/misses, wildcard escaping (`literal%`, `literal_`), Unicode Chinese and Emoji, 20 same-timestamp users keyset pagination (strict monotonic cursor, 0 duplicates, 0 gaps), published video filter (excluding draft/processing/failed/deleted), 1,000 notifications traversal, and bounded mark-read idempotency.

@@ -928,6 +928,9 @@ func TestMySQLGroupFanout_AllGates(t *testing.T) {
 				}
 			}
 			if len(cleanUserIDs) > 0 {
+				if err := tx.Where("user_id IN ? OR actor_id IN ?", cleanUserIDs, cleanUserIDs).Delete(&Notification{}).Error; err != nil {
+					return err
+				}
 				if err := tx.Where("user_id IN ?", cleanUserIDs).Delete(&MessageDevice{}).Error; err != nil {
 					return err
 				}
