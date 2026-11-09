@@ -1035,17 +1035,38 @@ func TestMySQLMultiUserConcurrentInteractionsAndCounters(t *testing.T) {
 	var videoIDs []uint
 
 	t.Cleanup(func() {
-		_ = dbA.Transaction(func(tx *gorm.DB) error {
+		if err := dbA.Transaction(func(tx *gorm.DB) error {
 			if len(videoIDs) > 0 {
-				_ = tx.Where("video_id IN ?", videoIDs).Delete(&VideoAction{}).Error
-				_ = tx.Where("video_id IN ?", videoIDs).Delete(&Comment{}).Error
-				_ = tx.Where("id IN ?", videoIDs).Delete(&Video{}).Error
+				var noticeIDs []uint
+				if err := tx.Model(&Notification{}).Where("video_id IN ?", videoIDs).Pluck("id", &noticeIDs).Error; err != nil {
+					return err
+				}
+				var keys []string
+				for _, id := range noticeIDs {
+					key := fmt.Sprintf("notification:%d", id)
+					keys = append(keys, key, "broker-delivery:"+key)
+				}
+				if len(keys) > 0 {
+					if err := tx.Where("event_key IN ?", keys).Delete(&OutboxEvent{}).Error; err != nil {
+						return err
+					}
+				}
+				for _, model := range []any{&Notification{}, &VideoAction{}, &Comment{}} {
+					if err := tx.Where("video_id IN ?", videoIDs).Delete(model).Error; err != nil {
+						return err
+					}
+				}
+				if err := tx.Where("id IN ?", videoIDs).Delete(&Video{}).Error; err != nil {
+					return err
+				}
 			}
 			if len(userIDs) > 0 {
-				_ = tx.Where("id IN ?", userIDs).Delete(&User{}).Error
+				return tx.Where("id IN ?", userIDs).Delete(&User{}).Error
 			}
 			return nil
-		})
+		}); err != nil {
+			t.Errorf("clean concurrent interaction fixture: %v", err)
+		}
 	})
 
 	sA := NewServer(dbA, "test-signing-secret-at-least-32-bytes", t.TempDir())

@@ -6,6 +6,7 @@ Last updated: 2026-11-09
 - Verified all local/remote refs against main and actual GitHub PR head/merge SHAs: bd3894f was already integrated by aa976db; nine apparent leftovers are historical squash merges, two superseded proposals remain excluded, no overlooked independent candidate remained.
 - Fixed formal Feed preflight followed by destructive smoke seeding/stale scale: formal mode preserves prepared data, records scale before/after load, rejects scale regression. New actual-main regressions cover both paths.
 - Diagnosed repeated loopback TCP timeouts as urllib environment-proxy routing to the developer proxy; loopback API/ready/metrics now connect directly, external addresses retain existing proxy behavior. Red/green real-HTTP regression and the same 24-group dual-API smoke verify the correction.
+- CI exposed and verified two additional integration issues: DSN diagnostics used a developer-only Go path; MySQL component test fixtures leaked a published video into later recommendation tests. Toolchain lookup now enforces go.mod through explicit/PATH resolution; MySQL fixtures roll back and interaction cleanup honors owned notifications/outbox and foreign keys.
 - Report scope explicitly remains G07 warm-cache only, not full A04 signoff. Remaining production-scale Feed, queries, final IM/fault/recovery evidence and final release checklist: [2026-11-09 review](docs/BRANCH_REVIEW_2026-11-09.md).
 
 2026-11-08 Feed acceptance scenario driver correction:

@@ -109,5 +109,37 @@
     "test_pattern": "test_component_outage.py -k dsn_redaction",
     "test_count": 2,
     "result": "passed"
+  },
+  "mysql_local_reproduction": {
+    "engine": "MySQL 8.4, disposable owned container",
+    "cases": [
+      {
+        "label": "nov09-owned-mysql-pair-before",
+        "elapsed_seconds": 2.156,
+        "exit_code": 1,
+        "timed_out": false
+      },
+      {
+        "label": "nov09-owned-mysql-pair-after",
+        "elapsed_seconds": 4.745,
+        "exit_code": 0,
+        "timed_out": false
+      },
+      {
+        "label": "nov09-owned-mysql-all-after",
+        "elapsed_seconds": 18.509,
+        "exit_code": 0,
+        "timed_out": false
+      }
+    ],
+    "component_videos_remaining_before_container_removal": 0,
+    "interaction_users_remaining_before_container_removal": 0,
+    "owned_container_removed": true
+  },
+  "ci_second_run": {
+    "run_id": 42552368921,
+    "mysql_result": "failure",
+    "cause": "component MySQL fixture left one published video; recommendation isolation guard correctly rejected it",
+    "action": "rollback own component fixture and fix owned interaction cleanup; exact sequence and all TestMySQL cases pass locally"
   }
 }

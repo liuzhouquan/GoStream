@@ -486,9 +486,9 @@ func TestOutage_MinIOStorageUnavailableAndNoOrphanSQL(t *testing.T) {
 }
 
 // TestComponentOutage_WorkerRestartAndLeaseReclaim verifies:
-// 1. When an active completion or outbox worker crashes and its lease expires,
-//    a restarted/new worker safely re-claims the session/event without duplication.
-// 2. Stale workers holding expired leases are fenced from committing changes.
+//  1. When an active completion or outbox worker crashes and its lease expires,
+//     a restarted/new worker safely re-claims the session/event without duplication.
+//  2. Stale workers holding expired leases are fenced from committing changes.
 func TestComponentOutage_WorkerRestartAndLeaseReclaim(t *testing.T) {
 	s, h, db := testServer(t)
 
@@ -590,6 +590,23 @@ func TestMySQLComponentOutage_AllGates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	pool, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	// All subtests share one connection/Server; no independent process needs committed rows.
+	// Roll back this fixture so later MySQL recommendation tests see their original database.
+	db = db.Begin()
+	if db.Error != nil {
+		t.Fatal(db.Error)
+	}
+	t.Cleanup(func() {
+		if err := db.Rollback().Error; err != nil {
+			t.Errorf("rollback component outage fixture: %v", err)
+		}
+	})
 
 	gin.SetMode(gin.TestMode)
 	mediaDir := t.TempDir()
