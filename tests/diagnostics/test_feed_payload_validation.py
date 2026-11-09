@@ -45,6 +45,10 @@ class FeedPayloadValidationTest(unittest.TestCase):
             continuous.run_continuous_feed_matrix("http://a", "http://b", warmup_sec=5, test_sec=-5, rounds=3)
         with self.assertRaisesRegex(ValueError, "Invalid duration or rounds parameters"):
             continuous.run_continuous_feed_matrix("http://a", "http://b", warmup_sec=5, test_sec=10, rounds=-1)
+        with self.assertRaisesRegex(ValueError, "Invalid duration or rounds parameters"):
+            continuous.run_continuous_feed_matrix("http://a", "http://b", warmup_sec=5, test_sec=10, rounds=1)
+        with self.assertRaisesRegex(ValueError, "Invalid duration or rounds parameters"):
+            continuous.run_continuous_feed_matrix("http://a", "http://b", warmup_sec=5, test_sec=10, rounds=2)
 
     def test_continuous_feed_empty_samples_returns_none_latencies(self):
         valid_items = [{"id": i + 1} for i in range(20)]
@@ -151,6 +155,45 @@ class FeedPayloadValidationTest(unittest.TestCase):
                 # Verify load matrix was NOT executed
                 mock_matrix.assert_not_called()
                 # Verify report content
+                rep = json.loads(Path(report_file).read_text())
+                self.assertEqual(rep["status"], "FAIL")
+                self.assertEqual(rep["validation_scope"], "rejected_insufficient_scale")
+                self.assertFalse(rep["release_gate_passed"])
+
+    def test_main_rejects_fewer_than_three_rounds(self):
+        import tempfile
+        import json
+        with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
+            report_file = tmp.name
+            with patch.object(continuous, "resolve_acceptance_target", return_value=("sqlite", "http://fake-a", "http://fake-b")), \
+                 patch.object(continuous, "run_continuous_feed_matrix") as mock_matrix, \
+                 patch.object(sys, "argv", ["feed_warm_cache_continuous.py", "--mode", "sqlite", "--rounds", "2", "--report", report_file]):
+                code = continuous.main()
+                self.assertEqual(code, 1)
+                mock_matrix.assert_not_called()
+                rep = json.loads(Path(report_file).read_text())
+                self.assertEqual(rep["status"], "FAIL")
+                self.assertEqual(rep["validation_scope"], "rejected_invalid_parameters")
+                self.assertFalse(rep["release_gate_passed"])
+
+    def test_main_aborts_upfront_on_compose_formal_dataset_without_seeding(self):
+        import tempfile
+        import json
+        with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
+            report_file = tmp.name
+            with patch.object(continuous, "resolve_acceptance_target", return_value=("compose", "http://fake-a", "http://fake-b")), \
+                 patch.object(continuous, "seed_mysql_feed_db") as mock_seed, \
+                 patch.object(continuous, "check_dataset_scale", return_value={
+                     "users": 10, "published_videos": 120, "videos": 120, "follows": 10,
+                     "interactions": 50, "has_high_author": False, "has_low_author": True,
+                     "meets_formal_scale": False
+                 }), \
+                 patch.object(continuous, "run_continuous_feed_matrix") as mock_matrix, \
+                 patch.object(sys, "argv", ["feed_warm_cache_continuous.py", "--mode", "compose", "--formal-dataset", "--report", report_file]):
+                code = continuous.main()
+                self.assertEqual(code, 1)
+                mock_seed.assert_not_called()
+                mock_matrix.assert_not_called()
                 rep = json.loads(Path(report_file).read_text())
                 self.assertEqual(rep["status"], "FAIL")
                 self.assertEqual(rep["validation_scope"], "rejected_insufficient_scale")

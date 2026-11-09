@@ -1,0 +1,101 @@
+{
+  "source_commit": "3db51b43d856c68a524b429f209ed009cb4caf1a",
+  "working_tree_contains_fix": true,
+  "branch": "fix/feed-acceptance-scenario-matrix",
+  "scope": "scenario driver fix, not final release acceptance",
+  "checks": [
+    {
+      "label": "feed-scenarios-go",
+      "exit_code": 0,
+      "elapsed_seconds": 43.606,
+      "timed_out": false
+    },
+    {
+      "label": "feed-scenarios-final-diagnostics",
+      "exit_code": 0,
+      "elapsed_seconds": 48.372,
+      "timed_out": false
+    },
+    {
+      "label": "feed-scenarios-real-smoke-fixed",
+      "exit_code": 0,
+      "elapsed_seconds": 11.589,
+      "timed_out": false
+    }
+  ],
+  "diagnostic_tests_passed": 100,
+  "skipped_go_test_events": 54,
+  "static_vet_build_js_exit_code": 0,
+  "real_smoke": {
+    "mode": "sqlite",
+    "status": "PASS",
+    "validation_scope": "component_smoke",
+    "release_gate_passed": false,
+    "coverage": {
+      "10:following": [
+        1,
+        2,
+        3
+      ],
+      "10:following_deep": [
+        1,
+        2,
+        3
+      ],
+      "10:recommend_logged_in": [
+        1,
+        2,
+        3
+      ],
+      "10:hot": [
+        1,
+        2,
+        3
+      ],
+      "20:following": [
+        1,
+        2,
+        3
+      ],
+      "20:following_deep": [
+        1,
+        2,
+        3
+      ],
+      "20:recommend_logged_in": [
+        1,
+        2,
+        3
+      ],
+      "20:hot": [
+        1,
+        2,
+        3
+      ]
+    },
+    "measured_requests": 1822,
+    "checkpoints": {
+      "semantic_eligibility": true,
+      "concurrency_10": true,
+      "concurrency_20_three_rounds": true,
+      "cache_invalidation_verified": true
+    }
+  },
+  "rejection_checks": [
+    {
+      "case": "zero",
+      "exit_code": 1,
+      "status": "FAIL",
+      "validation_scope": "rejected_invalid_parameters",
+      "release_gate_passed": false
+    },
+    {
+      "case": "small-formal",
+      "exit_code": 1,
+      "status": "FAIL",
+      "validation_scope": "rejected_insufficient_scale",
+      "release_gate_passed": false
+    }
+  ],
+  "formal_production_size_benchmark_run": false
+}

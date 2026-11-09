@@ -2,6 +2,12 @@
 
 Last updated: 2026-11-08
 
+2026-11-08 Feed acceptance scenario driver correction:
+- Replaced the scene rotation with all four required scenarios at both 10 and 20 concurrency, three rounds each; real following cursors and authenticated recommendations now execute under load.
+- Formal coverage rejects missing/duplicate rounds, empty samples and insufficient measured durations across both concurrency levels.
+- Real dual-API smoke exposed changing recommendation cursor anchors; protocol-aware validation now permits new anchors while retaining identity, scene, last-ID and other cursor checks.
+- Real SQLite/MiniRedis/two-API 24-group smoke passed and remains explicitly NOT_ACCEPTED for formal release. Formal production-size performance evidence is still pending; standard windows take at least 36 minutes. Details: [G07 driver fix](docs/tasks/G07_FEED_SCENARIO_FIX.md).
+
 2026-11-08 Third Acceptance Recheck and Resolution (T-Q1, T-Q2, T-S1, T-Q3):
 - Addressed all findings in `ACCEPTANCE_RECHECK_THIRD_2026-11-08.md`:
 - T-Q1 fixed: Defined global `ROOT` constant in `feed_warm_cache_continuous.py`, fixing `NameError` on Compose dataset check. Implemented upfront scale verification in `main()` before launching long 30s/60s load runs; `--formal-dataset` immediately rejects insufficient scale without wasteful long execution. Added unit tests for command construction and upfront rejection without Docker dependency.
