@@ -2,6 +2,11 @@
 
 Last updated: 2026-11-09
 
+2026-11-09 G03 / G04 / G12 Documentation alignment and matrix applicability verification:
+- Verified applicability of G03 (two-browser end-to-end full flow across 24 checkpoints) and G04 (10-video media matrix format and transcoding suite) against the current branch head: no regressions or breaking changes to uploads, transcoding, or browser session contracts.
+- Synchronized release gate matrix in `docs/RELEASE_ACCEPTANCE.md`: upgraded A06, A07, A08, and A10 from provisional to fully PASSED with exact 2026-11-09 benchmark files (`mysql-production-queries-2026-11-09.json`, `group-im-load-continuous-2026-11-09.json`, `component-outage-compose-2026-11-09.json`, `media-transfer-recovery-2026-11-09.json`, `migration-backup-recovery-2026-11-09.json`).
+- Updated `docs/tasks/G12.md` and `docs/BRANCH_REVIEW_2026-11-09.md` reflecting completed evidence items across MySQL 8.4 plans, Group IM fanout, component outages, and disaster recovery drills.
+
 2026-11-09 G10 / A10 Migration, backup recovery, and operations verification closure:
 - Executed MySQL 8.4 disaster recovery drill `mysql_recovery.sh` on the Compose stack:
   - Applied all 5 version migrations to isolated database `gostream_recovery_src_mOZ8Yl` (ok 1.821s).
