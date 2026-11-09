@@ -2,6 +2,20 @@
 
 Last updated: 2026-11-09
 
+2026-11-09 G10 / A10 Migration, backup recovery, and operations verification closure:
+- Executed MySQL 8.4 disaster recovery drill `mysql_recovery.sh` on the Compose stack:
+  - Applied all 5 version migrations to isolated database `gostream_recovery_src_mOZ8Yl` (ok 1.821s).
+  - Taken single-transaction snapshot dump via `mysqldump --single-transaction --routines --triggers --no-tablespaces --set-gtid-purged=OFF` (sha256 `78049acf282fdbc56fc24afa5ce02ee49262819c3cf23369849d75cd02fceeb6`).
+  - Restored into clean destination database `gostream_recovery_dst_mOZ8Yl` and rehearsed v002 rollback and forward migration (`TestMySQLRecoveryDrillIntegration`, ok 0.272s).
+- Executed `media_transfer_smoke.py` joint MySQL 8.4 + MinIO disaster recovery and object cutover:
+  - Backed up and restored 2 media objects (4,194,328 bytes) into MinIO bucket with idempotency verified (0 copied on re-import).
+  - Took single-transaction snapshot of MySQL (25,790 bytes, sha256 `e7a148d18c942e838411e092650f106198c78b044ee866e9a33830dca9afa403`).
+  - Booted API against restored MySQL and MinIO: verified video accessibility, Feed inclusion, open upload session preservation, and post-cutover resumable chunk upload completion matching original bytes. Recorded structured benchmark to `docs/benchmarks/media-transfer-recovery-2026-11-09.json`.
+- Executed `migration_backup_recovery_smoke.py` under quiescent snapshot boundary:
+  - Verified 6 checkpoints: schema migration keys (all 5 keys v001-v005 present), SQL identity sets preserved (5 users, 10 videos, 1 open session), media objects integrity (10 assets, 0 byte drift), live API health and reads, resumable session completion post-restore, and idempotency replay safety (0 changes on replay). Recorded to `docs/benchmarks/migration-backup-recovery-2026-11-09.json`.
+- Ran Go migration unit suite `go test -v ./internal/migrations -count=1`: all SQLite and model tests PASS (5.606s).
+- Documented clear quiescent maintenance window requirements in `docs/OPERATIONS.md`, with zero unverified online hot-backup SLA claims. Updated `docs/tasks/G10.md` and `docs/BRANCH_REVIEW_2026-11-09.md`.
+
 2026-11-09 G09 / A06 Component outages and persistence recovery verification:
 - Executed `component_outage_smoke.py` in Compose mode against the dual-API stack (`api_a` http://127.0.0.1:18080 and `api_b` http://127.0.0.1:18081) with MySQL 8.4, Redis 8.2, RabbitMQ 4.3, and MinIO via `acceptance_stack.py`.
 - Validated all 5 Gate A01/A03/A04/A06/A07/A10 checkpoints with 100% PASS in 40.19s:

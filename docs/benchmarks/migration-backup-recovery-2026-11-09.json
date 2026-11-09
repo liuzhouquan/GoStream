@@ -1,0 +1,30 @@
+{
+  "status": "PASS",
+  "mode": "sqlite",
+  "validation_scope": "sqlite_component_smoke",
+  "release_gate_passed": false,
+  "checkpoints": {
+    "schema_migration_keys": true,
+    "sql_identity_sets_preserved": true,
+    "media_objects_integrity": true,
+    "post_restore_live_api_health": true,
+    "resumable_upload_completion_after_restore": true,
+    "idempotency_and_migration_replay_safety": true
+  },
+  "metrics": {
+    "backup_duration_ms": 21.56,
+    "restore_duration_ms": 8.98,
+    "sql_backup_bytes": 348160,
+    "media_objects_bytes": 4194804,
+    "media_assets_count": 10,
+    "users_count": 5,
+    "videos_count": 10
+  },
+  "rpo_rto_spec": {
+    "measured_rpo": null,
+    "measured_rto_ms": null,
+    "file_restore_stage_ms": 8.98,
+    "scope": "File copy stage only; end-to-end RPO/RTO were not measured",
+    "online_backup_limitation": "Online backup without stop-write/coordinated snapshot is unsupported; quiescent boundary is mandatory for cross-system consistency."
+  }
+}
