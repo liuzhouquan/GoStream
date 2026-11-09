@@ -1,0 +1,102 @@
+{
+  "review_date": "2026-11-09",
+  "review_start_main": "aa976dbfadf5b7ec656063b5905d4cad33be5374",
+  "review_branch": "review/pending-branches-20261109",
+  "working_tree_contains_review_fixes": true,
+  "conclusion": "review_fixes_validated_final_release_not_accepted",
+  "checks": [
+    {
+      "label": "nov09-go",
+      "elapsed_seconds": 37.135,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "label": "nov09-final-proxy-diagnostics",
+      "elapsed_seconds": 41.841,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "label": "nov09-feed-direct-loopback",
+      "elapsed_seconds": 8.32,
+      "exit_code": 0,
+      "timed_out": false
+    }
+  ],
+  "diagnostic_tests_passed": 103,
+  "diagnostic_unittest_seconds": 39.862,
+  "skipped_go_test_events": 54,
+  "static_checks_exit_code": 0,
+  "smoke": {
+    "mode": "sqlite",
+    "status": "PASS",
+    "validation_scope": "component_smoke",
+    "release_gate_passed": false,
+    "acceptance_scope": "G07_warm_cache_only",
+    "full_a04_accepted": false,
+    "measured_requests": 4381,
+    "coverage": {
+      "10:following": [
+        1,
+        2,
+        3
+      ],
+      "10:following_deep": [
+        1,
+        2,
+        3
+      ],
+      "10:recommend_logged_in": [
+        1,
+        2,
+        3
+      ],
+      "10:hot": [
+        1,
+        2,
+        3
+      ],
+      "20:following": [
+        1,
+        2,
+        3
+      ],
+      "20:following_deep": [
+        1,
+        2,
+        3
+      ],
+      "20:recommend_logged_in": [
+        1,
+        2,
+        3
+      ],
+      "20:hot": [
+        1,
+        2,
+        3
+      ]
+    }
+  },
+  "failed_runs_preserved": [
+    {
+      "label": "nov09-feed-smoke-timing",
+      "elapsed_seconds": 23.238,
+      "exit_code": 1
+    },
+    {
+      "label": "nov09-feed-smoke-isolated-timing",
+      "elapsed_seconds": 21.572,
+      "exit_code": 1
+    },
+    {
+      "label": "nov09-feed-network-probe",
+      "elapsed_seconds": 22.736,
+      "exit_code": 1
+    }
+  ],
+  "proxy_root_cause": "loopback urllib request used environment HTTP proxy; verified by per-port TCP probe and real HTTP regression; only loopback routing changed",
+  "formal_production_scale_benchmark_run": false,
+  "remote_ci": "pending integration PR; authoritative status must be read from GitHub"
+}

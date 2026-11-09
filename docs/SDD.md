@@ -1,6 +1,8 @@
 # GoStream 求职展示版 SDD 与开发任务清单
 
-更新时间：2026-11-08。目标版本：`v1.0.0`。本文件是后续 coding agent 的执行入口；产品边界见 [DELIVERY_SCOPE](DELIVERY_SCOPE.md)，验收门槛见 [TEST_STANDARD](TEST_STANDARD.md)，历史证据见 [PROGRESS](../PROGRESS.md)。SDD 在这里指以明确规格、任务和验证证据驱动开发。
+更新时间：2026-11-09。目标版本：`v1.0.0`。本文件是后续 coding agent 的执行入口；产品边界见 [DELIVERY_SCOPE](DELIVERY_SCOPE.md)，验收门槛见 [TEST_STANDARD](TEST_STANDARD.md)，历史证据见 [PROGRESS](../PROGRESS.md)。SDD 在这里指以明确规格、任务和验证证据驱动开发。
+
+> 2026-11-09 集成入口：分支分类、正式夹具保护与 loopback 代理超时修复、真实验证及剩余可执行清单见 [本轮审查](BRANCH_REVIEW_2026-11-09.md)。以下历史测试数量/本地与远程状态属于其记录时点；最终 CI 与合并状态以集成 PR 为准。正式规模 G06/G07、G08/G09 同版业务证据、G10 恢复量测仍不得提前勾选。
 
 
 > 2026-11-08 验收复核与状态更新：针对 2026-11-08 独立复核发现的验收判定假阳性（R1/R2）与停机保护/凭据脱敏缺陷（R3/R4），已完成代码与诊断测试修复并合入 main。当前全量单元测试、编译、静态检查及 87 项诊断测试全部通过。

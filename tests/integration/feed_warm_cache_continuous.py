@@ -30,6 +30,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
 from datetime import datetime, timezone, timedelta
 import json
+import ipaddress
 import os
 from pathlib import Path
 import random
@@ -45,13 +46,28 @@ import threading
 import time
 import urllib.parse
 from urllib.error import HTTPError
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests/integration"))
 
 from launcher_lifecycle import cleanup_on_interrupt
 from acceptance_config import resolve_acceptance_target
+
+
+# Local acceptance traffic must not queue behind a developer's outbound proxy.
+_DIRECT_API_OPENER = build_opener(ProxyHandler({}))
+
+
+def open_api_request(request: Request, timeout: float):
+    host = urllib.parse.urlsplit(request.full_url).hostname or ""
+    loopback = host.lower() == "localhost"
+    try:
+        loopback = loopback or ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        pass
+    opener = _DIRECT_API_OPENER.open if loopback else urlopen
+    return opener(request, timeout=timeout)
 
 
 def free_port() -> int:
@@ -118,7 +134,7 @@ def call_api(base: str, path: str, method: str = "GET", token: str = "", body: b
     req = Request(base + path, data=body, headers=headers, method=method)
     t0 = time.monotonic()
     try:
-        with urlopen(req, timeout=15) as resp:
+        with open_api_request(req, timeout=15) as resp:
             data = resp.read()
             elapsed_ms = (time.monotonic() - t0) * 1000
             ct = resp.headers.get_content_type()
@@ -148,7 +164,7 @@ def wait_url_ready(url: str, timeout: float = 15.0):
     while time.monotonic() - start < timeout:
         try:
             req = Request(url + "/ready", method="GET")
-            with urlopen(req, timeout=1) as resp:
+            with open_api_request(req, timeout=1) as resp:
                 if resp.status == 200:
                     return
         except Exception:
@@ -387,7 +403,7 @@ def run_feed_load_scenarios(base_urls: list[str], viewer_token: str, following_c
 def parse_prometheus_metrics(base_url: str) -> dict:
     try:
         req = Request(base_url + "/metrics", method="GET")
-        with urlopen(req, timeout=3) as resp:
+        with open_api_request(req, timeout=3) as resp:
             text = resp.read().decode("utf-8", errors="replace")
     except Exception:
         return {}
@@ -714,6 +730,8 @@ def main():
         "duration_seconds": args.duration_seconds,
         "concurrency": args.concurrency,
         "rounds_count": args.rounds,
+        "acceptance_scope": "G07_warm_cache_only",
+        "full_a04_accepted": False,
     }
 
     def write_rejection(scope: str, unverified: list[str]) -> int:
@@ -755,8 +773,9 @@ def main():
                         f"videos={scale_info.get('videos', 0)}, follows={scale_info.get('follows', 0)}, interactions={scale_info.get('interactions', 0)}, "
                         f"has_high_author={scale_info.get('has_high_author', False)}, has_low_author={scale_info.get('has_low_author', False)}"
                     ])
-            print(f"Seeding benchmark feed fixture into Compose MySQL (addr: {mysql_addr})...")
-            seed_mysql_feed_db(mysql_addr)
+            else:
+                print(f"Seeding smoke feed fixture into Compose MySQL (addr: {mysql_addr})...")
+                seed_mysql_feed_db(mysql_addr)
         else:
             temp_dir = stack.enter_context(tempfile.TemporaryDirectory(prefix="gostream_warm_feed_"))
             db_path = os.path.join(temp_dir, "feed.db")
@@ -851,6 +870,14 @@ def main():
             tracked_pids=tracked_pids,
         )
         report.update(results)
+        if mode == "compose" and args.formal_dataset:
+            report["dataset_scale_before_load"] = scale_info
+            scale_info = check_dataset_scale(mode, mysql_addr=mysql_addr)
+            report["dataset_scale"] = scale_info
+            if not scale_info.get("meets_formal_scale", False):
+                return write_rejection("rejected_scale_changed", [
+                    "formal dataset no longer meets scale requirements after the measured load"
+                ])
         all_passed = bool(report.get("checkpoints")) and all(report["checkpoints"].values())
         report["status"] = "PASS" if all_passed else "FAIL"
 

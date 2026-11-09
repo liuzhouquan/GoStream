@@ -45,3 +45,12 @@ PATH=/usr/local/go/bin:$PATH python3 tools/task_timing.py run \
 正式配置必须由隔离 acceptance_stack 提供两个 API、真实 MySQL/Redis 及相应环境变量，并预先准备满足 TEST_STANDARD 的正式数据（现有 120 视频种子本身不够）。再以 `--mode compose --formal-dataset --warmup-seconds 30 --duration-seconds 60 --rounds 3` 执行，报告输出到新的路径。小数据会在负载执行前拒绝正式模式。
 
 24 × (30 秒预热 + 60 秒测量) = **至少 2,160 秒，即约 36 分钟**，另加构建、夹具、基线请求与媒体失效检查。预先安排总超时（例如 2,700 秒，加上实际构建预算），保留心跳，禁止把旧版三场景的耗时作为当前上限。本轮未运行这项正式长测，G07/A04 不因此勾选完成。
+
+
+## 2026-11-09 合并复核补充
+
+`bd3894f` 已由 `aa976db` 合入本地主线。独立复核发现正式预检成功后仍调用小夹具种子，可能重置 benchmark 账号、关注和视频，却继续引用旧规模。修复后正式 Compose 模式完全跳过小种子，使用预置正式夹具；负载后重新核对规模并记录 `dataset_scale_before_load` 与当前 `dataset_scale`，下降时返回 `rejected_scale_changed`。普通 smoke 仍可创建小夹具。
+
+正式夹具必须预先提供 `bench_viewer_prod` 测试账号及其既定测试密码，并保证该账号具有足够的关注页与兴趣互动；没有账号、游标或完整页面时真实矩阵会失败，不会自动改写正式数据来迁就测试。
+
+报告明确 `acceptance_scope=G07_warm_cache_only`、`full_a04_accepted=false`。本驱动负责暖缓存持续负载子项，冷缓存与无缓存混合推拉收益等完整 A04 证据必须分别关联，不能把本驱动的正式通过等同全部 A04 签收。剩余任务见 `docs/BRANCH_REVIEW_2026-11-09.md`。

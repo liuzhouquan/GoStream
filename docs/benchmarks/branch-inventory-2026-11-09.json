@@ -1,0 +1,818 @@
+{
+  "checked_main": "aa976dbfadf5b7ec656063b5905d4cad33be5374",
+  "candidate_commit": "bd3894f731f69150b63bbe2705a747af45565e52",
+  "rows": [
+    {
+      "ref": "chore/development-timing",
+      "commit": "0d1f2f0ab66431ac5f113ddb3b81d20f064bec3a",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "docs/a04-feed-stage-breakdown-results",
+      "commit": "26f79e1f0119f3c8abf8bf232e43cd864a7f5374",
+      "status": "included_in_main",
+      "merged_prs": [
+        48
+      ]
+    },
+    {
+      "ref": "docs/a04-observed-histogram-diagnosis",
+      "commit": "6ce9f8def269e66a10f38309879eab03e00fbbfc",
+      "status": "included_in_main",
+      "merged_prs": [
+        46
+      ]
+    },
+    {
+      "ref": "docs/a04-server-latency-results",
+      "commit": "8478aada6afd52d6fe51f7fb05b09273a08a5125",
+      "status": "included_in_main",
+      "merged_prs": [
+        32
+      ]
+    },
+    {
+      "ref": "docs/a04-stage-run-results",
+      "commit": "b1e375fc36f604ff35603b4eacf2b684444dea5c",
+      "status": "included_in_main",
+      "merged_prs": [
+        34
+      ]
+    },
+    {
+      "ref": "docs/p2-03-merge-record",
+      "commit": "4ad9fd9fcdf17f629047be98496281248a3a1cde",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        12
+      ]
+    },
+    {
+      "ref": "feat/device-ack-ranges",
+      "commit": "3f97e4cb6a1a0d5782c03ef73444c3b0af8e1f3c",
+      "status": "included_in_main",
+      "merged_prs": [
+        19
+      ]
+    },
+    {
+      "ref": "feat/im-device-lifecycle",
+      "commit": "da64f7bdcef69b859bb62568837122d5abca5491",
+      "status": "superseded_do_not_merge",
+      "merged_prs": []
+    },
+    {
+      "ref": "feat/im-group-history-semantics",
+      "commit": "57308d76eb9a8430df65bebe38e4010488c57cab",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "feat/im-presence-lifecycle",
+      "commit": "b723f73260a8e5faa9a9909f8643537923ee9630",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "feat/openapi-contract-parity",
+      "commit": "91a914c579ad52d9f30f681d85108b0d23803ee9",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "feat/openapi-spec",
+      "commit": "bfde3b19025521466cfdf1fa1fbcc2c81ed10fd5",
+      "status": "superseded_do_not_merge",
+      "merged_prs": []
+    },
+    {
+      "ref": "feat/rabbitmq-notification-delivery",
+      "commit": "c0b82c282a51727e396a5f2039d83cabb355e2a7",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        14
+      ]
+    },
+    {
+      "ref": "fix/a04-idempotent-histogram-rows",
+      "commit": "cdbfaea47c3c1f3dc9840663ffe384affed7e764",
+      "status": "included_in_main",
+      "merged_prs": [
+        44
+      ]
+    },
+    {
+      "ref": "fix/a04-prepared-statement-diagnostics",
+      "commit": "8c9d85d4b18816feed8c4a0c9dd95045289ccd27",
+      "status": "included_in_main",
+      "merged_prs": [
+        36
+      ]
+    },
+    {
+      "ref": "fix/account-storage-errors",
+      "commit": "3dad1d64728fa2138869b14473c89d6abf4404cf",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        8
+      ]
+    },
+    {
+      "ref": "fix/group-commit-order",
+      "commit": "29384596d8fb9b1578448a486a5a613c86f8f307",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        16
+      ]
+    },
+    {
+      "ref": "fix/group-member-revocation-race",
+      "commit": "fac7417a7ee4ef36f285bb32b4c39f2e2f24c5ae",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "fix/owned-lookup-storage-errors",
+      "commit": "f1203b4df26437df03d7e5b4d06c2c62fd4b4aa0",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        9
+      ]
+    },
+    {
+      "ref": "fix/r1-r2-acceptance-predicates",
+      "commit": "bac541704659e395572cb3799b2726b4c04b7c2d",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "fix/upload-completion-lease",
+      "commit": "ee7c745efe71daaa451b810f50cb6ddfbcdcbc37",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        13
+      ]
+    },
+    {
+      "ref": "fix/web-action-counts",
+      "commit": "9c055058bee8a72fc38ede4448c5298178f082aa",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        10
+      ]
+    },
+    {
+      "ref": "fix/web-group-sync-ack",
+      "commit": "a8951e01ea7e2cbf521d26ec02199a6437f997dc",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "fix/web-stored-session-recovery",
+      "commit": "fbaed77f21871f4052dad4347eec730f372bdd59",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        11
+      ]
+    },
+    {
+      "ref": "main",
+      "commit": "aa976dbfadf5b7ec656063b5905d4cad33be5374",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "perf/a04-db-diagnostics",
+      "commit": "16e865eedf6e0f5077f10e573db7ae95fa7ac3ad",
+      "status": "included_in_main",
+      "merged_prs": [
+        35
+      ]
+    },
+    {
+      "ref": "perf/a04-db-pool-reuse",
+      "commit": "ec5d808f3ba8b537726f9e5047d2e871e3ce75e9",
+      "status": "included_in_main",
+      "merged_prs": [
+        37
+      ]
+    },
+    {
+      "ref": "perf/a04-diagnostic-error-context",
+      "commit": "bee8da684fe8b1ff74eb101fc5d25acb6e3ab069",
+      "status": "included_in_main",
+      "merged_prs": [
+        40
+      ]
+    },
+    {
+      "ref": "perf/a04-feed-stage-breakdown",
+      "commit": "bb28dd158fa12674c5942d9861e822ba647f0320",
+      "status": "included_in_main",
+      "merged_prs": [
+        47
+      ]
+    },
+    {
+      "ref": "perf/a04-following-query-plan",
+      "commit": "0d7c26b9b409a4a7e7fb1cbca18b08a18dc69b35",
+      "status": "included_in_main",
+      "merged_prs": [
+        55
+      ]
+    },
+    {
+      "ref": "perf/a04-observed-histogram-p95",
+      "commit": "7f1d6e965c82c15b1f7c505d3c2697ecf7ab2090",
+      "status": "included_in_main",
+      "merged_prs": [
+        45
+      ]
+    },
+    {
+      "ref": "perf/a04-route-histograms",
+      "commit": "0804ca397f6ce35b00d9eba2f2626798192d1ae0",
+      "status": "included_in_main",
+      "merged_prs": [
+        31
+      ]
+    },
+    {
+      "ref": "perf/device-ack-query",
+      "commit": "15427f349117ca32ae0db93fe48c328303669522",
+      "status": "included_in_main",
+      "merged_prs": [
+        20
+      ]
+    },
+    {
+      "ref": "perf/feed-a04-acceptance",
+      "commit": "d3ec0aba703fbe3017e5d69e8fbcc0c469be561d",
+      "status": "included_in_main",
+      "merged_prs": [
+        25
+      ]
+    },
+    {
+      "ref": "perf/feed-duration-driver",
+      "commit": "68abecba087373c53f30ba7ed7bc1dd74dd86421",
+      "status": "included_in_main",
+      "merged_prs": [
+        24
+      ]
+    },
+    {
+      "ref": "perf/feed-hybrid-optimization",
+      "commit": "4e5252a36d93e236d32052df1e1a40ecfe2dcd43",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "perf/feed-stage-timing",
+      "commit": "1be6f9f9bf267882b019d94b30a017b860c7d88a",
+      "status": "included_in_main",
+      "merged_prs": [
+        33
+      ]
+    },
+    {
+      "ref": "perf/feed-union-all",
+      "commit": "72d5ecc02657f0a9c944e98960a2fac75ce7baa4",
+      "status": "included_in_main",
+      "merged_prs": [
+        23
+      ]
+    },
+    {
+      "ref": "perf/hybrid-push-inbox-order",
+      "commit": "34bc39cea62433ed86849f22bd32823767faf645",
+      "status": "included_in_main",
+      "merged_prs": [
+        56
+      ]
+    },
+    {
+      "ref": "release/v1.0.0",
+      "commit": "163aa858e513e838163e9b61915eaf2bceb59952",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "release/v1.0.0-final-acceptance-closure",
+      "commit": "5d7d68768ef3f975c37c99fef9d3d79e0e6d9c26",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "review/pending-branches-20261105",
+      "commit": "5dd7b5bcde67de2e023fd42551f5823b4bd3b7be",
+      "status": "included_in_main",
+      "merged_prs": [
+        58
+      ]
+    },
+    {
+      "ref": "review/seven-branches",
+      "commit": "0b9ea8d6c0d17770889872e60f81e9bfbd5c1fa2",
+      "status": "included_in_main",
+      "merged_prs": [
+        17
+      ]
+    },
+    {
+      "ref": "review/ten-branches",
+      "commit": "c553000fa3fdd5cef0746282704f787804f9e382",
+      "status": "included_in_main",
+      "merged_prs": [
+        18
+      ]
+    },
+    {
+      "ref": "review/three-delivery-branches",
+      "commit": "56d8c3d814ba0a017fab29c62e7a25e7858f93dc",
+      "status": "included_in_main",
+      "merged_prs": [
+        22
+      ]
+    },
+    {
+      "ref": "test/broker-fault-boundaries",
+      "commit": "6f83e237c57245b1085b6bda9ad9274aaccc85e1",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/fault-consistency-scenarios",
+      "commit": "d36f7bdf17930c389a696bc348a8f02071569c70",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/feed-and-interaction-matrix",
+      "commit": "e5ed775290e2d5156d7b5df119715ba748b2659e",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/feed-redis-cache-recovery",
+      "commit": "759b51aa8fca83cd9609fc54308c11ff78627922",
+      "status": "included_in_main",
+      "merged_prs": [
+        57
+      ]
+    },
+    {
+      "ref": "test/final-delivery-acceptance",
+      "commit": "2fd45170c9e1b19a04d1b9fac90369c1416f0336",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/final-stack-launcher",
+      "commit": "92afef4dc14d92f7aa41924dc05ad7d2e641f458",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g02-acceptance-stack-closure",
+      "commit": "d0562295ca9dd633ce5dadc9613773bed590f954",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g03-browser-acceptance-closure",
+      "commit": "b971aa3d1d598691d27ce45ad8f70e7e890f0293",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g04-media-matrix-and-ten-videos",
+      "commit": "8e6ba1266d7cba8596338b28a42027c3b707bf67",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g04-media-matrix-closure",
+      "commit": "1b2092a7bf3c07e5debe02d5ea2e49a05509d5f5",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g05-interactions-notifications-security",
+      "commit": "90e6cdc26e1ed76437b9e5623d01e8a5fadb9cdd",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g05-interactions-security-closure",
+      "commit": "a9333d2bbf3c05645d9d495f83bb572560f67965",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g06-real-production-queries",
+      "commit": "b23d6c6564dbee368e5ab01f3dedec09ecd25d48",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g07-feed-warm-cache",
+      "commit": "c1df14653168c79433583f4d73cdf9938532aa32",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g07-feed-warm-cache-closure",
+      "commit": "e3599d539add945291acdc096f415f2839a4dcfe",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g08-group-im-fanout",
+      "commit": "e38ad00de98c120066c88a60e78f6f6d6331052f",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g08-group-im-fanout-closure",
+      "commit": "792529f90380645dfe2bb172c656e4f7ec5e133a",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g09-component-outages-persistence",
+      "commit": "a66913b49701a63b090ae1429e5f174fb418d228",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g09-component-outages-persistence-closure",
+      "commit": "abad5ee06c6457fce712306821347cb50cbb1649",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g10-migration-backup-recovery",
+      "commit": "8e39a22040053de5d3a4126e196945548cba49d4",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g10-migration-backup-recovery-closure",
+      "commit": "2000605f439472891492872c526edaf8d1188c04",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g11-openapi-docs-consistency",
+      "commit": "e6e0688583ad4dd652a45f3e1ceb468ee2fe642e",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/g11-openapi-docs-consistency-closure",
+      "commit": "ebe31849ba4a505f6712ef11263a7b996b7e9b25",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/im-concurrent-load",
+      "commit": "73214e65b38e15b0306b3756ecb012ef4fbdf1c0",
+      "status": "included_in_main",
+      "merged_prs": [
+        21
+      ]
+    },
+    {
+      "ref": "test/im-process-recovery",
+      "commit": "c214de796f441cc7f243840ce43af1a64bd89b69",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        15
+      ]
+    },
+    {
+      "ref": "test/media-matrix-and-storage-outage",
+      "commit": "9da28b02907e0c9749e3b23594991ff307687e2f",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/minio-outage-and-media-matrix",
+      "commit": "378e21a99daba143f1c9b05ee392ebeada9e84c3",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/query-plans-and-index-validation",
+      "commit": "d5acd5b9003d7662fe44258383984666ba2d69ce",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/rabbitmq-consumer-preack-process-kill",
+      "commit": "9bf2bff6f36c59f2433d3c18f60ba0bf938ac964",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/rabbitmq-fault-boundary",
+      "commit": "2d1a068664943c0a1ae473ff146a7217f6df22cb",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/rabbitmq-fault-windows",
+      "commit": "8383047c0997ea48bbd360c993567e1b180d5536",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/security-boundaries-and-permissions",
+      "commit": "ffeedc2917ed22a2d95a7f9af46539cc04077d02",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/startup-persistence-and-ready-semantics",
+      "commit": "4dfdedb72ddd1469dabcd60b5ac0343eaccfc628",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/web-full-flow-compose",
+      "commit": "c99afaa596b84b5020408feab7fc8d799be29ce3",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "test/web-full-flow-e2e",
+      "commit": "0a9dd61d7b6c159ed58adc3bf59e1c8089b4eb22",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "origin/docs/a04-feed-stage-breakdown-results",
+      "commit": "26f79e1f0119f3c8abf8bf232e43cd864a7f5374",
+      "status": "included_in_main",
+      "merged_prs": [
+        48
+      ]
+    },
+    {
+      "ref": "origin/docs/a04-observed-histogram-diagnosis",
+      "commit": "6ce9f8def269e66a10f38309879eab03e00fbbfc",
+      "status": "included_in_main",
+      "merged_prs": [
+        46
+      ]
+    },
+    {
+      "ref": "origin/docs/a04-server-latency-results",
+      "commit": "8478aada6afd52d6fe51f7fb05b09273a08a5125",
+      "status": "included_in_main",
+      "merged_prs": [
+        32
+      ]
+    },
+    {
+      "ref": "origin/docs/p2-03-merge-record",
+      "commit": "4ad9fd9fcdf17f629047be98496281248a3a1cde",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        12
+      ]
+    },
+    {
+      "ref": "origin/feat/device-ack-ranges",
+      "commit": "3f97e4cb6a1a0d5782c03ef73444c3b0af8e1f3c",
+      "status": "included_in_main",
+      "merged_prs": [
+        19
+      ]
+    },
+    {
+      "ref": "origin/feat/rabbitmq-notification-delivery",
+      "commit": "c0b82c282a51727e396a5f2039d83cabb355e2a7",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        14
+      ]
+    },
+    {
+      "ref": "origin/fix/a04-idempotent-histogram-rows",
+      "commit": "cdbfaea47c3c1f3dc9840663ffe384affed7e764",
+      "status": "included_in_main",
+      "merged_prs": [
+        44
+      ]
+    },
+    {
+      "ref": "origin/fix/account-storage-errors",
+      "commit": "3dad1d64728fa2138869b14473c89d6abf4404cf",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        8
+      ]
+    },
+    {
+      "ref": "origin/fix/group-commit-order",
+      "commit": "29384596d8fb9b1578448a486a5a613c86f8f307",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        16
+      ]
+    },
+    {
+      "ref": "origin/fix/owned-lookup-storage-errors",
+      "commit": "f1203b4df26437df03d7e5b4d06c2c62fd4b4aa0",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        9
+      ]
+    },
+    {
+      "ref": "origin/fix/upload-completion-lease",
+      "commit": "ee7c745efe71daaa451b810f50cb6ddfbcdcbc37",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        13
+      ]
+    },
+    {
+      "ref": "origin/fix/web-action-counts",
+      "commit": "9c055058bee8a72fc38ede4448c5298178f082aa",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        10
+      ]
+    },
+    {
+      "ref": "origin/fix/web-stored-session-recovery",
+      "commit": "fbaed77f21871f4052dad4347eec730f372bdd59",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        11
+      ]
+    },
+    {
+      "ref": "origin/main",
+      "commit": "c2e3376e3115784bd13654c048597e7323d2c320",
+      "status": "included_in_main",
+      "merged_prs": []
+    },
+    {
+      "ref": "origin/perf/a04-db-pool-reuse",
+      "commit": "ec5d808f3ba8b537726f9e5047d2e871e3ce75e9",
+      "status": "included_in_main",
+      "merged_prs": [
+        37
+      ]
+    },
+    {
+      "ref": "origin/perf/a04-diagnostic-error-context",
+      "commit": "bee8da684fe8b1ff74eb101fc5d25acb6e3ab069",
+      "status": "included_in_main",
+      "merged_prs": [
+        40
+      ]
+    },
+    {
+      "ref": "origin/perf/a04-feed-stage-breakdown",
+      "commit": "bb28dd158fa12674c5942d9861e822ba647f0320",
+      "status": "included_in_main",
+      "merged_prs": [
+        47
+      ]
+    },
+    {
+      "ref": "origin/perf/a04-following-query-plan",
+      "commit": "0d7c26b9b409a4a7e7fb1cbca18b08a18dc69b35",
+      "status": "included_in_main",
+      "merged_prs": [
+        55
+      ]
+    },
+    {
+      "ref": "origin/perf/a04-observed-histogram-p95",
+      "commit": "7f1d6e965c82c15b1f7c505d3c2697ecf7ab2090",
+      "status": "included_in_main",
+      "merged_prs": [
+        45
+      ]
+    },
+    {
+      "ref": "origin/perf/a04-route-histograms",
+      "commit": "0804ca397f6ce35b00d9eba2f2626798192d1ae0",
+      "status": "included_in_main",
+      "merged_prs": [
+        31
+      ]
+    },
+    {
+      "ref": "origin/perf/device-ack-query",
+      "commit": "15427f349117ca32ae0db93fe48c328303669522",
+      "status": "included_in_main",
+      "merged_prs": [
+        20
+      ]
+    },
+    {
+      "ref": "origin/perf/feed-a04-acceptance",
+      "commit": "d3ec0aba703fbe3017e5d69e8fbcc0c469be561d",
+      "status": "included_in_main",
+      "merged_prs": [
+        25
+      ]
+    },
+    {
+      "ref": "origin/perf/feed-duration-driver",
+      "commit": "68abecba087373c53f30ba7ed7bc1dd74dd86421",
+      "status": "included_in_main",
+      "merged_prs": [
+        24
+      ]
+    },
+    {
+      "ref": "origin/perf/feed-stage-timing",
+      "commit": "1be6f9f9bf267882b019d94b30a017b860c7d88a",
+      "status": "included_in_main",
+      "merged_prs": [
+        33
+      ]
+    },
+    {
+      "ref": "origin/perf/feed-union-all",
+      "commit": "72d5ecc02657f0a9c944e98960a2fac75ce7baa4",
+      "status": "included_in_main",
+      "merged_prs": [
+        23
+      ]
+    },
+    {
+      "ref": "origin/perf/hybrid-push-inbox-order",
+      "commit": "34bc39cea62433ed86849f22bd32823767faf645",
+      "status": "included_in_main",
+      "merged_prs": [
+        56
+      ]
+    },
+    {
+      "ref": "origin/review/pending-branches-20261105",
+      "commit": "5dd7b5bcde67de2e023fd42551f5823b4bd3b7be",
+      "status": "included_in_main",
+      "merged_prs": [
+        58
+      ]
+    },
+    {
+      "ref": "origin/review/seven-branches",
+      "commit": "0b9ea8d6c0d17770889872e60f81e9bfbd5c1fa2",
+      "status": "included_in_main",
+      "merged_prs": [
+        17
+      ]
+    },
+    {
+      "ref": "origin/review/ten-branches",
+      "commit": "c553000fa3fdd5cef0746282704f787804f9e382",
+      "status": "included_in_main",
+      "merged_prs": [
+        18
+      ]
+    },
+    {
+      "ref": "origin/review/three-delivery-branches",
+      "commit": "56d8c3d814ba0a017fab29c62e7a25e7858f93dc",
+      "status": "included_in_main",
+      "merged_prs": [
+        22
+      ]
+    },
+    {
+      "ref": "origin/test/feed-redis-cache-recovery",
+      "commit": "759b51aa8fca83cd9609fc54308c11ff78627922",
+      "status": "included_in_main",
+      "merged_prs": [
+        57
+      ]
+    },
+    {
+      "ref": "origin/test/im-concurrent-load",
+      "commit": "73214e65b38e15b0306b3756ecb012ef4fbdf1c0",
+      "status": "included_in_main",
+      "merged_prs": [
+        21
+      ]
+    },
+    {
+      "ref": "origin/test/im-process-recovery",
+      "commit": "c214de796f441cc7f243840ce43af1a64bd89b69",
+      "status": "previous_squash_merge_verified",
+      "merged_prs": [
+        15
+      ]
+    }
+  ]
+}

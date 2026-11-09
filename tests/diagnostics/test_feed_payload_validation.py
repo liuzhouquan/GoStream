@@ -198,3 +198,69 @@ class FeedPayloadValidationTest(unittest.TestCase):
                 self.assertEqual(rep["status"], "FAIL")
                 self.assertEqual(rep["validation_scope"], "rejected_insufficient_scale")
                 self.assertFalse(rep["release_gate_passed"])
+
+    def test_formal_compose_preserves_prepared_dataset_without_smoke_seed(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            report_file = str(Path(directory) / "formal.json")
+            with patch.object(continuous, "resolve_acceptance_target", return_value=("compose", "http://a", "http://b")), \
+                 patch.object(continuous, "check_dataset_scale", return_value={"meets_formal_scale": True}), \
+                 patch.object(continuous, "seed_mysql_feed_db") as seed, \
+                 patch.object(continuous, "run_continuous_feed_matrix", side_effect=RuntimeError("matrix reached")) as matrix, \
+                 patch.object(sys, "argv", ["feed", "--mode", "compose", "--formal-dataset", "--report", report_file]):
+                with self.assertRaisesRegex(RuntimeError, "matrix reached"):
+                    continuous.main()
+                matrix.assert_called_once()
+                seed.assert_not_called()
+
+    def test_formal_compose_rechecks_scale_after_load_before_signoff(self):
+        import tempfile
+        import json
+        with tempfile.TemporaryDirectory() as directory:
+            report_file = str(Path(directory) / "formal.json")
+            with patch.object(continuous, "resolve_acceptance_target", return_value=("compose", "http://a", "http://b")), \
+                 patch.object(continuous, "check_dataset_scale", side_effect=[
+                     {"users": 2500, "published_videos": 21000, "meets_formal_scale": True},
+                     {"users": 10, "published_videos": 120, "meets_formal_scale": False},
+                 ]) as scale, \
+                 patch.object(continuous, "seed_mysql_feed_db") as seed, \
+                 patch.object(continuous, "run_continuous_feed_matrix", return_value={"checkpoints": {"matrix": True}}), \
+                 patch.object(sys, "argv", ["feed", "--mode", "compose", "--formal-dataset", "--report", report_file]):
+                self.assertEqual(continuous.main(), 1)
+            seed.assert_not_called()
+            self.assertEqual(scale.call_count, 2)
+            result = json.loads(Path(report_file).read_text())
+            self.assertFalse(result["release_gate_passed"])
+            self.assertEqual(result["validation_scope"], "rejected_scale_changed")
+            self.assertEqual(result["dataset_scale_before_load"]["users"], 2500)
+            self.assertEqual(result["dataset_scale"]["users"], 10)
+
+    def test_loopback_api_requests_ignore_environment_proxy(self):
+        import os
+        import threading
+        import urllib.request
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = b'{"status":"ready"}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            def log_message(self, *args):
+                pass
+        with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
+            worker = threading.Thread(target=server.serve_forever, daemon=True)
+            worker.start()
+            try:
+                # Port zero is never a usable proxy endpoint: success must come from the API.
+                proxies = {"http_proxy": "http://127.0.0.1:0", "HTTP_PROXY": "http://127.0.0.1:0",
+                           "all_proxy": "", "ALL_PROXY": "", "no_proxy": "", "NO_PROXY": ""}
+                with patch.dict(os.environ, proxies), patch.object(urllib.request, "_opener", None):
+                    code, data, _ = continuous.call_api(f"http://127.0.0.1:{server.server_port}", "/ready")
+                self.assertEqual(code, 200)
+                self.assertEqual(data["status"], "ready")
+            finally:
+                server.shutdown()
+                worker.join(timeout=2)
