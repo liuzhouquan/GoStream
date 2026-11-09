@@ -2,6 +2,17 @@
 
 Last updated: 2026-11-09
 
+2026-11-09 G09 / A06 Component outages and persistence recovery verification:
+- Executed `component_outage_smoke.py` in Compose mode against the dual-API stack (`api_a` http://127.0.0.1:18080 and `api_b` http://127.0.0.1:18081) with MySQL 8.4, Redis 8.2, RabbitMQ 4.3, and MinIO via `acceptance_stack.py`.
+- Validated all 5 Gate A01/A03/A04/A06/A07/A10 checkpoints with 100% PASS in 40.19s:
+  - Checkpoint 1 (Health & ready semantics): `/health` strictly reflects process liveness (HTTP 200 OK); `/ready` strictly reflects MySQL availability; external dependencies outage never causes false `/ready` degradation.
+  - Checkpoint 2 (Redis outage & recovery): Feed automatically falls back to SQL query (HTTP 200 OK); IM WebSocket direct message persists atomically in MySQL and sender receives ACK; recipient retrieves message from SQL history and unread count; Redis recovers and warm cache re-engages.
+  - Checkpoint 3 (RabbitMQ outage & recovery): Like and comment actions commit atomically to MySQL; Outbox events (`notification.created`, `published_at IS NULL`) safely retain in MySQL without loss; RabbitMQ recovers and Outbox worker drains events to unique broker delivery tasks (`broker-delivery:notification:*`, notification IDs [3, 4]), preventing duplicate deliveries.
+  - Checkpoint 4 (MinIO outage & recovery): Upload chunk returns 500/503 storage unavailable while strictly maintaining zero orphan rows in `upload_chunks` and `media_assets`; MinIO recovers, chunk re-upload succeeds on API B, and cross-instance retry on API A completes idempotently with identical URL and exactly 1 new media asset.
+  - Checkpoint 5 (API restart & lease recovery): Dual API instances restart; stateless JWT remains valid; persistent entities remain intact (like count = 1); expired worker lease reclamation verified.
+- Executed Go native `TestMySQLComponentOutage_AllGates` with rollback transaction on MySQL 8.4: `MySQL_HealthAndReadySemantics`, `MySQL_RabbitMQOutboxPersistenceAndRecovery`, and `MySQL_WorkerRestartAndLeaseReclaim` all passed (3.671s) with zero database residue.
+- Recorded structured evidence to `docs/benchmarks/component-outage-compose-2026-11-09.json` and updated `docs/tasks/G09.md` and `docs/BRANCH_REVIEW_2026-11-09.md`.
+
 2026-11-09 G08 / A07 Group IM 20-client 1,000-message continuous verification closure:
 - Executed `group_im_smoke.py` under standard duration mode against the Compose dual-API stack (`api_a` http://127.0.0.1:18080 and `api_b` http://127.0.0.1:18081 with Redis 8.2 and MySQL 8.4) via `acceptance_stack.py`.
 - Verified 20 concurrent WebSocket clients across dual APIs sending 1,000 messages (50 msgs/client), generating exactly 19,000 deliveries (100% reception) with zero duplicate deliveries and zero duplicate ACKs.

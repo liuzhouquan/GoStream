@@ -1,0 +1,21 @@
+{
+  "status": "PASS",
+  "release_gate_passed": true,
+  "mode": "compose",
+  "endpoints": {
+    "api_a": "http://127.0.0.1:18080",
+    "api_b": "http://127.0.0.1:18081"
+  },
+  "checkpoints": {
+    "health_ready_semantics": true,
+    "redis_outage_fallback_and_recovery": true,
+    "rabbitmq_outage_outbox_retention_and_delivery": true,
+    "minio_outage_isolation_and_recovery": true,
+    "api_restart_and_lease_recovery": true
+  },
+  "broker_notification_ids": [
+    3,
+    4
+  ],
+  "elapsed_seconds": 40.19
+}
