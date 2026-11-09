@@ -24,6 +24,7 @@ Corresponds to SDD.md Task G07 and Acceptance Gate A04:
 from __future__ import annotations
 
 import argparse
+import base64
 import bcrypt
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -229,13 +230,30 @@ def populate_benchmark_feed_db(db_path: str):
 
 
 def run_load_burst(base_urls: list[str], path: str, token: str, concurrency: int, duration_sec: float) -> dict:
+    is_recommend = urllib.parse.parse_qs(urllib.parse.urlsplit(path).query).get("scene") == ["recommend"]
+
     def signature(data):
         if not isinstance(data, dict) or not isinstance(data.get("items"), list) or len(data["items"]) != 20:
             raise ValueError("smoke fixture requires a complete 20-video page")
         ids = tuple(item.get("id") for item in data["items"] if isinstance(item, dict))
         if len(ids) != 20 or any(type(item) is not int or item <= 0 for item in ids) or len(set(ids)) != 20:
             raise ValueError("invalid or duplicated video identities")
-        return ids, data.get("next_cursor")
+        cursor = data.get("next_cursor")
+        if is_recommend:
+            if not isinstance(cursor, str) or not cursor:
+                raise ValueError("recommendation fixture requires a continuation cursor")
+            try:
+                decoded = json.loads(base64.b64decode(cursor + "=" * (-len(cursor) % 4), altchars=b"-_", validate=True))
+                if (not isinstance(decoded, dict) or decoded.get("v") != "recommend"
+                        or decoded.get("i") != ids[-1] or not isinstance(decoded.get("a"), int)
+                        or decoded["a"] <= 0):
+                    raise ValueError("recommendation cursor does not match page")
+                # Every first-page request has a new time anchor; other cursor fields remain checked.
+                decoded.pop("a")
+                cursor = decoded
+            except (ValueError, TypeError) as error:
+                raise ValueError("invalid recommendation cursor") from error
+        return ids, cursor
 
     code, baseline, _ = call_api(base_urls[0], path, "GET", token=token)
     if code != 200:
@@ -300,6 +318,72 @@ def run_load_burst(base_urls: list[str], path: str, token: str, concurrency: int
     }
 
 
+REQUIRED_FEED_SCENARIOS = ("following", "following_deep", "recommend_logged_in", "hot")
+
+
+def feed_load_coverage_issues(records: list[dict]) -> list[str]:
+    """Fail closed unless both concurrency levels contain three valid rounds per scenario."""
+    issues = []
+    for concurrency in (10, 20):
+        for scene in REQUIRED_FEED_SCENARIOS:
+            group = [r for r in records if r.get("concurrency") == concurrency and r.get("scene") == scene]
+            label = f"{scene} at concurrency {concurrency}"
+            numbers = [r.get("round") for r in group]
+            if not {1, 2, 3}.issubset(numbers) or len(numbers) != len(set(numbers)):
+                issues.append(f"{label}: at least three distinct measured rounds required")
+            for record in group:
+                try:
+                    valid = (
+                        record["successes"] > 0 and record["failures"] == 0
+                        and record["total_requests"] == record["successes"]
+                        and record["warmup_duration_sec"] >= 30.0
+                        and record["duration_sec"] >= 60.0
+                        and 0 <= record["p95_ms"] <= 200.0
+                        and 0 <= record["p99_ms"] <= 500.0
+                    )
+                except (KeyError, TypeError):
+                    valid = False
+                if not valid:
+                    issues.append(f"{label} round {record.get('round')}: samples, timing or latency gate not met")
+    return issues
+
+
+def run_feed_load_scenarios(base_urls: list[str], viewer_token: str, following_cursor: str,
+                            warmup_sec: float, test_sec: float, rounds: int) -> list[dict]:
+    """Measure every required scenario at both concurrency levels, repeating each round."""
+    if not viewer_token or not isinstance(following_cursor, str) or not following_cursor:
+        raise ValueError("Feed load requires a logged-in viewer and a following deep-page cursor")
+    if warmup_sec < 0 or test_sec <= 0 or rounds < 3:
+        raise ValueError("Feed load requires nonnegative warmup, positive duration and at least 3 rounds")
+    scenarios = (
+        ("following", "/api/feed?scene=following&limit=20", viewer_token),
+        ("following_deep", "/api/feed?" + urllib.parse.urlencode({
+            "scene": "following", "limit": 20, "cursor": following_cursor,
+        }), viewer_token),
+        ("recommend_logged_in", "/api/feed?scene=recommend&limit=20", viewer_token),
+        ("hot", "/api/feed?scene=hot&limit=20", ""),
+    )
+    results = []
+    for concurrency in (10, 20):
+        for scene, path, token in scenarios:
+            for round_number in range(1, rounds + 1):
+                warmup_duration = 0.0
+                if warmup_sec > 0:
+                    warmup = run_load_burst(base_urls, path, token, concurrency, warmup_sec)
+                    assert warmup["successes"] > 0 and warmup["failures"] == 0, f"{scene} warmup failed"
+                    warmup_duration = warmup["duration_sec"]
+                measured = run_load_burst(base_urls, path, token, concurrency, test_sec)
+                measured.update(scene=scene, round=round_number, warmup_duration_sec=warmup_duration)
+                assert measured["successes"] > 0 and measured["total_requests"] > 0, f"{scene} has no measured samples"
+                assert measured["failures"] == 0, f"{scene} had failed or inconsistent responses"
+                assert measured["p95_ms"] is not None and measured["p95_ms"] <= 200.0, f"{scene} exceeded P95 gate"
+                assert measured["p99_ms"] is not None and measured["p99_ms"] <= 500.0, f"{scene} exceeded P99 gate"
+                print(f"  {scene} concurrency={concurrency} round={round_number}: "
+                      f"requests={measured['total_requests']}, P95={measured['p95_ms']}ms, P99={measured['p99_ms']}ms")
+                results.append(measured)
+    return results
+
+
 def parse_prometheus_metrics(base_url: str) -> dict:
     try:
         req = Request(base_url + "/metrics", method="GET")
@@ -351,7 +435,7 @@ def get_process_stats(pids: list[int]) -> dict:
 
 
 def run_continuous_feed_matrix(api_a: str, api_b: str, warmup_sec: float = 30.0, test_sec: float = 60.0, rounds: int = 3, tracked_pids: list[int] | None = None) -> dict:
-    if warmup_sec < 0 or test_sec <= 0 or rounds <= 0:
+    if warmup_sec < 0 or test_sec <= 0 or rounds < 3:
         raise ValueError(f"Invalid duration or rounds parameters: warmup_sec={warmup_sec}, test_sec={test_sec}, rounds={rounds}")
 
     bases = [api_a, api_b]
@@ -404,65 +488,18 @@ def run_continuous_feed_matrix(api_a: str, api_b: str, warmup_sec: float = 30.0,
     report["checkpoints"]["semantic_eligibility"] = True
     print("  semantic_eligibility: PASS")
 
-    # -------------------------------------------------------------
-    # Checkpoint 2: 10 Concurrency Gate
-    # -------------------------------------------------------------
-    print("Testing Checkpoint 2: 10 Concurrency Gate...")
-    # Warmup
-    if warmup_sec > 0:
-        print(f"  10 Concurrency: Warming up for {warmup_sec}s...")
-        run_load_burst(bases, "/api/feed?scene=timeline&limit=20", "", 10, warmup_sec)
-    # Test
-    print(f"  10 Concurrency: Measuring for {test_sec}s...")
-    burst_10 = run_load_burst(bases, "/api/feed?scene=timeline&limit=20", "", 10, test_sec)
-    print(f"  10 Concurrency: reqs={burst_10['total_requests']}, rps={burst_10['requests_per_sec']}, P50={burst_10['p50_ms']}ms, P95={burst_10['p95_ms']}ms, P99={burst_10['p99_ms']}ms")
-    assert burst_10["total_requests"] > 0, "No requests executed during 10 concurrency measurement"
-    assert burst_10["successes"] > 0, "Zero successful requests during 10 concurrency measurement"
-    assert burst_10["failures"] == 0, f"Unexpected failures: {burst_10['failures']}"
-    assert burst_10["p95_ms"] is not None and burst_10["p95_ms"] <= 200.0, f"P95 exceeded 200ms: {burst_10['p95_ms']}"
-    report["checkpoints"]["concurrency_10"] = True
-    report["concurrency_10_stats"] = burst_10
-
-    # -------------------------------------------------------------
-    # Checkpoint 3: 20 Concurrency 3-Round Gate (A04)
-    # -------------------------------------------------------------
-    print(f"Testing Checkpoint 3: 20 Concurrency ({rounds} Rounds - A04 Gate, warmup: {warmup_sec}s, test: {test_sec}s)...")
-    assert rounds >= 3, f"A04 gate requires at least 3 rounds, got {rounds}"
-    c20_rounds = []
-    scenes = ["following", "timeline", "hot"]
-
-    for r in range(1, rounds + 1):
-        scene = scenes[(r - 1) % len(scenes)]
-        token = viewer_tok if scene == "following" else ""
-        path = f"/api/feed?scene={scene}&limit=20"
-
-        # Prime cache for this scene
-        json_call(api_a, path, token=token)
-
-        # Warmup
-        if warmup_sec > 0:
-            print(f"  Round {r} ({scene}): Warming up for {warmup_sec}s...")
-            run_load_burst(bases, path, token, 20, warmup_sec)
-        # Measured round
-        print(f"  Round {r} ({scene}): Measuring for {test_sec}s...")
-        r_stats = run_load_burst(bases, path, token, 20, test_sec)
-        r_stats["round"] = r
-        r_stats["scene"] = scene
-        print(f"  Round {r} (20 Concurrency, {scene}): reqs={r_stats['total_requests']}, rps={r_stats['requests_per_sec']}, P50={r_stats['p50_ms']}ms, P95={r_stats['p95_ms']}ms, P99={r_stats['p99_ms']}ms")
-
-        assert r_stats["total_requests"] > 0, f"Round {r} executed 0 requests"
-        assert r_stats["successes"] > 0, f"Round {r} had 0 successful requests"
-        assert r_stats["failures"] == 0, f"Round {r} failures: {r_stats['failures']}"
-        assert r_stats["p95_ms"] is not None and r_stats["p95_ms"] <= 200.0, f"Round {r} P95 {r_stats['p95_ms']}ms exceeded 200ms"
-        assert r_stats["p99_ms"] is not None and r_stats["p99_ms"] <= 500.0, f"Round {r} P99 {r_stats['p99_ms']}ms exceeded 500ms"
-        c20_rounds.append(r_stats)
-
-    report["checkpoints"]["concurrency_20_three_rounds"] = len(c20_rounds) >= 3 and all(
-        r["successes"] > 0 and r["failures"] == 0 and r["p95_ms"] is not None and r["p95_ms"] <= 200.0 and r["p99_ms"] is not None and r["p99_ms"] <= 500.0
-        for r in c20_rounds
+    # Each scenario uses its real identity and cursor at 10 and 20 concurrency.
+    load_rounds = run_feed_load_scenarios(
+        bases, viewer_tok, f_first["next_cursor"], warmup_sec, test_sec, rounds,
     )
-    report["rounds"] = c20_rounds
+    c10_rounds = [r for r in load_rounds if r["concurrency"] == 10]
+    c20_rounds = [r for r in load_rounds if r["concurrency"] == 20]
+    report["checkpoints"]["concurrency_10"] = bool(c10_rounds)
+    report["checkpoints"]["concurrency_20_three_rounds"] = bool(c20_rounds)
+    report["concurrency_10_stats"] = c10_rounds[0] if c10_rounds else {}  # Kept for older report readers.
+    report["concurrency_10_rounds"] = c10_rounds
     report["concurrency_20_rounds"] = c20_rounds
+    report["rounds"] = load_rounds
 
     # -------------------------------------------------------------
     # Checkpoint 4: Invalidation & Consistency
@@ -656,7 +693,7 @@ def main():
     parser.add_argument("--warmup-seconds", type=float, default=30.0, help="warmup duration per round in seconds")
     parser.add_argument("--duration-seconds", type=float, default=60.0, help="measurement duration per round in seconds")
     parser.add_argument("--concurrency", type=int, default=20, help="worker concurrency")
-    parser.add_argument("--rounds", type=int, default=3, help="number of repeated rounds for concurrency 20")
+    parser.add_argument("--rounds", type=int, default=3, help="rounds per scenario at each of 10 and 20 concurrency (minimum 3)")
     parser.add_argument("--formal-dataset", action="store_true", help="verify production scale dataset (2,000 users, 20,000 videos)")
     parser.add_argument("--report", default="docs/benchmarks/feed-warm-cache-continuous-2026-11-08.json")
     args = parser.parse_args()
@@ -679,23 +716,45 @@ def main():
         "rounds_count": args.rounds,
     }
 
-    if args.warmup_seconds < 0 or args.duration_seconds <= 0 or args.rounds <= 0:
-        print(f"Error: Invalid load parameters (warmup={args.warmup_seconds}, duration={args.duration_seconds}, rounds={args.rounds})", file=sys.stderr)
-        report["validation_scope"] = "rejected_invalid_parameters"
+    def write_rejection(scope: str, unverified: list[str]) -> int:
+        report["status"] = "FAIL"
+        report["validation_scope"] = scope
         report["release_gate_passed"] = False
-        report["unverified_requirements"] = ["valid positive duration and rounds required"]
+        report["unverified_requirements"] = unverified
+        elapsed = time.time() - start_time
+        report["elapsed_seconds"] = round(elapsed, 2)
         out_path = Path(args.report)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, ensure_ascii=False)
+        print(f"Report written to: {out_path}")
         return 1
 
+    if args.warmup_seconds < 0 or args.duration_seconds <= 0 or args.rounds < 3:
+        print(f"Error: Invalid load parameters (warmup={args.warmup_seconds}, duration={args.duration_seconds}, rounds={args.rounds})", file=sys.stderr)
+        return write_rejection("rejected_invalid_parameters", ["valid positive duration and at least 3 rounds required"])
+
     tracked_pids = []
+    scale_info = None
+    db_path = ""
+    mysql_addr = ""
 
     with ExitStack() as stack:
         if mode == "compose":
             api_a, api_b = external_api_a, external_api_b
             mysql_addr = os.environ.get("GOSTREAM_MYSQL_ADDR", "")
+            if getattr(args, "formal_dataset", False):
+                scale_info = check_dataset_scale(mode, mysql_addr=mysql_addr)
+                report["dataset_scale"] = scale_info
+                if not scale_info.get("meets_formal_scale", False):
+                    print("Formal dataset verification requested (--formal-dataset), but dataset scale does not meet formal criteria.", file=sys.stderr)
+                    print(f"Observed scale: {scale_info}", file=sys.stderr)
+                    return write_rejection("rejected_insufficient_scale", [
+                        f"formal dataset scale requirement not met: minimum 2,000 users, 20,000 published videos, 10,000 follows, 50,000 interactions, and hybrid threshold authors; "
+                        f"observed users={scale_info.get('users', 0)}, published_videos={scale_info.get('published_videos', 0)}, "
+                        f"videos={scale_info.get('videos', 0)}, follows={scale_info.get('follows', 0)}, interactions={scale_info.get('interactions', 0)}, "
+                        f"has_high_author={scale_info.get('has_high_author', False)}, has_low_author={scale_info.get('has_low_author', False)}"
+                    ])
             print(f"Seeding benchmark feed fixture into Compose MySQL (addr: {mysql_addr})...")
             seed_mysql_feed_db(mysql_addr)
         else:
@@ -768,30 +827,20 @@ def main():
             wait_url_ready(api_b, timeout=15)
             tracked_pids = [p_a.pid, p_b.pid]
 
-        db_path_for_check = db_path if mode == "sqlite" else ""
-        scale_info = check_dataset_scale(mode, db_path=db_path_for_check, mysql_addr=mysql_addr if mode == "compose" else "")
-        report["dataset_scale"] = scale_info
+        if scale_info is None:
+            db_path_for_check = db_path if mode == "sqlite" else ""
+            scale_info = check_dataset_scale(mode, db_path=db_path_for_check, mysql_addr=mysql_addr if mode == "compose" else "")
+            report["dataset_scale"] = scale_info
 
         if getattr(args, "formal_dataset", False) and not scale_info.get("meets_formal_scale", False):
             print("Formal dataset verification requested (--formal-dataset), but dataset scale does not meet formal criteria.", file=sys.stderr)
             print(f"Observed scale: {scale_info}", file=sys.stderr)
-            report["status"] = "FAIL"
-            report["validation_scope"] = "rejected_insufficient_scale"
-            report["release_gate_passed"] = False
-            report["unverified_requirements"] = [
+            return write_rejection("rejected_insufficient_scale", [
                 f"formal dataset scale requirement not met: minimum 2,000 users, 20,000 published videos, 10,000 follows, 50,000 interactions, and hybrid threshold authors; "
                 f"observed users={scale_info.get('users', 0)}, published_videos={scale_info.get('published_videos', 0)}, "
                 f"videos={scale_info.get('videos', 0)}, follows={scale_info.get('follows', 0)}, interactions={scale_info.get('interactions', 0)}, "
                 f"has_high_author={scale_info.get('has_high_author', False)}, has_low_author={scale_info.get('has_low_author', False)}"
-            ]
-            elapsed = time.time() - start_time
-            report["elapsed_seconds"] = round(elapsed, 2)
-            out_path = Path(args.report)
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(out_path, "w", encoding="utf-8") as f:
-                json.dump(report, f, indent=2, ensure_ascii=False)
-            print(f"Report written to: {out_path}")
-            return 1
+            ])
 
         print(f"Running continuous warm-cache acceptance: API A={api_a}, API B={api_b}...")
         results = run_continuous_feed_matrix(
@@ -805,13 +854,8 @@ def main():
         all_passed = bool(report.get("checkpoints")) and all(report["checkpoints"].values())
         report["status"] = "PASS" if all_passed else "FAIL"
 
-        # Check required scenes and full repetitions across all 4 required scenarios (TEST_STANDARD.md:115)
-        c20_rounds = report.get("concurrency_20_rounds", [])
-        scenes_run = set(r.get("scene") for r in c20_rounds)
-        rounds_per_scene = {sc: sum(1 for r in c20_rounds if r.get("scene") == sc) for sc in scenes_run}
-        required_scenes = {"following", "following_deep", "recommend_logged_in", "hot"}
-        has_all_scenes = required_scenes.issubset(scenes_run)
-        all_scenes_three_rounds = has_all_scenes and all(rounds_per_scene.get(sc, 0) >= 3 for sc in required_scenes)
+        coverage_issues = feed_load_coverage_issues(report.get("rounds", []))
+        report["load_coverage_issues"] = coverage_issues
 
         is_formal_config = (
             mode == "compose"
@@ -820,7 +864,7 @@ def main():
             and args.warmup_seconds >= 30.0
             and args.duration_seconds >= 60.0
             and args.rounds >= 3
-            and all_scenes_three_rounds
+            and not coverage_issues
         )
 
         if is_formal_config and all_passed:
@@ -840,13 +884,7 @@ def main():
                     f"videos={scale_info.get('videos', 0)}, follows={scale_info.get('follows', 0)}, interactions={scale_info.get('interactions', 0)}, "
                     f"has_high_author={scale_info.get('has_high_author', False)}, has_low_author={scale_info.get('has_low_author', False)}"
                 )
-            if not all_scenes_three_rounds:
-                missing_scenes = sorted(list(required_scenes - scenes_run))
-                incomplete_scenes = [sc for sc in required_scenes if rounds_per_scene.get(sc, 0) < 3 and sc in scenes_run]
-                unverified.append(
-                    f"formal gate requires full 3-round repetitions across all four scenarios (following 1st page, following deep page, logged-in recommend, hot ranking); "
-                    f"observed scenes={dict(sorted(rounds_per_scene.items()))}, missing={missing_scenes}, incomplete={incomplete_scenes}"
-                )
+            unverified.extend(coverage_issues)
             if args.warmup_seconds < 30.0:
                 unverified.append(f"warmup_seconds ({args.warmup_seconds}s) < required 30s")
             if args.duration_seconds < 60.0:
