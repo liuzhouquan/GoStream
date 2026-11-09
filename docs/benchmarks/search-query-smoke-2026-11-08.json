@@ -1,0 +1,29 @@
+{
+  "status": "PASS",
+  "mode": "sqlite",
+  "scale": "production",
+  "checkpoints": {
+    "search_users": true,
+    "search_videos": true,
+    "notifications_pagination_and_read": true,
+    "query_performance_and_plans": true
+  },
+  "metrics": {
+    "video_search_shallow_ms": 10.2,
+    "video_search_deep_ms": 7.11,
+    "video_search_p50_ms": 12.24,
+    "video_search_p95_ms": 14.3,
+    "video_search_max_ms": 16.87
+  },
+  "applicability": {
+    "dataset_size_videos": null,
+    "dataset_size_users": null,
+    "observed_p95_ms": 14.3,
+    "keyset_order_filesort": "Requires an actual production-query execution plan",
+    "applicable_range_sql_like": "not established",
+    "conclusion": "HTTP latency is measured for the configured fixture only. Dataset counts and production MySQL execution plans must be recorded separately; no capacity limit or search-engine migration threshold is established by this smoke."
+  },
+  "validation_scope": "component_query_smoke",
+  "release_gate_passed": false,
+  "elapsed_sec": 4.742
+}

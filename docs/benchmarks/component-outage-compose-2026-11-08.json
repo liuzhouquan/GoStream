@@ -1,0 +1,57 @@
+{
+  "version": "1.0-demo",
+  "git": {
+    "commit": "1f1095c2e168f76a2179db37fb21db9c7151946c",
+    "branch": "test/g09-component-outages-persistence-closure",
+    "dirty": true
+  },
+  "go_version": "go1.27.2",
+  "host": {
+    "kernel": "6.18.33.2-microsoft-standard-WSL2",
+    "machine": "x86_64",
+    "cpu_model": "AMD Ryzen 7 5800H with Radeon Graphics",
+    "memory_bytes": 14576939008
+  },
+  "deployment": {
+    "project_name": "gostream-acc-72a9588e",
+    "compose_files": [
+      "docker-compose.yml",
+      "docker-compose.object.yml",
+      "tests/integration/object-test.compose.yml"
+    ],
+    "scale": 2,
+    "api_a": "http://127.0.0.1:18080",
+    "api_b": "http://127.0.0.1:18081",
+    "mysql_addr": "127.0.0.1:13307",
+    "minio_endpoint": "127.0.0.1:29000",
+    "build": false
+  },
+  "api_instances": [
+    {
+      "label": "api_a",
+      "url": "http://127.0.0.1:18080",
+      "metrics_available": true
+    },
+    {
+      "label": "api_b",
+      "url": "http://127.0.0.1:18081",
+      "metrics_available": true
+    },
+    {
+      "service": "api",
+      "container_name": "gostream-acc-72a9588e-api-1",
+      "container_id": "9cf926818563"
+    },
+    {
+      "service": "api",
+      "container_name": "gostream-acc-72a9588e-api-2",
+      "container_id": "8660f3d7effe"
+    }
+  ],
+  "ready_elapsed_seconds": 22.1,
+  "launcher_cleanup": {
+    "containers": 0,
+    "volumes": 0,
+    "networks": 0
+  }
+}

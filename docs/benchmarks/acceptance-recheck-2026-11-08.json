@@ -1,0 +1,64 @@
+{
+  "review_date": "2026-11-08",
+  "candidate_commit": "0c897afa6841307b2822ba0f897036f5120b8fda",
+  "conclusion": "not_accepted",
+  "scope": "read-only source review and bounded local verification; no business source changes",
+  "runtime": "go1.27.2 linux/amd64",
+  "checks": [
+    {
+      "label": "acceptance-recheck-go",
+      "elapsed_seconds": 40.6,
+      "exit_code": 0,
+      "timed_out": false,
+      "interrupted": false
+    },
+    {
+      "label": "acceptance-recheck-diagnostics",
+      "elapsed_seconds": 35.268,
+      "exit_code": 0,
+      "timed_out": false,
+      "interrupted": false
+    },
+    {
+      "label": "acceptance-zero-load-counterexample",
+      "elapsed_seconds": 4.864,
+      "exit_code": 0,
+      "timed_out": false,
+      "interrupted": false
+    },
+    {
+      "label": "go vet; go build three commands; node --check web/app.js; git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "zero_load_counterexample": {
+    "status": "PASS",
+    "mode": "sqlite",
+    "warmup_seconds": 0.0,
+    "duration_seconds": 0.0,
+    "rounds_count": 0,
+    "validation_scope": "formal_standard",
+    "release_gate_passed": true,
+    "rounds": [],
+    "concurrency_10_stats": {
+      "concurrency": 10,
+      "duration_sec": 0.0,
+      "total_requests": 0,
+      "successes": 0,
+      "failures": 0,
+      "requests_per_sec": 0.0,
+      "statuses": {},
+      "p50_ms": 0.0,
+      "p95_ms": 0.0,
+      "p99_ms": 0.0,
+      "bytes_transferred": 0
+    }
+  },
+  "not_reexecuted": [
+    "full Compose acceptance matrix",
+    "real MySQL/Redis/RabbitMQ/MinIO fault suite",
+    "browser E2E",
+    "full-size A04 benchmark",
+    "full Go race suite"
+  ]
+}

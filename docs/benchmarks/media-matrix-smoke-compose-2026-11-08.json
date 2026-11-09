@@ -1,0 +1,243 @@
+{
+  "matrix": [
+    {
+      "key": "01_mp4_h264_aac",
+      "video_id": 1,
+      "container": "mp4",
+      "video_codec": "h264",
+      "audio_codec": "aac",
+      "source_bytes": 21258,
+      "input_probe": {
+        "width": 640,
+        "height": 360,
+        "duration": 1.02,
+        "streams_count": 1
+      },
+      "final_status": "published",
+      "expected_status": "published",
+      "processing_error": null,
+      "elapsed_seconds": 1.655,
+      "media_bytes": 20532,
+      "cover_bytes": 5621,
+      "duration_ms": 1022,
+      "width": 640,
+      "height": 360
+    },
+    {
+      "key": "02_mp4_h264_noaudio",
+      "video_id": 2,
+      "container": "mp4",
+      "video_codec": "h264",
+      "audio_codec": "none",
+      "source_bytes": 12434,
+      "input_probe": {
+        "width": 640,
+        "height": 360,
+        "duration": 1.2,
+        "streams_count": 1
+      },
+      "final_status": "published",
+      "expected_status": "published",
+      "processing_error": null,
+      "elapsed_seconds": 1.646,
+      "media_bytes": 9722,
+      "cover_bytes": 6333,
+      "duration_ms": 1200,
+      "width": 640,
+      "height": 360
+    },
+    {
+      "key": "03_webm_vp8_vorbis",
+      "video_id": 3,
+      "container": "webm",
+      "video_codec": "vp8",
+      "audio_codec": "vorbis",
+      "source_bytes": 36103,
+      "input_probe": {
+        "width": 320,
+        "height": 240,
+        "duration": 1.0,
+        "streams_count": 1
+      },
+      "final_status": "published",
+      "expected_status": "published",
+      "processing_error": null,
+      "elapsed_seconds": 2.056,
+      "media_bytes": 22210,
+      "cover_bytes": 6768,
+      "duration_ms": 1015,
+      "width": 320,
+      "height": 240
+    },
+    {
+      "key": "04_webm_vp9_opus",
+      "video_id": 4,
+      "container": "webm",
+      "video_codec": "vp9",
+      "audio_codec": "opus",
+      "source_bytes": 30016,
+      "input_probe": {
+        "width": 640,
+        "height": 360,
+        "duration": 1.01,
+        "streams_count": 1
+      },
+      "final_status": "published",
+      "expected_status": "published",
+      "processing_error": null,
+      "elapsed_seconds": 2.053,
+      "media_bytes": 26145,
+      "cover_bytes": 7948,
+      "duration_ms": 1008,
+      "width": 640,
+      "height": 360
+    },
+    {
+      "key": "05_mov_prores",
+      "video_id": 5,
+      "container": "mov",
+      "video_codec": "prores",
+      "audio_codec": "pcm",
+      "source_bytes": 1060497,
+      "input_probe": {
+        "width": 480,
+        "height": 270,
+        "duration": 1.0,
+        "streams_count": 1
+      },
+      "final_status": "published",
+      "expected_status": "published",
+      "processing_error": null,
+      "elapsed_seconds": 1.676,
+      "media_bytes": 24656,
+      "cover_bytes": 7702,
+      "duration_ms": 1000,
+      "width": 480,
+      "height": 270
+    },
+    {
+      "key": "06_mov_h264_aac",
+      "video_id": 6,
+      "container": "mov",
+      "video_codec": "h264",
+      "audio_codec": "aac",
+      "source_bytes": 20290,
+      "input_probe": {
+        "width": 640,
+        "height": 360,
+        "duration": 1.02,
+        "streams_count": 1
+      },
+      "final_status": "published",
+      "expected_status": "published",
+      "processing_error": null,
+      "elapsed_seconds": 2.05,
+      "media_bytes": 21162,
+      "cover_bytes": 7895,
+      "duration_ms": 1022,
+      "width": 640,
+      "height": 360
+    },
+    {
+      "key": "07_mp4_portrait",
+      "video_id": 7,
+      "container": "mp4",
+      "video_codec": "h264",
+      "audio_codec": "aac",
+      "source_bytes": 19437,
+      "input_probe": {
+        "width": 360,
+        "height": 640,
+        "duration": 1.02,
+        "streams_count": 1
+      },
+      "final_status": "published",
+      "expected_status": "published",
+      "processing_error": null,
+      "elapsed_seconds": 2.062,
+      "media_bytes": 18553,
+      "cover_bytes": 10644,
+      "duration_ms": 1022,
+      "width": 360,
+      "height": 640
+    },
+    {
+      "key": "08_overlong_reject",
+      "video_id": 8,
+      "container": "mp4",
+      "video_codec": "h264",
+      "audio_codec": "none",
+      "source_bytes": 9345,
+      "input_probe": {
+        "width": 16,
+        "height": 16,
+        "duration": 605.0,
+        "streams_count": 1
+      },
+      "final_status": "failed",
+      "expected_status": "failed",
+      "processing_error": "duration_limit",
+      "elapsed_seconds": 1.244,
+      "media_bytes": 0,
+      "cover_bytes": 0,
+      "duration_ms": 0,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "key": "09_corrupted_reject",
+      "video_id": 9,
+      "container": "mp4",
+      "video_codec": "corrupted",
+      "audio_codec": "none",
+      "source_bytes": 16024,
+      "input_probe": {
+        "error": "ffprobe_shim: invalid data found when processing /tmp/gostream_media_matrix__63wrnsb/fixtures/09_corrupted_reject.mp4"
+      },
+      "final_status": "failed",
+      "expected_status": "failed",
+      "processing_error": "processing_failed",
+      "elapsed_seconds": 25.94,
+      "media_bytes": 0,
+      "cover_bytes": 0,
+      "duration_ms": 0,
+      "width": 0,
+      "height": 0
+    },
+    {
+      "key": "10_chunked_large_mp4",
+      "video_id": 10,
+      "container": "mp4",
+      "video_codec": "h264",
+      "audio_codec": "none",
+      "source_bytes": 4443118,
+      "input_probe": {
+        "width": 720,
+        "height": 480,
+        "duration": 1.0,
+        "streams_count": 1
+      },
+      "final_status": "published",
+      "expected_status": "published",
+      "processing_error": null,
+      "elapsed_seconds": 2.673,
+      "media_bytes": 2436727,
+      "cover_bytes": 28884,
+      "duration_ms": 1000,
+      "width": 720,
+      "height": 480
+    }
+  ],
+  "privacy_verified": true,
+  "recovery_verified": true,
+  "search_verified": true,
+  "feed_verified": true,
+  "mode": "compose",
+  "endpoints": {
+    "api_a": "http://127.0.0.1:18080",
+    "api_b": "http://127.0.0.1:18081"
+  },
+  "ffmpeg_bin": "/home/lzq/.vscode-server/extensions/kilocode.kilo-code-7.8.27-linux-x64/bin/ffmpeg",
+  "ffprobe_bin": "/home/lzq/projects/golangprojects/GoStream/tools/ffprobe_shim.py",
+  "elapsed_seconds": 47.812
+}

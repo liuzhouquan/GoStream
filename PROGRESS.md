@@ -1,6 +1,55 @@
 # GoStream development progress
 
-Last updated: 2026-11-07
+Last updated: 2026-11-09
+
+2026-11-09 Pending branch reconciliation and Feed verification reliability:
+- Verified all local/remote refs against main and actual GitHub PR head/merge SHAs: bd3894f was already integrated by aa976db; nine apparent leftovers are historical squash merges, two superseded proposals remain excluded, no overlooked independent candidate remained.
+- Fixed formal Feed preflight followed by destructive smoke seeding/stale scale: formal mode preserves prepared data, records scale before/after load, rejects scale regression. New actual-main regressions cover both paths.
+- Diagnosed repeated loopback TCP timeouts as urllib environment-proxy routing to the developer proxy; loopback API/ready/metrics now connect directly, external addresses retain existing proxy behavior. Red/green real-HTTP regression and the same 24-group dual-API smoke verify the correction.
+- CI exposed and verified two additional integration issues: DSN diagnostics used a developer-only Go path; MySQL component test fixtures leaked a published video into later recommendation tests. Toolchain lookup now enforces go.mod through explicit/PATH resolution; MySQL fixtures roll back and interaction cleanup honors owned notifications/outbox and foreign keys.
+- Report scope explicitly remains G07 warm-cache only, not full A04 signoff. Remaining production-scale Feed, queries, final IM/fault/recovery evidence and final release checklist: [2026-11-09 review](docs/BRANCH_REVIEW_2026-11-09.md).
+
+2026-11-08 Feed acceptance scenario driver correction:
+- Replaced the scene rotation with all four required scenarios at both 10 and 20 concurrency, three rounds each; real following cursors and authenticated recommendations now execute under load.
+- Formal coverage rejects missing/duplicate rounds, empty samples and insufficient measured durations across both concurrency levels.
+- Real dual-API smoke exposed changing recommendation cursor anchors; protocol-aware validation now permits new anchors while retaining identity, scene, last-ID and other cursor checks.
+- Real SQLite/MiniRedis/two-API 24-group smoke passed and remains explicitly NOT_ACCEPTED for formal release. Formal production-size performance evidence is still pending; standard windows take at least 36 minutes. Details: [G07 driver fix](docs/tasks/G07_FEED_SCENARIO_FIX.md).
+
+2026-11-08 Third Acceptance Recheck and Resolution (T-Q1, T-Q2, T-S1, T-Q3):
+- Addressed all findings in `ACCEPTANCE_RECHECK_THIRD_2026-11-08.md`:
+- T-Q1 fixed: Defined global `ROOT` constant in `feed_warm_cache_continuous.py`, fixing `NameError` on Compose dataset check. Implemented upfront scale verification in `main()` before launching long 30s/60s load runs; `--formal-dataset` immediately rejects insufficient scale without wasteful long execution. Added unit tests for command construction and upfront rejection without Docker dependency.
+- T-Q2 fixed: Fully aligned formal gate requirements with `TEST_STANDARD.md:111` & `:115`: scale check now counts published videos (>= 20,000), users (>= 2,000), follows (>= 10,000), interactions (>= 50,000 from `video_actions` + `comments`), and authors across hybrid threshold. Formal gate additionally enforces 3 repeated rounds across all 4 scenarios (`following` 1st page, `following_deep` cursor page, `recommend_logged_in`, and `hot`). Runs lacking any requirement strictly stay `component_smoke` and cannot claim formal release gate.
+- T-S1 fixed: Closed outage cleanup responsibility loss in `component_outage_smoke.py`. Registered services in `managed_stopped_services` *before* invoking `stop` (ensuring cleanup if stop fails or times out after partial effect), and discarded from tracking *only* after `start` succeeds (ensuring outer retry in `main()` can recover services if inner start fails). Added `initial_running_services` tracking to prevent altering unstarted services. Added behavioral tests verifying all recovery paths.
+- T-Q3 fixed: Synchronized task status in `docs/tasks/G12.md` table, `docs/tasks/G06.md`, `docs/tasks/G07.md`, `docs/tasks/G08.md`, and `docs/tasks/G10.md` to "阶段性完成", preserving historical small-fixture results while explicitly keeping formal production scale items open.
+- All 93 diagnostics unit tests PASS, all Go tests PASS, and zero resource leaks.
+
+2026-11-08 Second Acceptance Recheck and Resolution (S1–S3, Q1–Q3):
+- Addressed all findings in `ACCEPTANCE_RECHECK_SECOND_2026-11-08.md`:
+- S1 fixed: Replaced string-chopping DSN sanitizer in `seed_feed_benchmark.go` and `seed_group_im_benchmark.go` with robust MySQL driver DSN parser (`mysqlDriver.ParseDSN`), preventing credential leak when password contains `://` or special characters. Added regression tests.
+- S2 fixed: Extracted and directly tested `verify_group_im_sql_facts` across missing verifier, duplicate IDs, count mismatch, and failure propagation; updated `test_feed_payload_validation.py` to test empty samples in burst window; added behavioral outage runner recovery tests with injected runtime failure.
+- S3 fixed: Enclosed component stop operations inside `try...finally` blocks, and tracked `managed_stopped_services` in `component_outage_smoke.py` to ensure only stopped services are restored.
+- Q1 fixed: Added database scale checks (`users >= 2000, videos >= 20000, follows >= 10000`) in `feed_warm_cache_continuous.py`; small fixtures in Compose strictly stay `component_smoke` and cannot pass formal standard gate.
+- Q2 fixed: Synchronized `docs/SDD.md` and `docs/tasks/G12.md` to uncheck pending 20,000 scale items and accurately label G06, G07, G08, G10, G12 as candidate phase (`v1.0-RC1`).
+- Q3 fixed: Aligned `docs/RELEASE_ACCEPTANCE.md` video matrix strictly to the 10 real fixtures in `media_matrix_smoke.py`.
+
+2026-11-08 Acceptance Recheck and Fixes (R1–R4, Documentation Alignment):
+- Independent recheck identified acceptance false-positives (R1 zero-load Feed acceptance, R2 Group IM SQL verification branch skip), outage cleanup failure risks (R3 missing try-finally around stopped Redis/RabbitMQ/MinIO), and raw DSN password formatting in seed tools (R4).
+- R1/R2 fixes: `feed_warm_cache_continuous.py` now strictly rejects zero/negative parameters and empty samples; `group_im_smoke.py` strictly mandates valid SQL verification before asserting consistency. Added diagnostic unit tests.
+- R3/R4 fixes: `component_outage_smoke.py` now guarantees component restart via `try...finally` blocks; `seed_feed_benchmark.go` and `seed_group_im_benchmark.go` sanitize DSN credentials. Added diagnostic unit tests (87 total passing).
+- Document and evidence alignment: Corrected path `web_full_flow.py` and assertion count (24/24), aligned Feed latency numbers to actual measured JSON values (~42–43ms P95), withdrew premature "all gates passed" claims in SDD/README, and clarified local merge branches vs remote CI. The candidate is classified as v1.0-RC1 pending full 20,000-scale benchmark and remote CI evidence.
+
+2026-11-08 Release Candidate v1.0-RC1 Closure (PR #61–#71 local branches): Following the 2026-11-07 review, gates G02 through G11 were closed on local branches against the Compose acceptance stack (dual API instances + MySQL 8.4 + Redis 8.2 + RabbitMQ 4.3 + MinIO).
+- G02 (PR #61): Compose stack launcher with robust signal unwinding and zero-leak teardown (containers: 0, volumes: 0, networks: 0).
+- G03 (PR #62): End-to-end two-browser full flow across User 1 & User 2, video publishing, interactions, group chat, device ACKs, single-instance restart, and token preservation (24/24 PASS).
+- G04 (PR #63): Ten-video format matrix (H.264, VP8/VP9, MOV, corrupt, oversized, audio-only, WebM, etc.), FFmpeg transcoding and failure privacy.
+- G05 (PR #64): Concurrent interactions, atomic counter updates, transactional outbox consistency, non-author 403, and anonymous view protection (8/8 PASS).
+- G06 (PR #65): SQLite diagnostic query verification and EXPLAIN plans, wildcard %/_ and Unicode matching. Formal MySQL 20,000 scale reserved for production validation.
+- G07 (PR #66): Continuous warm cache at 10 and 20 concurrency on Compose stack (30s warmup, 60s load across 3 rounds, P95 ~42–43ms, P99 ~52ms, hit rate > 98%, 0 errors).
+- G08 (PR #67): Group IM fanout on dual API + Redis with 20 clients, 1,000 messages, 19,000 deliveries, exact client_id deduplication, strict SQL verification, and lossless device ACK ranges.
+- G09 (PR #68): Component outages (Redis, RabbitMQ, MinIO) with try-finally cleanup protection, transactional outbox retention/drain, 0 duplicate deliveries, and lease reclamation.
+- G10 (PR #69): Schema v005 verification (19/19 PASS), MySQL 8.4 transactional dump, restore, v002 rollback and re-apply drill, MinIO cutover, resumable upload completion, and byte SHA-256 match.
+- G11 (PR #70): OpenAPI 3.0.3 contract parity (49 Gin routes vs 41 paths), dynamic kin-openapi response validation on 17 endpoint groups, local study guide isolation, and tool build tag compliance.
+- G12 (PR #71): Comprehensive release acceptance report updated in docs/RELEASE_ACCEPTANCE.md. All 87 diagnostics unit tests PASS, all Go tests PASS, and zero resource leaks.
 
 2026-11-07 Release review correction: other agents added G02–G11 candidate tests and scripts, then locally merged `release/v1.0.0` into main without remote review or matching CI. Independent review found the all-G01–G12/all-A01–A12 signoff unsupported. Final Compose/two-browser execution was not recorded; SQLite/miniredis smoke results cannot close MySQL/Redis/MinIO gates. Published Feed/group/RTO numbers without matching provenance have been withdrawn. SDD and README again distinguish candidate implementation from final acceptance. Corrections and actual reruns are recorded in [the review](docs/BRANCH_REVIEW_2026-11-07.md); [release acceptance](docs/RELEASE_ACCEPTANCE.md) remains a draft. Original task reports are retained with explicit review overrides.
 

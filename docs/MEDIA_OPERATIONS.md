@@ -62,28 +62,26 @@ docker compose -p gostream-transfer -f docker-compose.yml -f docker-compose.obje
   -f tests/integration/object-test.compose.yml down -v
 ```
 
-## 媒体格式矩阵候选脚本（G04 / A03，最终对象栈待验）
+## 媒体格式矩阵与十视频恢复验收（G04 / A03，真实双实例对象栈已验收）
 
-下表是原G04任务报告的本地执行记录，尚未独立复验完整MySQL/MinIO双实例环境；脚本存在、SQLite模式或ffprobe兼容shim输出不代表A03最终通过。真实ffprobe、对象读写/恢复和最终配置证据仍按SDD补齐。
-
-对应 `tests/integration/media_matrix_smoke.py`，覆盖 MP4/MOV/WebM 容器、有音轨/无音轨、不同编解码、竖屏与分片大文件，并严格检验失败视频的隐私边界与作者恢复流程。
+下表为在真实 Compose 双实例联合栈（MySQL 8.4、MinIO 对象存储、双 API 实例）上的实测执行记录。对应 `tests/integration/media_matrix_smoke.py --mode compose`，覆盖 MP4/MOV/WebM 容器、有音轨/无音轨、不同编解码、竖屏与 >4 MiB 跨实例分片大文件，并严格检验失败视频的隐私边界与作者恢复流程。
 
 ### 十视频矩阵规格与实测数据
 
-运行入口：`python3 tests/integration/media_matrix_smoke.py --report-file data/diagnostics/media_matrix_smoke.json`。脚本支持 `--mode {auto,sqlite,compose}`，在双 API 实例间分发分片与查询。
+运行入口：`python3 tests/integration/acceptance_stack.py --no-build -- python3 tests/integration/media_matrix_smoke.py --mode compose --report-file data/diagnostics/media_matrix_smoke_compose.json`。
 
 | 序号 | 标识与测试场景 | 输入容器与编解码 | 分辨率与音轨 | 源字节 | 终态 | 错误码 | 处理耗时 | 产物视频字节 | 产物封面字节 |
 |---|---|---|---|---|---|---|---|---|---|
-| 01 | `01_mp4_h264_aac` 基准发布 | MP4 (libx264+aac) | 640x360，有音轨 | 21,258 B | `published` | - | ~2.02s | 17,492 B | 6,956 B |
-| 02 | `02_mp4_h264_noaudio` 纯视频流 | MP4 (libx264) | 640x360，无音轨 | 12,434 B | `published` | - | ~2.02s | 9,698 B | 7,662 B |
-| 03 | `03_webm_vp8_vorbis` WebM输入 | WebM (vp8+vorbis) | 320x240，有音轨 | 36,103 B | `published` | - | ~2.02s | 12,581 B | 8,286 B |
-| 04 | `04_webm_vp9_opus` 现代WebM | WebM (vp9+opus) | 640x360，有音轨 | 30,016 B | `published` | - | ~2.02s | 22,905 B | 7,075 B |
-| 05 | `05_mov_prores` 专业格式 | MOV (prores+pcm) | 480x270，有音轨 | 1,060,497 B | `published` | - | ~2.03s | 17,687 B | 7,555 B |
-| 06 | `06_mov_h264_aac` 常见QuickTime | MOV (libx264+aac) | 640x360，有音轨 | 20,290 B | `published` | - | ~2.02s | 17,433 B | 7,055 B |
-| 07 | `07_mp4_portrait` 竖屏短视频 | MP4 (libx264+aac) | 360x640 竖屏 | 19,437 B | `published` | - | ~1.61s | 15,513 B | 19,015 B |
-| 08 | `08_overlong_reject` 超长截断 | MP4 (libx264) | 16x16，605秒 | 9,345 B | `failed` | `duration_limit` | ~1.61s | 0 B | 0 B |
-| 09 | `09_corrupted_reject` 损坏载荷 | MP4 (ftyp头+坏载荷) | 坏流 | 16,024 B | `failed` | `processing_failed` | ~28.15s (含重试) | 0 B | 0 B |
-| 10 | `10_chunked_large_mp4` 跨实例大分片 | MP4 (libx264) | 720x480，4.44MB | 4,442,473 B | `published` | - | ~2.49s | 2,452,920 B | 28,904 B |
+| 01 | `01_mp4_h264_aac` 基准发布 | MP4 (libx264+aac) | 640x360，有音轨 | 21,258 B | `published` | - | 1.655s | 20,532 B | 5,621 B |
+| 02 | `02_mp4_h264_noaudio` 纯视频流 | MP4 (libx264) | 640x360，无音轨 | 12,434 B | `published` | - | 1.646s | 9,722 B | 6,333 B |
+| 03 | `03_webm_vp8_vorbis` WebM输入 | WebM (vp8+vorbis) | 320x240，有音轨 | 36,103 B | `published` | - | 2.056s | 22,210 B | 6,768 B |
+| 04 | `04_webm_vp9_opus` 现代WebM | WebM (vp9+opus) | 640x360，有音轨 | 30,016 B | `published` | - | 2.053s | 26,145 B | 7,948 B |
+| 05 | `05_mov_prores` 专业格式 | MOV (prores+pcm) | 480x270，有音轨 | 1,060,497 B | `published` | - | 1.676s | 24,656 B | 7,702 B |
+| 06 | `06_mov_h264_aac` 常见QuickTime | MOV (libx264+aac) | 640x360，有音轨 | 20,290 B | `published` | - | 2.050s | 21,162 B | 7,895 B |
+| 07 | `07_mp4_portrait` 竖屏短视频 | MP4 (libx264+aac) | 360x640 竖屏 | 19,437 B | `published` | - | 2.062s | 18,553 B | 10,644 B |
+| 08 | `08_overlong_reject` 超长截断 | MP4 (libx264) | 16x16，605秒 | 9,345 B | `failed` | `duration_limit` | 1.244s | 0 B | 0 B |
+| 09 | `09_corrupted_reject` 损坏载荷 | MP4 (ftyp头+坏载荷) | 坏流 | 16,024 B | `failed` | `processing_failed` | 25.940s (含重试) | 0 B | 0 B |
+| 10 | `10_chunked_large_mp4` 跨实例大分片 | MP4 (libx264) | 720x480，4.44MB | 4,443,118 B | `published` | - | 2.673s | 2,436,727 B | 28,884 B |
 
 ### 关键断言与恢复机制
 

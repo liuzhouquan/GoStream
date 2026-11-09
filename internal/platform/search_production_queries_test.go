@@ -238,10 +238,7 @@ func seedProductionSearchAndNotificationDataset(t *testing.T, s *Server, db *gor
 	return meta
 }
 
-func TestProductionScaleSearchAndNotificationQueries(t *testing.T) {
-	s, h, db := testServer(t)
-	meta := seedProductionSearchAndNotificationDataset(t, s, db)
-
+func runProductionSearchAndNotificationAssertions(t *testing.T, h http.Handler, db *gorm.DB, meta productionFixtureMeta) {
 	t.Run("UserSearch_HitsMissesUnicodeAndWildcards", func(t *testing.T) {
 		// 1. Exact Hit: query 'user_hit' should match 3 users
 		res := request(t, h, http.MethodGet, "/api/search?q=user_hit&type=users&limit=10", "", nil)
@@ -535,6 +532,13 @@ func TestProductionScaleSearchAndNotificationQueries(t *testing.T) {
 			t.Fatalf("stranger unread affected: %s", resStranger.Body.String())
 		}
 	})
+}
+
+func TestProductionScaleSearchAndNotificationQueries(t *testing.T) {
+	s, h, db := testServer(t)
+	meta := seedProductionSearchAndNotificationDataset(t, s, db)
+
+	runProductionSearchAndNotificationAssertions(t, h, db, meta)
 
 	t.Run("QueryPlans_ExplainAnalysis_AndScanCost", func(t *testing.T) {
 		// 1. Notification keyset query
@@ -617,34 +621,114 @@ func TestMySQLProductionSearchAndNotificationQueries(t *testing.T) {
 	s := NewServer(tx, "test-signing-secret-at-least-32-bytes", t.TempDir())
 	meta := seedProductionSearchAndNotificationDataset(t, s, tx)
 
-	// Verify MySQL EXPLAIN for notifications keyset pagination
-	notifQuery := "SELECT * FROM notifications WHERE user_id = ? AND id < ? ORDER BY id DESC LIMIT 31"
-	rows := explainMySQL(t, tx, notifQuery, meta.ViewerID, 1000)
-	if len(rows) == 0 {
-		t.Fatal("empty explain output for notifications keyset")
-	}
-	r := rows[0]
-	t.Logf("MySQL Plan (Notifications): table=%s type=%s key=%s rows=%d extra=%s",
-		r.Table, r.Type, r.Key.String, r.Rows, r.Extra)
+	// Run full functional assertions across 2,000 users, 20,000 videos, 1,000 notifications on real MySQL
+	runProductionSearchAndNotificationAssertions(t, s.Router(), tx, meta)
 
-	if strings.Contains(r.Extra, "Using filesort") {
-		t.Fatalf("notifications keyset requires filesort: %s", r.Extra)
-	}
+	// 1. Verify MySQL EXPLAIN & EXPLAIN ANALYZE for notifications keyset pagination
+	t.Run("MySQL_NotificationsKeyset", func(t *testing.T) {
+		notifQuery := "SELECT * FROM notifications WHERE user_id = ? AND id < ? ORDER BY id DESC LIMIT 31"
+		rows := explainMySQL(t, tx, notifQuery, meta.ViewerID, 1000)
+		if len(rows) == 0 {
+			t.Fatal("empty explain output for notifications keyset")
+		}
+		r := rows[0]
+		t.Logf("MySQL Plan (Notifications): table=%s type=%s key=%s rows=%d extra=%s",
+			r.Table, r.Type, r.Key.String, r.Rows, r.Extra)
 
-	// Verify unread count uses covering index
-	unreadQuery := "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL"
-	unreadRows := explainMySQL(t, tx, unreadQuery, meta.ViewerID)
-	if len(unreadRows) > 0 {
-		ur := unreadRows[0]
-		t.Logf("MySQL Plan (Unread Count): table=%s type=%s key=%s rows=%d extra=%s",
-			ur.Table, ur.Type, ur.Key.String, ur.Rows, ur.Extra)
-	}
+		if strings.Contains(r.Extra, "Using filesort") {
+			t.Fatalf("notifications keyset requires filesort: %s", r.Extra)
+		}
 
-	// Verify EXPLAIN ANALYZE if supported (MySQL 8.0+)
-	var analyzeResult []struct {
-		Explain string `gorm:"column:EXPLAIN"`
-	}
-	if err := tx.Raw("EXPLAIN ANALYZE " + notifQuery, meta.ViewerID, 1000).Scan(&analyzeResult).Error; err == nil && len(analyzeResult) > 0 {
-		t.Logf("MySQL EXPLAIN ANALYZE:\n%s", analyzeResult[0].Explain)
-	}
+		var analyzeResult []struct {
+			Explain string `gorm:"column:EXPLAIN"`
+		}
+		if err := tx.Raw("EXPLAIN ANALYZE " + notifQuery, meta.ViewerID, 1000).Scan(&analyzeResult).Error; err == nil && len(analyzeResult) > 0 {
+			t.Logf("MySQL EXPLAIN ANALYZE (Notifications):\n%s", analyzeResult[0].Explain)
+		}
+	})
+
+	// 2. Verify unread count uses covering index
+	t.Run("MySQL_NotificationsUnreadCount", func(t *testing.T) {
+		unreadQuery := "SELECT COUNT(*) FROM notifications WHERE user_id = ? AND read_at IS NULL"
+		unreadRows := explainMySQL(t, tx, unreadQuery, meta.ViewerID)
+		if len(unreadRows) > 0 {
+			ur := unreadRows[0]
+			t.Logf("MySQL Plan (Unread Count): table=%s type=%s key=%s rows=%d extra=%s",
+				ur.Table, ur.Type, ur.Key.String, ur.Rows, ur.Extra)
+		}
+		var analyzeResult []struct {
+			Explain string `gorm:"column:EXPLAIN"`
+		}
+		if err := tx.Raw("EXPLAIN ANALYZE " + unreadQuery, meta.ViewerID).Scan(&analyzeResult).Error; err == nil && len(analyzeResult) > 0 {
+			t.Logf("MySQL EXPLAIN ANALYZE (Unread Count):\n%s", analyzeResult[0].Explain)
+		}
+	})
+
+	// 3. User search keyset query
+	t.Run("MySQL_UserSearchKeyset", func(t *testing.T) {
+		userQuery := "SELECT * FROM users WHERE (username LIKE ? ESCAPE '!' OR nickname LIKE ? ESCAPE '!') AND id < ? ORDER BY id DESC LIMIT 21"
+		userRows := explainMySQL(t, tx, userQuery, "%test%", "%test%", 1000)
+		if len(userRows) > 0 {
+			ur := userRows[0]
+			t.Logf("MySQL Plan (User Search): table=%s type=%s key=%s rows=%d extra=%s",
+				ur.Table, ur.Type, ur.Key.String, ur.Rows, ur.Extra)
+		}
+		var analyzeResult []struct {
+			Explain string `gorm:"column:EXPLAIN"`
+		}
+		if err := tx.Raw("EXPLAIN ANALYZE " + userQuery, "%test%", "%test%", 1000).Scan(&analyzeResult).Error; err == nil && len(analyzeResult) > 0 {
+			t.Logf("MySQL EXPLAIN ANALYZE (User Search):\n%s", analyzeResult[0].Explain)
+		}
+	})
+
+	// 4. Video search shallow & deep queries
+	t.Run("MySQL_VideoSearchShallowAndDeep", func(t *testing.T) {
+		videoQuery := "SELECT * FROM videos WHERE status = ? AND (title LIKE ? ESCAPE '!' OR description LIKE ? ESCAPE '!') AND id < ? ORDER BY id DESC LIMIT 21"
+		videoRowsShallow := explainMySQL(t, tx, videoQuery, "published", "%GoStream%", "%GoStream%", 20000)
+		if len(videoRowsShallow) > 0 {
+			vr := videoRowsShallow[0]
+			t.Logf("MySQL Plan (Video Search Shallow): table=%s type=%s key=%s rows=%d extra=%s",
+				vr.Table, vr.Type, vr.Key.String, vr.Rows, vr.Extra)
+		}
+		var analyzeResultShallow []struct {
+			Explain string `gorm:"column:EXPLAIN"`
+		}
+		if err := tx.Raw("EXPLAIN ANALYZE "+videoQuery, "published", "%GoStream%", "%GoStream%", 20000).Scan(&analyzeResultShallow).Error; err == nil && len(analyzeResultShallow) > 0 {
+			t.Logf("MySQL EXPLAIN ANALYZE (Video Search Shallow):\n%s", analyzeResultShallow[0].Explain)
+		}
+
+		videoRowsDeep := explainMySQL(t, tx, videoQuery, "published", "%prod%", "%prod%", 10000)
+		if len(videoRowsDeep) > 0 {
+			vr := videoRowsDeep[0]
+			t.Logf("MySQL Plan (Video Search Deep): table=%s type=%s key=%s rows=%d extra=%s",
+				vr.Table, vr.Type, vr.Key.String, vr.Rows, vr.Extra)
+		}
+		var analyzeResultDeep []struct {
+			Explain string `gorm:"column:EXPLAIN"`
+		}
+		if err := tx.Raw("EXPLAIN ANALYZE "+videoQuery, "published", "%prod%", "%prod%", 10000).Scan(&analyzeResultDeep).Error; err == nil && len(analyzeResultDeep) > 0 {
+			t.Logf("MySQL EXPLAIN ANALYZE (Video Search Deep):\n%s", analyzeResultDeep[0].Explain)
+		}
+	})
+
+	// 5. Benchmark 50 video search iterations on real 20,000 videos MySQL table
+	t.Run("MySQL_BenchmarkVideoSearchLatency", func(t *testing.T) {
+		videoQuery := "SELECT * FROM videos WHERE status = ? AND (title LIKE ? ESCAPE '!' OR description LIKE ? ESCAPE '!') AND id < ? ORDER BY id DESC LIMIT 21"
+		const iters = 50
+		var durations []time.Duration
+		for i := 0; i < iters; i++ {
+			t0 := time.Now()
+			var vRows []Video
+			if err := tx.Raw(videoQuery, "published", "%prod%", "%prod%", 15000).Scan(&vRows).Error; err != nil {
+				t.Fatal(err)
+			}
+			durations = append(durations, time.Since(t0))
+		}
+		slices.Sort(durations)
+		p50 := durations[len(durations)/2]
+		p95 := durations[len(durations)*95/100]
+		maxDur := durations[len(durations)-1]
+
+		t.Logf("MySQL Production Search Latency (20,000 videos, 50 queries): P50=%v P95=%v Max=%v", p50, p95, maxDur)
+	})
 }

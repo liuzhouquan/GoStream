@@ -17,7 +17,10 @@ import (
 	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	gormmysql "gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 // TestComponentOutage_HealthAndReadySemantics verifies:
@@ -354,12 +357,21 @@ func TestComponentOutage_RabbitMQOutboxPersistenceAndRecovery(t *testing.T) {
 func TestOutage_MinIOStorageUnavailableAndNoOrphanSQL(t *testing.T) {
 	endpoint := os.Getenv("GOSTREAM_TEST_MINIO_ENDPOINT")
 	if endpoint == "" {
-		t.Skip("GOSTREAM_TEST_MINIO_ENDPOINT not set; skipping MinIO integration sub-test")
+		endpoint = os.Getenv("GOSTREAM_MINIO_ENDPOINT")
+	}
+	if endpoint == "" {
+		t.Skip("GOSTREAM_TEST_MINIO_ENDPOINT / GOSTREAM_MINIO_ENDPOINT not set; skipping MinIO integration sub-test")
 	}
 
 	ctx := context.Background()
 	access := os.Getenv("GOSTREAM_TEST_MINIO_ACCESS_KEY")
+	if access == "" {
+		access = "gostreamminio"
+	}
 	secret := os.Getenv("GOSTREAM_TEST_MINIO_SECRET_KEY")
+	if secret == "" {
+		secret = "gostream-local-minio-secret"
+	}
 	bucket := fmt.Sprintf("gostream-outage-%d", time.Now().UnixNano())
 
 	directStore, err := NewMinIOMediaStore(ctx, endpoint, access, secret, bucket, false)
@@ -474,9 +486,9 @@ func TestOutage_MinIOStorageUnavailableAndNoOrphanSQL(t *testing.T) {
 }
 
 // TestComponentOutage_WorkerRestartAndLeaseReclaim verifies:
-// 1. When an active completion or outbox worker crashes and its lease expires,
-//    a restarted/new worker safely re-claims the session/event without duplication.
-// 2. Stale workers holding expired leases are fenced from committing changes.
+//  1. When an active completion or outbox worker crashes and its lease expires,
+//     a restarted/new worker safely re-claims the session/event without duplication.
+//  2. Stale workers holding expired leases are fenced from committing changes.
 func TestComponentOutage_WorkerRestartAndLeaseReclaim(t *testing.T) {
 	s, h, db := testServer(t)
 
@@ -567,4 +579,263 @@ func TestComponentOutage_WorkerRestartAndLeaseReclaim(t *testing.T) {
 
 	_ = s
 	_ = userID
+}
+
+func TestMySQLComponentOutage_AllGates(t *testing.T) {
+	dsn := os.Getenv("GOSTREAM_TEST_MYSQL_DSN")
+	if dsn == "" {
+		t.Skip("set GOSTREAM_TEST_MYSQL_DSN to run real MySQL component outage verification")
+	}
+	db, err := gorm.Open(gormmysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pool, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = pool.Close() })
+	// All subtests share one connection/Server; no independent process needs committed rows.
+	// Roll back this fixture so later MySQL recommendation tests see their original database.
+	db = db.Begin()
+	if db.Error != nil {
+		t.Fatal(db.Error)
+	}
+	t.Cleanup(func() {
+		if err := db.Rollback().Error; err != nil {
+			t.Errorf("rollback component outage fixture: %v", err)
+		}
+	})
+
+	gin.SetMode(gin.TestMode)
+	mediaDir := t.TempDir()
+	s := NewServer(db, "mysql-component-outage-jwt-secret-at-least-32-bytes", mediaDir)
+	h := s.Router()
+
+	t.Run("MySQL_HealthAndReadySemantics", func(t *testing.T) {
+		hRes := request(t, h, http.MethodGet, "/health", "", nil)
+		if hRes.Code != http.StatusOK {
+			t.Fatalf("expected /health 200, got %d", hRes.Code)
+		}
+		rRes := request(t, h, http.MethodGet, "/ready", "", nil)
+		if rRes.Code != http.StatusOK {
+			t.Fatalf("expected /ready 200, got %d", rRes.Code)
+		}
+
+		mr := miniredis.NewMiniRedis()
+		if err := mr.Start(); err != nil {
+			t.Fatal(err)
+		}
+		rc := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+		s.UseRedisFeedCache(rc)
+		mr.Close()
+		_ = rc.Close()
+
+		hDuring := request(t, h, http.MethodGet, "/health", "", nil)
+		if hDuring.Code != http.StatusOK {
+			t.Fatalf("expected /health 200 during Redis outage, got %d", hDuring.Code)
+		}
+		rDuring := request(t, h, http.MethodGet, "/ready", "", nil)
+		if rDuring.Code != http.StatusOK {
+			t.Fatalf("expected /ready 200 during Redis outage, got %d", rDuring.Code)
+		}
+	})
+
+	t.Run("MySQL_RabbitMQOutboxPersistenceAndRecovery", func(t *testing.T) {
+		tag := fmt.Sprintf("%d", time.Now().UnixNano())
+		authorID, authorTok := registerUserWithPeer(t, h, "my_rb_u1_"+tag, 1)
+		_, viewerTok := registerUserWithPeer(t, h, "my_rb_u2_"+tag, 2)
+
+		v := Video{AuthorID: authorID, Title: "MySQL Rabbit Video " + tag, MediaURL: "/media/rb_" + tag + ".mp4", Status: "published"}
+		if err := db.Create(&v).Error; err != nil {
+			t.Fatal(err)
+		}
+
+		var brokerOnline atomic.Bool
+		brokerOnline.Store(false)
+		var publishedEvents []OutboxEvent
+
+		dispatch := func(ctx context.Context, item OutboxEvent) error {
+			if !brokerOnline.Load() {
+				return errors.New("RabbitMQ connection refused: broker offline")
+			}
+			publishedEvents = append(publishedEvents, item)
+			return nil
+		}
+
+		likeRes := request(t, h, http.MethodPut, fmt.Sprintf("/api/videos/%d/like", v.ID), viewerTok, nil)
+		if likeRes.Code != http.StatusOK {
+			t.Fatalf("like expected 200, got %d", likeRes.Code)
+		}
+
+		commentRes := request(t, h, http.MethodPost, fmt.Sprintf("/api/videos/%d/comments", v.ID), viewerTok, map[string]string{
+			"body": "comment during MySQL broker outage",
+		})
+		if commentRes.Code != http.StatusCreated {
+			t.Fatalf("comment expected 201, got %d", commentRes.Code)
+		}
+
+		var updated Video
+		if err := db.First(&updated, v.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if updated.LikeCount != 1 || updated.CommentCount != 1 {
+			t.Fatalf("expected like=1 comment=1 in MySQL, got like=%d comment=%d", updated.LikeCount, updated.CommentCount)
+		}
+
+		processed, err := s.processOutboxOnce(context.Background(), dispatch)
+		if err != nil {
+			t.Fatalf("processOutboxOnce: %v", err)
+		}
+		if processed != 2 {
+			t.Fatalf("expected 2 processed events during outage, got %d", processed)
+		}
+
+		var notices []Notification
+		if err := db.Where("video_id = ?", v.ID).Find(&notices).Error; err != nil {
+			t.Fatal(err)
+		}
+		if len(notices) != 2 {
+			t.Fatalf("expected 2 notifications in MySQL, got %d", len(notices))
+		}
+		var noticeKeys []string
+		for _, n := range notices {
+			noticeKeys = append(noticeKeys, fmt.Sprintf("notification:%d", n.ID))
+		}
+
+		var stillPending []OutboxEvent
+		if err := db.Where("topic = ? AND published_at IS NULL AND event_key IN ?", notificationCreatedTopic, noticeKeys).Find(&stillPending).Error; err != nil {
+			t.Fatal(err)
+		}
+		if len(stillPending) != 2 {
+			t.Fatalf("expected 2 still pending events in MySQL, got %d", len(stillPending))
+		}
+		for _, ev := range stillPending {
+			if ev.Attempts != 1 || !strings.Contains(ev.LastError, "broker offline") {
+				t.Fatalf("expected attempt=1 with broker offline error in MySQL, got %+v", ev)
+			}
+		}
+
+		// Broker recovers
+		brokerOnline.Store(true)
+		if err := db.Model(&OutboxEvent{}).Where("published_at IS NULL AND event_key IN ?", noticeKeys).
+			Update("available_at", time.Now().UTC().Add(-time.Second)).Error; err != nil {
+			t.Fatal(err)
+		}
+
+		processedAfter, err := s.processOutboxOnce(context.Background(), dispatch)
+		if err != nil {
+			t.Fatalf("processOutboxOnce after recovery: %v", err)
+		}
+		if processedAfter != 2 {
+			t.Fatalf("expected 2 processed events after recovery, got %d", processedAfter)
+		}
+
+		// Consumer delivery and idempotency
+		for _, ev := range publishedEvents {
+			body, err := marshalBrokerNotification(ev)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dup, err := s.acceptBrokerNotification(context.Background(), body, ev.EventKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if dup {
+				t.Fatal("first delivery must not be duplicate")
+			}
+			dup2, err := s.acceptBrokerNotification(context.Background(), body, ev.EventKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !dup2 {
+				t.Fatal("second delivery must be detected as duplicate in MySQL")
+			}
+		}
+
+		notifRes := request(t, h, http.MethodGet, "/api/notifications", authorTok, nil)
+		if notifRes.Code != http.StatusOK {
+			t.Fatalf("notifications expected 200, got %d", notifRes.Code)
+		}
+	})
+
+	t.Run("MySQL_WorkerRestartAndLeaseReclaim", func(t *testing.T) {
+		tag := fmt.Sprintf("%d", time.Now().UnixNano())
+		_, tok := registerUserWithPeer(t, h, "my_lreclaim_"+tag, 1)
+
+		created := request(t, h, http.MethodPost, "/api/uploads/sessions", tok, map[string]any{
+			"filename": "lease_reclaim_" + tag + ".mp4",
+			"size":     len(sampleMP4),
+		})
+		if created.Code != http.StatusCreated {
+			t.Fatalf("create session: %d", created.Code)
+		}
+		var session UploadSession
+		_ = json.Unmarshal(created.Body.Bytes(), &session)
+
+		if r := putTestChunk(h, tok, session.ID, 0, sampleMP4); r.Code != http.StatusOK {
+			t.Fatalf("put chunk: %d", r.Code)
+		}
+
+		past := time.Now().UTC().Add(-time.Minute)
+		if err := db.Model(&UploadSession{}).Where("id = ?", session.ID).Updates(map[string]any{
+			"status":      "completing",
+			"lease_until": past,
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+
+		completeRes := request(t, h, http.MethodPost, "/api/uploads/sessions/"+session.ID+"/complete", tok, nil)
+		if completeRes.Code != http.StatusOK {
+			t.Fatalf("reclaimed completion expected 200, got %d: %s", completeRes.Code, completeRes.Body.String())
+		}
+
+		var finishedSession UploadSession
+		if err := db.First(&finishedSession, "id = ?", session.ID).Error; err != nil || finishedSession.Status != "completed" {
+			t.Fatalf("expected completed session in MySQL, got %+v", finishedSession)
+		}
+
+		// Outbox monotonic generation fence
+		event := OutboxEvent{
+			EventKey:    "my-lease-guard-" + tag,
+			Topic:       "notification.deliver",
+			Payload:     `{"notification_id": 999}`,
+			AvailableAt: time.Now().UTC().Add(-time.Second),
+		}
+		if err := db.Create(&event).Error; err != nil {
+			t.Fatal(err)
+		}
+
+		worker1Lease := time.Now().UTC().Add(30 * time.Second)
+		claim1 := db.Model(&OutboxEvent{}).Where("id = ? AND attempts = 0", event.ID).
+			Updates(map[string]any{"available_at": worker1Lease, "attempts": 1})
+		if claim1.RowsAffected != 1 {
+			t.Fatal("worker 1 claim failed in MySQL")
+		}
+
+		// Lease expires
+		expiredLease := time.Now().UTC().Add(-time.Second)
+		_ = db.Model(&OutboxEvent{}).Where("id = ?", event.ID).Update("available_at", expiredLease)
+
+		worker2Lease := time.Now().UTC().Add(30 * time.Second)
+		claim2 := db.Model(&OutboxEvent{}).Where("id = ? AND attempts = 1 AND available_at <= ?", event.ID, time.Now().UTC()).
+			Updates(map[string]any{"available_at": worker2Lease, "attempts": 2})
+		if claim2.RowsAffected != 1 {
+			t.Fatal("worker 2 claim failed in MySQL")
+		}
+
+		finished := time.Now().UTC()
+		res := db.Model(&OutboxEvent{}).Where("id = ? AND attempts = 2 AND available_at > ?", event.ID, finished).
+			Updates(map[string]any{"published_at": finished})
+		if res.RowsAffected != 1 {
+			t.Fatal("worker 2 mark published failed in MySQL")
+		}
+
+		staleUpdate := db.Model(&OutboxEvent{}).Where("id = ? AND attempts = 1", event.ID).
+			Updates(map[string]any{"published_at": time.Now().UTC()})
+		if staleUpdate.RowsAffected != 0 {
+			t.Fatalf("fencing failed in MySQL: stale worker affected %d rows", staleUpdate.RowsAffected)
+		}
+	})
 }

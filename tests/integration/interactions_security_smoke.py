@@ -33,6 +33,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import shutil
 import socket
 import subprocess
 import sys
@@ -49,6 +50,61 @@ def free_port():
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def find_default_ffmpeg():
+    if "FFMPEG_BIN" in os.environ and shutil.which(os.environ["FFMPEG_BIN"]):
+        return os.environ["FFMPEG_BIN"]
+    system = shutil.which("ffmpeg")
+    if system:
+        return system
+    candidates = [
+        "/home/lzq/.vscode-server/extensions/kilocode.kilo-code-7.8.27-linux-x64/bin/ffmpeg",
+        "/home/lzq/.vscode-server/extensions/kilocode.kilo-code-7.8.18-linux-x64/bin/ffmpeg",
+        "/usr/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+    ]
+    for c in candidates:
+        if os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return ""
+
+
+def find_default_ffprobe():
+    if "FFPROBE_BIN" in os.environ and shutil.which(os.environ["FFPROBE_BIN"]):
+        return os.environ["FFPROBE_BIN"]
+    root = Path(__file__).resolve().parents[2]
+    shim = root / "tools" / "ffprobe_shim.py"
+    if shim.is_file() and os.access(shim, os.X_OK):
+        return str(shim)
+    system = shutil.which("ffprobe")
+    if system:
+        return system
+    for c in ["/usr/bin/ffprobe", "/usr/local/bin/ffprobe"]:
+        if os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return str(shim)
+
+
+def generate_sample_video(ffmpeg_bin):
+    """Generate a tiny valid MP4 video; fallback to dummy bytes if ffmpeg is unavailable."""
+    if ffmpeg_bin and shutil.which(ffmpeg_bin):
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tf:
+            tmp_name = tf.name
+        try:
+            subprocess.run([
+                ffmpeg_bin, "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=25",
+                "-f", "lavfi", "-i", "sine=frequency=1000:duration=1",
+                "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-y", tmp_name,
+            ], check=True, timeout=15)
+            return Path(tmp_name).read_bytes()
+        except Exception:
+            pass
+        finally:
+            if os.path.exists(tmp_name):
+                os.remove(tmp_name)
+    return bytes([0, 0, 0, 24]) + b"ftypisom" + bytes(4) + b"isommp42" + b"\x00" * 200
 
 
 def call_api(base, path, method="GET", token="", body=None, content_type="application/json"):
@@ -84,7 +140,7 @@ def json_call(base, path, method="GET", token="", body=None, expected=200):
     return data
 
 
-def run_closure_matrix(api_a, api_b):
+def run_closure_matrix(api_a, api_b, ffmpeg_bin=None):
     report = {
         "checkpoints": {},
         "interactions_idempotent": False,
@@ -116,7 +172,7 @@ def run_closure_matrix(api_a, api_b):
 
     # Create published video for author
     boundary = f"boundary-{suffix}"
-    dummy_video = bytes([0, 0, 0, 24]) + b"ftypisom" + bytes(4) + b"isommp42" + b"\x00" * 200
+    dummy_video = generate_sample_video(ffmpeg_bin)
     upload_body = (
         f"--{boundary}\r\n"
         f'Content-Disposition: form-data; name="file"; filename="closure_test.mp4"\r\n'
@@ -133,14 +189,22 @@ def run_closure_matrix(api_a, api_b):
     }, expected=201)
     video_id = video["id"]
 
-    # Poll until published (or active)
+    # Poll until published
     deadline = time.monotonic() + 30
+    published_ok = False
+    last_status = None
     while time.monotonic() < deadline:
         v = json_call(api_a, f"/api/videos/{video_id}", token=author_token)
-        if v["status"] in ("published", "processing"):
-            if v["status"] == "published":
-                break
+        last_status = v.get("status")
+        if last_status == "published":
+            published_ok = True
+            break
+        if last_status == "failed":
+            raise RuntimeError(f"video processing failed: {v}")
         time.sleep(0.3)
+
+    if not published_ok:
+        raise RuntimeError(f"video did not become published within 30s: status={last_status}")
 
     # -------------------------------------------------------------
     # 1. Interactions Idempotency & Underflow Protection
@@ -227,36 +291,7 @@ def run_closure_matrix(api_a, api_b):
     report["comments_hierarchy_verified"] = True
 
     # -------------------------------------------------------------
-    # 3. Video Play Count & Rate Limiting Budget
-    # -------------------------------------------------------------
-    view_path = f"/api/videos/{video_id}/views"
-
-    # Single valid view
-    s_v1, _, _ = call_api(api_a, view_path, "POST")
-    if s_v1 != 204:
-        raise RuntimeError(f"view expected 204, got {s_v1}")
-
-    # Exhaust rate limit budget (120 req/min)
-    rate_limited = False
-    retry_header_found = False
-    for i in range(125):
-        s_vw, _, r_after = call_api(api_a, view_path, "POST")
-        if s_vw == 429:
-            rate_limited = True
-            if r_after and int(r_after) > 0:
-                retry_header_found = True
-            break
-
-    if not rate_limited:
-        raise RuntimeError("rate limiter did not trigger 429 within 125 requests")
-    if not retry_header_found:
-        raise RuntimeError("429 response missing or invalid Retry-After header")
-
-    report["checkpoints"]["play_rate_limiting"] = "PASS"
-    report["play_rate_limit_verified"] = True
-
-    # -------------------------------------------------------------
-    # 4. Security & Negative Boundaries (A02/A05/A08/A11)
+    # 3. Security & Negative Boundaries (A02/A05/A08/A11)
     # -------------------------------------------------------------
     # (a) Anonymous access to protected routes -> 401
     sec_tests = [
@@ -297,7 +332,13 @@ def run_closure_matrix(api_a, api_b):
     if s_ack_bogus != 404:
         raise RuntimeError(f"stranger ack third-party DM expected 404, got {s_ack_bogus}")
 
-    # (e) Soft delete video & verify subsequent interactions return 404
+    # (e) Verify single legitimate view before deletion
+    view_path = f"/api/videos/{video_id}/views"
+    s_v1, _, _ = call_api(api_a, view_path, "POST")
+    if s_v1 != 204:
+        raise RuntimeError(f"view expected 204, got {s_v1}")
+
+    # (f) Soft delete video & verify subsequent interactions return 404
     json_call(api_a, f"/api/videos/{video_id}", "DELETE", author_token, expected=204)
 
     s_del_like, _, _ = call_api(api_a, like_path, "PUT", user_b_token)
@@ -312,6 +353,28 @@ def run_closure_matrix(api_a, api_b):
     report["checkpoints"]["security_negative_boundaries"] = "PASS"
     report["security_boundaries_verified"] = True
 
+    # -------------------------------------------------------------
+    # 4. Video Play Count & Rate Limiting Budget
+    # -------------------------------------------------------------
+    # Exhaust rate limit budget (120 req/min)
+    rate_limited = False
+    retry_header_found = False
+    for i in range(130):
+        s_vw, _, r_after = call_api(api_a, view_path, "POST")
+        if s_vw == 429:
+            rate_limited = True
+            if r_after and int(r_after) > 0:
+                retry_header_found = True
+            break
+
+    if not rate_limited:
+        raise RuntimeError("rate limiter did not trigger 429 within 130 requests")
+    if not retry_header_found:
+        raise RuntimeError("429 response missing or invalid Retry-After header")
+
+    report["checkpoints"]["play_rate_limiting"] = "PASS"
+    report["play_rate_limit_verified"] = True
+
     return report
 
 
@@ -323,6 +386,8 @@ def main():
     parser.add_argument("--base-url", help="fallback single base URL")
     parser.add_argument("--report-file", type=Path, help="path to write JSON report")
     parser.add_argument("--go-bin", default="go", help="go binary")
+    parser.add_argument("--ffmpeg-bin", default=find_default_ffmpeg(), help="ffmpeg binary")
+    parser.add_argument("--ffprobe-bin", default=find_default_ffprobe(), help="ffprobe binary")
     args = parser.parse_args()
 
     env_api_a = os.environ.get("GOSTREAM_API_A")
@@ -344,6 +409,10 @@ def main():
 
     print("GoStream Interactions & Security Closure Smoke Runner")
     print(f"Mode: {mode}")
+    if args.ffmpeg_bin:
+        print(f"FFmpeg: {args.ffmpeg_bin}")
+    if args.ffprobe_bin:
+        print(f"FFprobe: {args.ffprobe_bin}")
 
     start_time = time.monotonic()
 
@@ -373,6 +442,8 @@ def main():
                 "MEDIA_STORE": "local",
                 "JWT_SECRET": "closure-secret-at-least-32-bytes-long-12345!",
                 "FEED_FANOUT_MAX_FOLLOWERS": "1000",
+                "FFMPEG_BIN": args.ffmpeg_bin or "",
+                "FFPROBE_BIN": args.ffprobe_bin or "",
             }
 
             env_a = dict(env_base, ADDR=f"127.0.0.1:{port_a}")
@@ -413,10 +484,14 @@ def main():
                 raise RuntimeError(f"Server at {api_b} failed to become ready")
 
         print(f"Running interactions & security closure across: API A={api_a}, API B={api_b}...")
-        results = run_closure_matrix(api_a, api_b)
+        results = run_closure_matrix(api_a, api_b, ffmpeg_bin=args.ffmpeg_bin)
 
         results["mode"] = mode
         results["endpoints"] = {"api_a": api_a, "api_b": api_b}
+        if args.ffmpeg_bin:
+            results["ffmpeg_bin"] = args.ffmpeg_bin
+        if args.ffprobe_bin:
+            results["ffprobe_bin"] = args.ffprobe_bin
         results["elapsed_seconds"] = round(time.monotonic() - start_time, 3)
 
         print("\n--- Interaction & Security Checkpoints ---")

@@ -35,9 +35,88 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests/integration"))
+from acceptance_config import resolve_acceptance_target
 from launcher_lifecycle import LauncherInterrupted, cleanup_on_interrupt
 
 SAMPLE_MP4 = bytes([0, 0, 0, 24]) + b"ftypisom" + bytes(4) + b"isommp42"
+
+
+def find_default_ffmpeg() -> str | None:
+    if "FFMPEG_BIN" in os.environ and shutil.which(os.environ["FFMPEG_BIN"]):
+        return os.environ["FFMPEG_BIN"]
+    system = shutil.which("ffmpeg")
+    if system:
+        return system
+    candidates = [
+        "/home/lzq/.vscode-server/extensions/kilocode.kilo-code-7.8.27-linux-x64/bin/ffmpeg",
+        "/home/lzq/.vscode-server/extensions/kilocode.kilo-code-7.8.18-linux-x64/bin/ffmpeg",
+        "/usr/bin/ffmpeg",
+        "/usr/local/bin/ffmpeg",
+    ]
+    for c in candidates:
+        if os.path.isfile(c) and os.access(c, os.X_OK):
+            return c
+    return None
+
+
+def generate_valid_mp4() -> bytes:
+    ffmpeg = find_default_ffmpeg()
+    if ffmpeg:
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tf:
+            tmp_path = tf.name
+        try:
+            subprocess.run([
+                ffmpeg, "-hide_banner", "-loglevel", "error",
+                "-f", "lavfi", "-i", "testsrc=duration=1:size=320x240:rate=25",
+                "-f", "lavfi", "-i", "sine=frequency=1000:duration=1",
+                "-c:v", "libx264", "-c:a", "aac", "-pix_fmt", "yuv420p", "-y", tmp_path,
+            ], check=True)
+            with open(tmp_path, "rb") as f:
+                return f.read()
+        except Exception:
+            pass
+        finally:
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                pass
+    return SAMPLE_MP4 + b"gostream-outage-valid-fallback"
+
+
+class ComposeStackController:
+    """Controls container states on an existing Compose project without destroying it."""
+
+    def __init__(self, project_name: str, root_dir: Path | None = None):
+        self.project_name = project_name
+        self.root = Path(root_dir or ROOT).resolve()
+        self.compose_files = [
+            self.root / "docker-compose.yml",
+            self.root / "docker-compose.object.yml",
+            self.root / "tests/integration/object-test.compose.yml",
+        ]
+
+    def compose_cmd(self, *args):
+        cmd = ["docker", "compose", "-p", self.project_name]
+        for f in self.compose_files:
+            cmd.extend(["-f", str(f)])
+        cmd.extend(args)
+        return cmd
+
+    def run_compose(self, *args, check=True, capture_output=True):
+        cmd = self.compose_cmd(*args)
+        return subprocess.run(
+            cmd, cwd=self.root, check=check,
+            capture_output=capture_output, text=True
+        )
+
+    def get_running_services(self) -> set[str]:
+        try:
+            res = self.run_compose("ps", "--services", "--filter", "status=running", check=False)
+            if res.returncode == 0:
+                return set(line.strip() for line in res.stdout.splitlines() if line.strip())
+        except Exception:
+            pass
+        return set()
 
 
 def find_free_port() -> int:
@@ -237,15 +316,53 @@ class ComponentOutageRunner:
         self.project_name = project_name
         self.checkpoints = {}
         self.broker_event_ids = []
+        self.managed_stopped_services: set[str] = set()
+        self.initial_running_services: set[str] = set()
+
+    def stop_managed_service(self, service: str):
+        """Registers intent and stops the specified service in Compose mode.
+
+        Registers the service in self.managed_stopped_services BEFORE executing stop,
+        so that if stop fails or times out after taking effect, finally recovery can still
+        attempt to restore it. If initial running state was tracked, verifies the service was
+        running initially.
+        """
+        if self.mode != "compose":
+            return
+        if self.initial_running_services and service not in self.initial_running_services:
+            raise RuntimeError(f"Cannot stop service '{service}': service was not running initially")
+        self.managed_stopped_services.add(service)
+        if self.stack is not None:
+            self.stack.run_compose("stop", service)
+
+    def recover_managed_service(self, service: str, sleep_sec: float = 0):
+        """Restores a stopped service and unregisters it ONLY after start succeeds."""
+        if self.mode != "compose" or service not in self.managed_stopped_services:
+            return
+        if self.stack is not None:
+            self.stack.run_compose("start", service)
+            if sleep_sec > 0:
+                time.sleep(sleep_sec)
+        # ONLY discard after successful start without exception!
+        self.managed_stopped_services.discard(service)
 
     def query_sql(self, query: str):
         if self.mode == "compose":
-            cmd = [
-                "docker", "compose", "-p", self.project_name or "gostream-acc",
-                "exec", "-T", "mysql", "sh", "-c",
-                f'MYSQL_PWD="gostream-local" mysql -ugostream -D gostream --batch --skip-column-names -e "{query}"'
-            ]
-            res = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            if self.stack is not None and hasattr(self.stack, "compose_cmd"):
+                cmd = self.stack.compose_cmd(
+                    "exec", "-T", "mysql", "sh", "-c",
+                    f'MYSQL_PWD="gostream-local" mysql -ugostream -D gostream --batch --skip-column-names -e "{query}"'
+                )
+            else:
+                cmd = [
+                    "docker", "compose", "-p", self.project_name or "gostream-acc",
+                    "-f", str(ROOT / "docker-compose.yml"),
+                    "-f", str(ROOT / "docker-compose.object.yml"),
+                    "-f", str(ROOT / "tests/integration/object-test.compose.yml"),
+                    "exec", "-T", "mysql", "sh", "-c",
+                    f'MYSQL_PWD="gostream-local" mysql -ugostream -D gostream --batch --skip-column-names -e "{query}"'
+                ]
+            res = subprocess.run(cmd, cwd=str(ROOT), capture_output=True, text=True, check=True)
             return res.stdout.strip()
         else:
             conn = sqlite3.connect(self.db_path)
@@ -295,8 +412,13 @@ class ComponentOutageRunner:
                 time.sleep(0.2)
 
     def run_all(self, miniredis_proc=None, media_dir: str = "", restart_cb=None) -> dict:
-        if self.mode == "compose" and self.stack is None:
-            raise NotImplementedError("Compose outage testing requires an owned AcceptanceStack instance")
+        if self.mode == "compose":
+            if self.stack is None:
+                raise NotImplementedError("Compose outage testing requires an owned AcceptanceStack instance")
+            if hasattr(self.stack, "get_running_services"):
+                services = self.stack.get_running_services()
+                if isinstance(services, (set, list, tuple)):
+                    self.initial_running_services = set(services)
         print("============================================================")
         print("GoStream Component Outage & Persistence Runner (G09 / A01-A10)")
         print(f"Mode: {self.mode}, API A: {self.api_a}, API B: {self.api_b}")
@@ -347,49 +469,52 @@ class ComponentOutageRunner:
         assert ready_frame is not None, "ws_author did not receive ready frame"
 
         # 2b. Trigger Redis outage
-        if self.mode == "compose":
-            self.stack.run_compose("stop", "redis")
-        elif miniredis_proc is not None:
-            miniredis_proc.send_signal(signal.SIGTERM)
-            miniredis_proc.wait(timeout=5)
+        try:
+            if self.mode == "compose":
+                self.stop_managed_service("redis")
+            elif miniredis_proc is not None:
+                miniredis_proc.send_signal(signal.SIGTERM)
+                miniredis_proc.wait(timeout=5)
 
-        # 2c. During Redis outage: /ready must remain 200
-        for name, url in [("API A", self.api_a), ("API B", self.api_b)]:
-            r_stat, r_body, _ = call_api(url, "/ready")
-            assert r_stat == 200 and r_body.get("status") == "ready", f"{name} /ready altered during Redis outage: {r_stat}"
+            # 2c. During Redis outage: /ready must remain 200
+            for name, url in [("API A", self.api_a), ("API B", self.api_b)]:
+                r_stat, r_body, _ = call_api(url, "/ready")
+                assert r_stat == 200 and r_body.get("status") == "ready", f"{name} /ready altered during Redis outage: {r_stat}"
 
-        # 2d. Feed request during Redis outage falls back to SQL (200 OK)
-        feed_fallback = json_call(self.api_a, "/api/feed?scene=timeline&limit=10", expected=200)
-        assert "items" in feed_fallback, "feed fallback did not return items"
+            # 2d. Feed request during Redis outage falls back to SQL (200 OK)
+            feed_fallback = json_call(self.api_a, "/api/feed?scene=timeline&limit=10", expected=200)
+            assert "items" in feed_fallback, "feed fallback did not return items"
 
-        # 2e. IM direct message sent over WebSocket during Redis outage
-        im_body = f"persistent message during redis outage {suffix}"
-        client_msg_id = f"cli_outage_{suffix}"
-        ws_author.send_json({
-            "type": "message",
-            "recipient_id": viewer_id,
-            "client_id": client_msg_id,
-            "body": im_body,
-        })
-        ack_frame = ws_author.next_of_type("ack", timeout=5.0)
-        assert ack_frame is not None and ack_frame.get("client_id") == client_msg_id, f"did not receive ACK frame: {ack_frame}"
+            # 2e. IM direct message sent over WebSocket during Redis outage
+            im_body = f"persistent message during redis outage {suffix}"
+            client_msg_id = f"cli_outage_{suffix}"
+            ws_author.send_json({
+                "type": "message",
+                "recipient_id": viewer_id,
+                "client_id": client_msg_id,
+                "body": im_body,
+            })
+            ack_frame = ws_author.next_of_type("ack", timeout=5.0)
+            assert ack_frame is not None and ack_frame.get("client_id") == client_msg_id, f"did not receive ACK frame: {ack_frame}"
 
-        # Recipient reads message from SQL history on API B
-        hist = json_call(self.api_b, f"/api/messages?user_id={author_id}", "GET", token=viewer_token, expected=200)
-        hist_items = hist.get("items", [])
-        assert any(m.get("body") == im_body for m in hist_items), f"message not found in SQL history: {hist_items}"
+            # Recipient reads message from SQL history on API B
+            hist = json_call(self.api_b, f"/api/messages?user_id={author_id}", "GET", token=viewer_token, expected=200)
+            hist_items = hist.get("items", [])
+            assert any(m.get("body") == im_body for m in hist_items), f"message not found in SQL history: {hist_items}"
 
-        # Recipient unread count from SQL
-        unread = json_call(self.api_b, "/api/messages/unread", "GET", token=viewer_token, expected=200)
-        assert len(unread.get("items", [])) >= 1, f"expected unread items >= 1, got {unread}"
+            # Recipient unread count from SQL
+            unread = json_call(self.api_b, "/api/messages/unread", "GET", token=viewer_token, expected=200)
+            assert len(unread.get("items", [])) >= 1, f"expected unread items >= 1, got {unread}"
+        finally:
+            # Clean up author WebSocket
+            try:
+                ws_author.close()
+            except Exception:
+                pass
 
-        # Clean up author WebSocket
-        ws_author.close()
-
-        # 2f. Restore Redis
-        if self.mode == "compose":
-            self.stack.run_compose("start", "redis")
-            time.sleep(2)
+            # 2f. Restore Redis
+            if self.mode == "compose":
+                self.recover_managed_service("redis", sleep_sec=2)
 
         self.checkpoints["redis_outage_fallback_and_recovery"] = True
         print("  redis_outage_fallback_and_recovery: PASS")
@@ -399,13 +524,13 @@ class ComponentOutageRunner:
         # ------------------------------------------------------------------
         print("Testing Checkpoint 3: RabbitMQ Outage, Outbox Retention & Delivery...")
         # Upload a video by author for interaction
-        dummy_chunk = SAMPLE_MP4 + b"video-interaction-fixture"
+        video_bytes = generate_valid_mp4()
         v_sess = json_call(self.api_a, "/api/uploads/sessions", "POST", token=author_token, body={
-            "filename": "interaction_video.mp4", "size": len(dummy_chunk)
+            "filename": "interaction_video.mp4", "size": len(video_bytes)
         }, expected=201)
         v_sess_id = v_sess["id"]
         v_stat, _, _ = call_api(self.api_a, f"/api/uploads/sessions/{v_sess_id}/chunks/0", "PUT", token=author_token,
-                                body=dummy_chunk, content_type="application/octet-stream")
+                                body=video_bytes, content_type="application/octet-stream")
         assert v_stat == 200, f"chunk upload failed: {v_stat}"
         v_comp = json_call(self.api_a, f"/api/uploads/sessions/{v_sess_id}/complete", "POST", token=author_token, expected=200)
         video_url = v_comp["url"]
@@ -415,42 +540,54 @@ class ComponentOutageRunner:
         }, expected=201)
         target_video_id = video_resp["id"]
 
+        # Wait for video processing to reach published if ffmpeg/video processing is active
+        if self.mode == "compose" or video_resp.get("status") == "processing":
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline:
+                curr = json_call(self.api_a, f"/api/videos/{target_video_id}", "GET", token=author_token)
+                if curr.get("status") == "published":
+                    break
+                time.sleep(0.4)
+
         # 3a. Stop RabbitMQ in compose mode
+        try:
+            if self.mode == "compose":
+                self.stop_managed_service("rabbitmq")
+                time.sleep(2)
+
+            # 3b. Verify /ready remains 200 during broker outage
+            r_stat, _, _ = call_api(self.api_a, "/ready")
+            assert r_stat == 200, f"/ready altered during RabbitMQ outage: {r_stat}"
+
+            # 3c. Viewer likes and comments during broker outage
+            like_resp = json_call(self.api_b, f"/api/videos/{target_video_id}/like", "PUT", token=viewer_token, expected=200)
+            comment_body = f"comment during broker outage {suffix}"
+            comment_resp = json_call(self.api_b, f"/api/videos/{target_video_id}/comments", "POST", token=viewer_token, body={
+                "body": comment_body
+            }, expected=201)
+
+            # 3d. Verify SQL facts: interactions and pending outbox events exist
+            like_count_sql = int(self.query_sql(f"SELECT like_count FROM videos WHERE id = {target_video_id}"))
+            assert like_count_sql == 1, f"expected like_count=1 in SQL, got {like_count_sql}"
+
+            comment_count_sql = int(self.query_sql(f"SELECT comment_count FROM videos WHERE id = {target_video_id}"))
+            assert comment_count_sql == 1, f"expected comment_count=1 in SQL, got {comment_count_sql}"
+
+            if self.mode == "compose":
+                for kind in ("like", "comment"):
+                    predicate = (f"user_id={int(author_id)} AND actor_id={int(viewer_id)} "
+                                 f"AND video_id={int(target_video_id)} AND kind='{kind}'")
+                    assert int(self.query_sql(f"SELECT COUNT(*) FROM notifications WHERE {predicate}")) == 1
+                    self.broker_event_ids.append(int(self.query_sql(
+                        f"SELECT id FROM notifications WHERE {predicate}"
+                    )))
+                self.require_broker_event_state(self.broker_event_ids, recovered=False)
+        finally:
+            # 3e. Restore RabbitMQ in compose mode
+            if self.mode == "compose":
+                self.recover_managed_service("rabbitmq")
+
         if self.mode == "compose":
-            self.stack.run_compose("stop", "rabbitmq")
-            time.sleep(1)
-
-        # 3b. Verify /ready remains 200 during broker outage
-        r_stat, _, _ = call_api(self.api_a, "/ready")
-        assert r_stat == 200, f"/ready altered during RabbitMQ outage: {r_stat}"
-
-        # 3c. Viewer likes and comments during broker outage
-        like_resp = json_call(self.api_b, f"/api/videos/{target_video_id}/like", "PUT", token=viewer_token, expected=200)
-        comment_body = f"comment during broker outage {suffix}"
-        comment_resp = json_call(self.api_b, f"/api/videos/{target_video_id}/comments", "POST", token=viewer_token, body={
-            "body": comment_body
-        }, expected=201)
-
-        # 3d. Verify SQL facts: interactions and pending outbox events exist
-        like_count_sql = int(self.query_sql(f"SELECT like_count FROM videos WHERE id = {target_video_id}"))
-        assert like_count_sql == 1, f"expected like_count=1 in SQL, got {like_count_sql}"
-
-        comment_count_sql = int(self.query_sql(f"SELECT comment_count FROM videos WHERE id = {target_video_id}"))
-        assert comment_count_sql == 1, f"expected comment_count=1 in SQL, got {comment_count_sql}"
-
-        if self.mode == "compose":
-            for kind in ("like", "comment"):
-                predicate = (f"user_id={int(author_id)} AND actor_id={int(viewer_id)} "
-                             f"AND video_id={int(target_video_id)} AND kind='{kind}'")
-                assert int(self.query_sql(f"SELECT COUNT(*) FROM notifications WHERE {predicate}")) == 1
-                self.broker_event_ids.append(int(self.query_sql(
-                    f"SELECT id FROM notifications WHERE {predicate}"
-                )))
-            self.require_broker_event_state(self.broker_event_ids, recovered=False)
-
-        # 3e. Restore RabbitMQ in compose mode
-        if self.mode == "compose":
-            self.stack.run_compose("start", "rabbitmq")
             self.wait_for_broker_event_recovery(self.broker_event_ids)
 
         # 3f. Author verifies notifications received on API A
@@ -473,7 +610,7 @@ class ComponentOutageRunner:
         # Checkpoint 4: MinIO Outage, Isolation & Resumable Recovery
         # ------------------------------------------------------------------
         print("Testing Checkpoint 4: MinIO Outage, Isolation & Recovery...")
-        chunk_data = SAMPLE_MP4 + b"resumable-outage-sample-data"
+        chunk_data = generate_valid_mp4()
         outage_sess = json_call(self.api_a, "/api/uploads/sessions", "POST", token=author_token, body={
             "filename": "minio_outage.mp4", "size": len(chunk_data)
         }, expected=201)
@@ -482,36 +619,41 @@ class ComponentOutageRunner:
         assets_before = int(self.query_sql("SELECT count(*) FROM media_assets"))
 
         # 4a. Stop MinIO in compose mode or write-protect upload chunks directory in sqlite mode
+        chunks_protected = False
         chunks_dir = ""
-        if self.mode == "compose":
-            self.stack.run_compose("stop", "minio")
-            time.sleep(1)
-        elif media_dir:
-            chunks_dir = f"{media_dir}.chunks"
-            os.makedirs(chunks_dir, exist_ok=True)
-            os.chmod(chunks_dir, 0o555)
+        try:
+            if self.mode == "compose":
+                self.stop_managed_service("minio")
+                time.sleep(2)
+            elif media_dir:
+                chunks_dir = f"{media_dir}.chunks"
+                os.makedirs(chunks_dir, exist_ok=True)
+                os.chmod(chunks_dir, 0o555)
+                chunks_protected = True
 
-        # /ready remains 200 during storage outage
-        r_stat, _, _ = call_api(self.api_a, "/ready")
-        assert r_stat == 200, f"/ready altered during MinIO outage: {r_stat}"
+            # /ready remains 200 during storage outage
+            r_stat, _, _ = call_api(self.api_a, "/ready")
+            assert r_stat == 200, f"/ready altered during MinIO outage: {r_stat}"
 
-        # 4b. Chunk upload during outage must return 500 or 503
-        c_stat, c_err, _ = call_api(self.api_a, f"/api/uploads/sessions/{outage_sess_id}/chunks/0", "PUT",
-                                    token=author_token, body=chunk_data, content_type="application/octet-stream")
-        assert c_stat in (500, 503), f"expected 500/503 during storage outage, got {c_stat}: {c_err}"
+            # 4b. Chunk upload during outage must return 500 or 503
+            c_stat, c_err, _ = call_api(self.api_a, f"/api/uploads/sessions/{outage_sess_id}/chunks/0", "PUT",
+                                        token=author_token, body=chunk_data, content_type="application/octet-stream")
+            assert c_stat in (500, 503), f"expected 500/503 during storage outage, got {c_stat}: {c_err}"
 
-        # Invariant: 0 chunks recorded in SQL, media_assets unchanged
-        chunks_in_db = int(self.query_sql(f"SELECT count(*) FROM upload_chunks WHERE session_id = '{outage_sess_id}'"))
-        assert chunks_in_db == 0, f"failed chunk created orphan SQL row: {chunks_in_db}"
-        assets_during = int(self.query_sql("SELECT count(*) FROM media_assets"))
-        assert assets_during == assets_before, f"failed upload created orphan media_asset: {assets_during} != {assets_before}"
-
-        # 4c. Restore MinIO / write permissions
-        if self.mode == "compose":
-            self.stack.run_compose("start", "minio")
-            time.sleep(3)
-        elif chunks_dir:
-            os.chmod(chunks_dir, 0o755)
+            # Invariant: 0 chunks recorded in SQL, media_assets unchanged
+            chunks_in_db = int(self.query_sql(f"SELECT count(*) FROM upload_chunks WHERE session_id = '{outage_sess_id}'"))
+            assert chunks_in_db == 0, f"failed chunk created orphan SQL row: {chunks_in_db}"
+            assets_during = int(self.query_sql("SELECT count(*) FROM media_assets"))
+            assert assets_during == assets_before, f"failed upload created orphan media_asset: {assets_during} != {assets_before}"
+        finally:
+            # 4c. Restore MinIO / write permissions
+            if self.mode == "compose":
+                self.recover_managed_service("minio", sleep_sec=3)
+            if chunks_protected:
+                try:
+                    os.chmod(chunks_dir, 0o755)
+                except Exception:
+                    pass
 
         # 4d. Re-upload chunk succeeds on API B
         c_stat2, c_resp2, _ = call_api(self.api_b, f"/api/uploads/sessions/{outage_sess_id}/chunks/0", "PUT",
@@ -578,25 +720,16 @@ def main():
     parser.add_argument("--mode", choices=["auto", "sqlite", "compose"], default="auto")
     parser.add_argument("--api-a", help="API A URL")
     parser.add_argument("--api-b", help="API B URL")
-    parser.add_argument("--report-file", type=Path, default=ROOT / "data/diagnostics/component_outage_smoke.json")
+    parser.add_argument("--report", "--report-file", dest="report_file", type=Path,
+                        default=ROOT / "data/diagnostics/component_outage_smoke.json")
     parser.add_argument("--go-bin", default="/usr/local/go/bin/go")
     args = parser.parse_args()
-
-    env_api_a = os.environ.get("GOSTREAM_API_A")
-    env_api_b = os.environ.get("GOSTREAM_API_B")
-    compose_active = os.environ.get("GOSTREAM_COMPOSE_ACTIVE") == "1"
-
-    if args.mode == "compose" or (args.mode == "auto" and (args.api_a or env_api_a or compose_active)):
-        mode = "compose"
-        api_a = (args.api_a or env_api_a or "http://127.0.0.1:18080").rstrip("/")
-        api_b = (args.api_b or env_api_b or "http://127.0.0.1:18081").rstrip("/")
-    else:
-        mode = "sqlite"
-        api_a = api_b = None
 
     report_path = args.report_file.resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.unlink(missing_ok=True)
+
+    mode, external_api_a, external_api_b = resolve_acceptance_target(args.mode)
 
     if mode == "sqlite":
         with tempfile.TemporaryDirectory(prefix="gostream_outage_") as tmpdir:
@@ -664,10 +797,20 @@ def main():
                         p.kill()
     else:
         project_name = os.environ.get("GOSTREAM_STACK_PROJECT", "gostream-acc")
-        runner = ComponentOutageRunner(mode="compose", api_a=api_a, api_b=api_b, project_name=project_name)
-        report = runner.run_all()
-        report_path.write_text(json.dumps(report, indent=2))
-        print(f"Report written to: {report_path}")
+        stack = ComposeStackController(project_name=project_name)
+        runner = ComponentOutageRunner(mode="compose", api_a=external_api_a, api_b=external_api_b,
+                                       stack=stack, project_name=project_name)
+        try:
+            report = runner.run_all()
+            report_path.write_text(json.dumps(report, indent=2))
+            print(f"Report written to: {report_path}")
+        finally:
+            for svc in list(runner.managed_stopped_services):
+                try:
+                    stack.run_compose("start", svc)
+                    runner.managed_stopped_services.discard(svc)
+                except Exception:
+                    pass
 
 
 if __name__ == "__main__":
