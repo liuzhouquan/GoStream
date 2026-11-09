@@ -1,6 +1,8 @@
 """Diagnostic unit tests for Component Outage & Persistence Runner (G09 / A01-A10)."""
 
 import json
+import os
+import shutil
 from pathlib import Path
 import re
 import subprocess
@@ -12,6 +14,18 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests/integration"))
 
 import component_outage_smoke
+
+
+def declared_go_binary():
+    """Use the configured toolchain on both developer machines and setup-go runners."""
+    binary = os.environ.get("GOSTREAM_GO_BIN") or shutil.which("go") or "/usr/local/go/bin/go"
+    required = "go" + re.search(r"^go (\S+)", (ROOT / "go.mod").read_text(), re.MULTILINE).group(1)
+    # Do not silently select or download an older/newer toolchain for this check.
+    env = dict(os.environ, GOTOOLCHAIN="local")
+    actual = subprocess.check_output([binary, "env", "GOVERSION"], env=env, text=True, timeout=10).strip()
+    if actual != required:
+        raise RuntimeError(f"Go version mismatch: required {required}, found {actual} at {binary}")
+    return binary
 
 
 class ComponentOutageDiagnosticUnitTest(unittest.TestCase):
@@ -68,7 +82,7 @@ class ComponentOutageDiagnosticUnitTest(unittest.TestCase):
     def test_seed_feed_benchmark_dsn_redaction(self):
         # Test standard password and complex password with :// special characters
         for secret in ["my_secret_token", "sentinel_secret://tail", "pw@with!chars"]:
-            cmd = ["/usr/local/go/bin/go", "run", "./tools/seed_feed_benchmark.go", "-driver", "mysql", "-dsn", f"fake_user:{secret}@tcp(127.0.0.1:99999)/gostream"]
+            cmd = [declared_go_binary(), "run", "./tools/seed_feed_benchmark.go", "-driver", "mysql", "-dsn", f"fake_user:{secret}@tcp(127.0.0.1:99999)/gostream"]
             res = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             self.assertNotEqual(res.returncode, 0)
             output = res.stdout + res.stderr
@@ -77,7 +91,7 @@ class ComponentOutageDiagnosticUnitTest(unittest.TestCase):
 
     def test_seed_group_im_benchmark_dsn_redaction(self):
         for secret in ["my_secret_token", "sentinel_secret://tail", "pw@with!chars"]:
-            cmd = ["/usr/local/go/bin/go", "run", "./tools/seed_group_im_benchmark.go", "-driver", "mysql", "-dsn", f"fake_user:{secret}@tcp(127.0.0.1:99999)/gostream"]
+            cmd = [declared_go_binary(), "run", "./tools/seed_group_im_benchmark.go", "-driver", "mysql", "-dsn", f"fake_user:{secret}@tcp(127.0.0.1:99999)/gostream"]
             res = subprocess.run(cmd, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             self.assertNotEqual(res.returncode, 0)
             output = res.stdout + res.stderr

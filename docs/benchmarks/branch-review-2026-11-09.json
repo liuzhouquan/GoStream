@@ -98,5 +98,16 @@
   ],
   "proxy_root_cause": "loopback urllib request used environment HTTP proxy; verified by per-port TCP probe and real HTTP regression; only loopback routing changed",
   "formal_production_scale_benchmark_run": false,
-  "remote_ci": "pending integration PR; authoritative status must be read from GitHub"
+  "remote_ci": "pending integration PR; authoritative status must be read from GitHub",
+  "ci_first_run": {
+    "run_id": 42552071306,
+    "quality_result": "failure",
+    "cause": "DSN diagnostic tests hardcoded /usr/local/go/bin/go; missing on setup-go runner",
+    "action": "resolved Go via explicit setting or PATH with exact version verification; new head runs all CI jobs"
+  },
+  "targeted_go_path_fix_tests": {
+    "test_pattern": "test_component_outage.py -k dsn_redaction",
+    "test_count": 2,
+    "result": "passed"
+  }
 }
