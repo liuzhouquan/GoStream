@@ -59,7 +59,15 @@ class RecoveryIsolationTest(unittest.TestCase):
             run.assert_not_called()
 
     def test_owned_stack_cleanup_runs_on_drill_failure_and_cancellation(self):
-        for failure in (RuntimeError("restore failed"), recovery.LauncherInterrupted(15)):
+        stage_failures = (
+            RuntimeError("snapshot dump failed"),
+            RuntimeError("mysql restore failed"),
+            RuntimeError("minio restore failed"),
+            TimeoutError("restored API /ready timeout"),
+            AssertionError("migration replay key altered"),
+            recovery.LauncherInterrupted(15),
+        )
+        for failure in stage_failures:
             with self.subTest(failure=type(failure).__name__), tempfile.TemporaryDirectory() as directory:
                 report = Path(directory) / 'report.json'
                 argv = ['recovery', '--mode', 'compose', '--compose-e2e', '--report', str(report)]

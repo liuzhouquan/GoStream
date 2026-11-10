@@ -2,6 +2,24 @@
 
 Last updated: 2026-11-10
 
+2026-11-10 CLOSE-02 / G10 Formal Scale Disaster Recovery Acceptance (Gate A10 ACCEPTED):
+- Executed `migration_backup_recovery_smoke.py --mode compose --compose-e2e --formal-scale` on ephemeral Docker Compose AcceptanceStack:
+  - Preserved full formal hybrid scale: 2,005 users, 20,010 published videos, 11,001 follows, 50,002 interactions, 2 comments (root + author reply), 2 direct messages with device ACK compaction (`message_device_ack_ranges`), 1 chat group with device read cursor (`group_device_reads`), 10 notifications (all columns verified via SQL), and 1 open upload session (4 MiB chunk 0).
+  - True quiescent maintenance window verified: drained in-flight transcodes and feed fanouts to 0, stopped source API instances, asserted connection refused, 0 pending transcodes, 0 pending fanouts, 1 open upload session, 20 published outbox events, 0 pending outbox events.
+  - Snapshot backup: single-transaction mysqldump (93,966,996 bytes, SHA-256 `86cea44951cc2bd6d37ace0f1d832d3230fe425eb4761d704e51e795c6ca0d9e`) + MinIO bucket export in 3,405.41 ms (~3.4s). Peak temporary disk space: 153,465,035 bytes (~146.4 MB).
+  - Restored into clean destination MySQL 8.4 database and clean MinIO bucket. Restored API reached `/ready` in 32,514.98 ms (~32.5s).
+  - All 6 checkpoints PASS:
+    1. `schema_migration_keys`: all 5 migration keys present.
+    2. `sql_identity_sets_preserved`: exact ID sets and details verified across all 15 entity types and formal scale metrics.
+    3. `media_objects_integrity`: SHA-256 digests verified across media assets with zero byte drift.
+    4. `post_restore_live_api_health`: login, feed, video counts, comments, notifications, chat, and live write (user 2 likes video 0 on restored database) all intact.
+    5. `resumable_upload_completion_after_restore`: second chunk uploaded to open session and completed with exact SHA-256.
+    6. `idempotency_and_migration_replay_safety`: rerun `migrations.Apply` on restored database performed 0 changes, 0 data alteration.
+  - Measured RPO = 0 seconds (based on quiescent freeze boundary).
+  - Measured RTO: 32.51s to API `/ready`; 35.61s to full end-to-end business verification.
+  - AcceptanceStack teardown: 0 containers, 0 volumes, 0 networks residue.
+  - Gate A10: `release_gate_passed: true`. Report: `docs/benchmarks/close-02-recovery-report-2026-11-10.json`.
+
 2026-11-10 G07 / A04 Recommendation Semantics and Feed Warm-Cache Re-verification on Compose MySQL 8.4:
 - Executed `TestMySQLRecommendationIntegration` against the live Compose MySQL 8.4 stack: verified 3 continuous recommendation cursor pages under corrected ranking semantics (followed author +12, liked author +6, base popularity) with measured latencies of 12.14ms, 9.49ms, 11.68ms (0.06s total, PASS).
 - Executed `TestMySQLContinuousWarmCache_EligibilityAndLatencyGates` against Compose MySQL 8.4: validated cold-start penetration, warm cache hit (<5ms), logged-in timeline reflection of viewer actions, 10 concurrency (Reqs=500, P50=4.2ms, P95=7.9ms), 20 concurrency 3-round small-fixture regression (Reqs=1000/round, P50=7.5ms, P95=13.1ms, P99=18.4ms), and cross-instance invalidation on publish and follow (1.29s total, PASS).
