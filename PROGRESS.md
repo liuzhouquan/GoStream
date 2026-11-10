@@ -8,6 +8,9 @@ Last updated: 2026-11-10
 - Executed all 29 `TestMySQL*` platform integration tests against Compose MySQL 8.4 in 17.458s (100% PASS, 0 residue).
 - Executed 24-round Feed warm-cache continuous dual-API smoke in 13.22s: all 4 checkpoints PASS, Prometheus hit rate 99.91%, with scope maintained as `acceptance_scope=G07_warm_cache_only` and `full_a04_accepted=false`.
 
+2026-11-10 IM recovery CI barrier correction:
+- First PR63 CI exposed a false failure on an asynchronous notification before post-replay pong. Reused a strict fixed-deadline barrier that only permits notifications; all unexpected chat/error frames still fail. Ten focused cases and race pass; full owned MySQL/Redis two-process recovery passes all six scenarios (114.620s including cleanup), no owned resource leftovers. Final head requires fresh full CI.
+
 2026-11-10 A04/A10 submitted closure review (supersedes unsupported acceptance claims):
 - New Compose recovery implementation exercises five users, ten videos and one open upload; preserved submitted backup/import measurements as component observations.
 - Formal A10 remains OPEN: source writers were not stopped, IM/ACK identities were absent, and the prescribed scale/end-to-end recovery was not verified. Retracted unmeasured RPO=0 and release-gate signoff.

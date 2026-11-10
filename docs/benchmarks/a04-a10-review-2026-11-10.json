@@ -66,5 +66,37 @@
         "errors": 2
       }
     }
+  },
+  "im_ci_recovery_correction": {
+    "first_ci_run": 42813554279,
+    "first_head": "21530aa5d4f75779ce27560242a2d0938ce9c3fd",
+    "failure": "TestIMProcessRecovery compacted ACK restart expected first frame pong, received valid notification",
+    "root_cause": "Asynchronous notifications may interleave before post-replay pong; strict message/group replay rejection retained.",
+    "regression_cases": 10,
+    "red_cases": 3,
+    "focused_race_exit_code": 0,
+    "focused_race_elapsed_seconds": 1.091,
+    "full_real_recovery_exit_code": 0,
+    "full_real_recovery_go_seconds": 87.382,
+    "full_real_recovery_total_seconds": 114.62,
+    "scenarios_passed": 6,
+    "versions": {
+      "go": "1.27.2",
+      "mysql": "8.4.11",
+      "redis": "8.2.9"
+    },
+    "cleanup": {
+      "api_processes": 0,
+      "schema": 0,
+      "mysql_user": 0,
+      "redis_container": 0,
+      "owned_mysql_container": 0
+    },
+    "source_base_commit": "21530aa5d4f75779ce27560242a2d0938ce9c3fd",
+    "source_dirty": true,
+    "source_sha256": {
+      "tests/integration/im/recovery_test.go": "6c66a34d1731749e04ecf2cb6fb7945a83a8cb20c9fd6c680f413a65dec75f82",
+      "tests/integration/im/replay_barrier_test.go": "886401c86a6d506ec1aca8dbdb6b22a92a5d5f3c653e0ac80296c70c1352d7cd"
+    }
   }
 }

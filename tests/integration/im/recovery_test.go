@@ -452,13 +452,8 @@ func TestIMProcessRecovery(t *testing.T) {
 		}
 		memberB = open(b.base, member, memberOne)
 		memberB.write(t, map[string]any{"type": "ping"})
-		select {
-		case frame, ok := <-memberB.read:
-			if !ok || frame.Type != "pong" {
-				t.Fatalf("unexpected replay after compacted ACK: %+v open=%v", frame, ok)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatal("restarted device never completed replay")
+		if err := waitReplayBarrier(memberB.read, 5*time.Second); err != nil {
+			t.Fatal(err)
 		}
 	})
 }
@@ -567,4 +562,35 @@ func TestFeedCacheProcessRedisRecovery(t *testing.T) {
 		time.Sleep(200 * time.Millisecond)
 	}
 	t.Fatal("process A did not rebuild and hit its Following cache after Redis recovery")
+}
+
+// waitReplayBarrier verifies no direct/group backlog precedes the post-replay pong.
+// The production handler replays both backlogs before reading ping. Notifications
+// may arrive concurrently through realtime delivery and do not imply IM replay.
+func waitReplayBarrier(frames <-chan event, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		// A notification flood must not postpone the fixed replay deadline.
+		if !time.Now().Before(deadline) {
+			return fmt.Errorf("replay barrier timed out")
+		}
+		select {
+		case frame, ok := <-frames:
+			if !ok {
+				return fmt.Errorf("socket closed before replay barrier")
+			}
+			switch frame.Type {
+			case "pong":
+				return nil
+			case "notification":
+				continue
+			default:
+				return fmt.Errorf("unexpected replay frame %q", frame.Type)
+			}
+		case <-timer.C:
+			return fmt.Errorf("replay barrier timed out")
+		}
+	}
 }
