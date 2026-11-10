@@ -1,6 +1,12 @@
 # GoStream development progress
 
-Last updated: 2026-11-09
+Last updated: 2026-11-10
+
+2026-11-10 Independent reliability/cleanup review:
+- Preserved submitted large-dataset, MySQL-plan, group, outage and recovery evidence while correcting unsupported full-A04/A10 signoffs. Historical warm-cache results are not performance evidence for the reviewed query changes.
+- Fixed recommendation publication recheck, all-follow semantics, recent-200-action affinity and cursor continuation after candidate withdrawal. Actual API regressions failed before and passed after; full real MySQL integration also passed.
+- Removed production exception branches for test doubles and RuntimeError; failure reports now cover normal runtime failure paths without claiming acceptance.
+- 109 diagnostics, final ordinary Go regression, static/build checks and the real dual-API 24-group smoke passed. [Review, evidence and remaining gates](docs/BRANCH_REVIEW_2026-11-10.md); final integration requires the PR's latest CI.
 
 2026-11-09 G03 / G04 / G12 Documentation alignment and matrix applicability verification:
 - Verified applicability of G03 (two-browser end-to-end full flow across 24 checkpoints) and G04 (10-video media matrix format and transcoding suite) against the current branch head: no regressions or breaking changes to uploads, transcoding, or browser session contracts.

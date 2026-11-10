@@ -36,7 +36,7 @@ func newRecommendRanking(db *gorm.DB, viewerID uint, anchor time.Time) (*recomme
 		return r, nil
 	}
 	var followedIDs []uint
-	if err := db.Model(&Follow{}).Where("follower_id = ?", viewerID).Limit(500).Pluck("followee_id", &followedIDs).Error; err != nil {
+	if err := db.Model(&Follow{}).Where("follower_id = ?", viewerID).Pluck("followee_id", &followedIDs).Error; err != nil {
 		return nil, err
 	}
 	for _, fid := range followedIDs {
@@ -45,13 +45,14 @@ func newRecommendRanking(db *gorm.DB, viewerID uint, anchor time.Time) (*recomme
 			r.followedAuthorSet[fid] = true
 		}
 	}
+	// Keep the existing recent-200-action window while projecting only author IDs.
+	recentActions := db.Model(&VideoAction{}).Select("video_id").
+		Where("user_id = ? AND kind IN ?", viewerID, []string{"like", "favorite"}).
+		Order("id DESC").Limit(200)
 	var likedIDs []uint
-	if err := db.Model(&Video{}).
-		Distinct("author_id").
-		Joins("JOIN video_actions ON video_actions.video_id = videos.id").
-		Where("video_actions.user_id = ? AND video_actions.kind IN ?", viewerID, []string{"like", "favorite"}).
-		Limit(200).
-		Pluck("videos.author_id", &likedIDs).Error; err != nil {
+	if err := db.Table("(?) AS recent_actions", recentActions).
+		Joins("JOIN videos ON videos.id = recent_actions.video_id").
+		Distinct("videos.author_id").Pluck("videos.author_id", &likedIDs).Error; err != nil {
 		return nil, err
 	}
 	for _, aid := range likedIDs {

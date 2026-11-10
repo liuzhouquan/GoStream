@@ -1,6 +1,6 @@
 # GoStream 发布验收与进展核查报告 (2026-11-08)
 
-**核查日期**：2026-11-08<br>
+**核查日期**：2026-11-10<br>
 **验收状态**：**核心功能与架构闭环，进入有界标准与证据对齐阶段 (v1.0-RC1)**<br>
 **候选版本**：`v1.0-RC1`（代码树经 G02–G11 closure 分支合入本地 main，尚未镜像至远程 PR/CI）<br>
 **执行环境**：Linux 6.18.33.2 WSL2 (Ubuntu 24.04 LTS), Go 1.27.2, Python 3.12, Docker Compose (双 API 实例 + MySQL 8.4 + Redis 8.2 + RabbitMQ 4.3 + MinIO)
@@ -26,13 +26,13 @@
 | **A01** | **启动与持久化** | G02, G09 | `python3 tests/integration/acceptance_stack.py --no-build --probe-only` 及 `component_outage_smoke.py`<br>- 双 API 实例平滑启动，`/health` 200 (进程 liveness)，`/ready` 200 (SQL readiness)；<br>- Redis/RabbitMQ/MinIO 宕机时不破坏 `/ready` 200 语义；<br>- 故障注入受 `try...finally` 保护，停机组件确保恢复，避免环境污染；<br>- API 实例重启后无状态 JWT 仍有效，持久化数据零丢失，失效 worker 租约安全回收。 | **PASS** | 全 0 |
 | **A02** | **身份与权限边界** | G03, G05 | `python3 tests/integration/web_full_flow.py` 及 `interactions_security_smoke.py`<br>- Bcrypt 密码安全哈希，JWT 签发与过期拦截；<br>- 严格校验非作者编辑/删除视频 403 Forbidden；<br>- 匿名访问敏感信息拦截 401，禁止自我关注 (400)；<br>- 真实浏览器端双账号隔离验证。 | **PASS** | 全 0 |
 | **A03** | **视频流转与对象存储** | G04, G09, G10 | `python3 tests/integration/media_matrix_smoke.py` 及 `media_transfer_smoke.py`<br>- 覆盖真实测试矩阵 10 类视频用例（MP4 H.264/AAC、MP4 H.264 无音频、WebM VP8/Vorbis、WebM VP9/Opus、MOV ProRes/PCM、MOV H.264/AAC、MP4 竖屏、超长时长拒收、损坏流拒收、大分片上传），及作者视频失败自愈替换；<br>- 真实 FFmpeg/ffprobe 转码处理，转码失败原因仅作者可见（隐私保护）；<br>- MinIO 离线割接迁移与存储桶备份/恢复，SHA-256 零漂移；<br>- 断点续传 4 MiB 分片边界并在割接后成功续传组装。 | **PASS** | 全 0 |
-| **A04** | **Feed 持续流与暖缓存** | G07 | `python3 tests/integration/feed_warm_cache_continuous.py` 与 `tests/integration/run_formal_feed.sh`<br>- 生产正式规模实测（2,002 用户、20,001 已发布视频、11,011 关注、50,050 互动，大V与普通作者跨混合阈值）；<br>- 混合推拉架构（`FEED_FANOUT_MAX_FOLLOWERS=1000`）；<br>- 4 场景（关注首页、关注深页、登录推荐、热榜）× 2 档并发 (10, 20) × 各 3 轮完整 24 轮（耗时约 36 分钟）；<br>- 全量 741,925 次请求 0 失败，10 并发 P95 约 21–50ms、20 并发 P95 约 44–102ms（严密达标 $\le$200ms/500ms 门槛）；<br>- 双 API 聚合命中率 99.67%，跨实例发布与关注精准失效；`release_gate_passed=true`，`validation_scope=formal_standard`。 | **PASS** | 全 0 |
+| **A04** | **Feed 持续流与暖缓存** | G07 | `python3 tests/integration/feed_warm_cache_continuous.py` 与 `tests/integration/run_formal_feed.sh`<br>- 生产正式规模实测（2,002 用户、20,001 已发布视频、11,011 关注、50,050 互动，大V与普通作者跨混合阈值）；<br>- 混合推拉架构（`FEED_FANOUT_MAX_FOLLOWERS=1000`）；<br>- 4 场景（关注首页、关注深页、登录推荐、热榜）× 2 档并发 (10, 20) × 各 3 轮完整 24 轮（耗时约 36 分钟）；<br>- 全量 741,925 次请求 0 失败，10 并发 P95 约 21–50ms、20 并发 P95 约 44–102ms（严密达标 $\le$200ms/500ms 门槛）；<br>- 双 API 聚合命中率 99.67%，跨实例发布与关注精准失效；`release_gate_passed=true`，`validation_scope=formal_standard`。 | **暖缓存历史成绩已提交；完整A04待验证** | 见对应报告 |
 | **A05** | **互动明细与计数一致性** | G05 | `python3 tests/integration/interactions_security_smoke.py`<br>- 多用户并发点赞、收藏、关注、取消与评论；<br>- 业务明细、汇总计数与通知/Outbox 置于同一本地数据库事务；<br>- 强杀与事务回滚验证零孤儿记录、零脏数据、零负数计数。 | **PASS** | 全 0 |
 | **A06** | **异步事件与消息投递** | G09 | `internal/platform/component_outage_continuous_test.go` 与 `component_outage_smoke.py`<br>- 事务性 Outbox 模式（`topic='notification.created', published_at IS NULL`）；<br>- RabbitMQ 停机期间事件安全暂存 SQL 且 0 丢失；<br>- Broker 恢复后 Worker 自动重试排水，消费者依托 `broker-delivery:*` 幂等消费去重，0 重复投递（实测事件 [3, 4] 唯一交付）。 | **PASS** | 全 0 |
 | **A07** | **即时通讯 IM 扇出与恢复** | G08 | `python3 tests/integration/group_im_smoke.py`<br>- 双 API + Redis 8.2 + MySQL 8.4 真实联合栈实测；<br>- 20 客户端并发、1,000 条消息、19,000 次接收投递（100% 达成率，零自身投递、零重复投递、零重复 ACK）；<br>- Sender ACK P95=162.63ms，Delivery P95=167.57ms（均优于 250ms/300ms 门槛）；<br>- `client_id` 强幂等防重，数学集合 $E(k)$ 精确比对；<br>- `message_device_ack_ranges` 无损区间压缩，逐设备独立未读与 ACK 隔离；<br>- MySQL 持久化 1,145 消息单调无重；9 大检查点全量 PASS。 | **PASS** | 全 0 |
 | **A08** | **通知检索与生产查询** | G06 | `internal/platform/search_production_queries_test.go` 与 `search_query_smoke.py`<br>- MySQL 8.4 真实生产规模（2,000 用户、20,000 视频、1,000 通知）执行计划实测；<br>- 通知 keyset 分页与未读计数走覆盖索引，零 filesort，耗时 0.16–0.20ms；<br>- 用户搜索 Keyset 逆序主键扫描，零 filesort，耗时 0.69ms；<br>- 视频搜索浅页 21.8ms，深页 short-circuit 0.036ms；50 次基准 P95 达 3.62ms；<br>- 精确游标 keyset 分页，支持 Unicode 与通配符 `%`、`_` 字符转义匹配。 | **PASS** | 全 0 |
 | **A09** | **Web 端到端全流程** | G03 | `python3 tests/integration/web_full_flow.py`<br>- Compose 真实栈下模拟双浏览器主流程（User 1 与 User 2）；<br>- 覆盖注册、登录、视频分片上传、发布展示、点赞收藏、关注、群聊发送与接收回执；<br>- 单实例滚动重启后 Token 与业务状态完整保持，**24/24** 断言 PASS。 | **PASS** | 全 0 |
-| **A10** | **数据迁移、灾备与运维** | G10 | `mysql_recovery.sh`、`media_transfer_smoke.py` 及 `migration_backup_recovery_smoke.py`<br>- Schema v005 全量版本安装、增量升级、幂等重放与中断自愈（19/19 PASS）；<br>- MySQL 8.4 单事务快照转储 (25,790 字节, SHA256 `e7a148d...`)、恢复、v002 回滚演练与重放自愈完全闭环 (0.272s)；<br>- MinIO 对象存储离线割接与灾备恢复成功（2 对象 / 4,194,328 字节），断点续传恢复后成功追加合入原 bytes；<br>- 停写维护窗口下 SQL 记录与 MinIO 对象 SHA-256 摘要 100% 对齐；6 大检查点全量 PASS。 | **PASS** | 全 0 |
+| **A10** | **数据迁移、灾备与运维** | G10 | `mysql_recovery.sh`、`media_transfer_smoke.py` 及 `migration_backup_recovery_smoke.py`<br>- Schema v005 全量版本安装、增量升级、幂等重放与中断自愈（19/19 PASS）；<br>- MySQL 8.4 单事务快照转储 (25,790 字节, SHA256 `e7a148d...`)、恢复、v002 回滚演练与重放自愈完全闭环 (0.272s)；<br>- MinIO 对象存储离线割接与灾备恢复成功（2 对象 / 4,194,328 字节），断点续传恢复后成功追加合入原 bytes；<br>- 停写维护窗口下 SQL 记录与 MinIO 对象 SHA-256 摘要 100% 对齐；6 大检查点全量 PASS。 | **局部恢复通过；规定规模及端到端RPO/RTO待验证** | 见对应报告 |
 | **A11** | **安全边界与脱敏** | G05, G11 | `internal/platform/security_test.go` 及 `openapi_validation_test.go`<br>- 数据库连接凭据日志脱敏已修复（R4），防止 DSN 口令泄露；<br>- 严格校验越权拦截，错误响应统一掩码，无内部堆栈泄露；<br>- 核心受保护路由全部覆盖 401 拦截。 | **PASS** | 全 0 |
 | **A12** | **契约完备与文档一致性** | G11 | `go test ./internal/platform -run '^TestOpenAPI' -v`<br>- 49 个 Gin 路由与 41 个 OpenAPI 3.0.3 路径严格对齐；<br>- 基于 kin-openapi 递归动态验证 17 组业务端点正反用例；<br>- 本地学习手册 `docs/LOCAL_STUDY_GUIDE.md` 隔离于 git 跟踪之外；<br>- `go vet`、编译与 87 项诊断测试全部通过。 | **PASS** | 全 0 |
 
@@ -110,7 +110,6 @@ docker compose -f docker-compose.yml -f docker-compose.object.yml down -v
 基于 G01–G12 阶段性验收成果、108 项单元诊断测试、Go 单元测试及静态代码检查，并结合 2026-11-09 复验实测数据：
 
 1. **核心架构与功能闭环**：所有业务功能路径（双 API、MySQL、Redis、RabbitMQ、MinIO、FFmpeg）已在 Compose 联合环境实测通过，R1–R4 假阳性与凭据泄漏隐患已修复；
-2. **全门槛通过判定**：A01–A10 全部 10 大发布门槛已 100% 达成 PASS：
-   - A04（Feed 持续流与暖缓存）在 20,000 规模混合数据集下完成 24 轮 36 分钟全矩阵压测，P95 < 103ms，`release_gate_passed=true`；
-   - A06/A09（组件离线恢复）、A07（群聊 IM 20 客户端持续压测）、A08（MySQL 8.4 真实执行计划）、A10（停写窗口快照与灾备恢复）均已完成真实实测归档；
-3. **发布候选状态**：当前版本评定为 **v1.0-RC1 (全门槛实测达成，发布候选版本 1)**。
+2. **验收口径修正（2026-11-10）**：新增 20,000 规模暖缓存 JSON 自述 `acceptance_scope=G07_warm_cache_only`、`full_a04_accepted=false`，不能关闭完整 A04；本轮推荐查询正确性修正后，还需关联修正版本的性能结果。原数据保留为历史记录，未补造缺失的测试 SHA。
+3. **恢复边界**：新增 SQLite 恢复 JSON 明确 `release_gate_passed=false`、RPO/RTO 未测量；MySQL/MinIO 两对象割接与快照结果证明局部能力，不能替代规定规模及端到端恢复量测，A10 保持待验收。
+4. **发布候选状态**：仍为 v1.0-RC1，尚未全量验收。新增查询计划、群聊及故障结果保留；准确复核与后续操作见 [2026-11-10审查](BRANCH_REVIEW_2026-11-10.md)。

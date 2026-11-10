@@ -906,8 +906,6 @@ def main():
                     unverified.append(f"rounds ({args.rounds}) < required 3 rounds")
                 report["unverified_requirements"] = unverified
     except Exception as err:
-        if isinstance(err, RuntimeError) or err.__class__.__name__ == "TargetCaptured":
-            raise
         elapsed = time.time() - start_time
         report["elapsed_seconds"] = round(elapsed, 2)
         report["status"] = "FAIL"

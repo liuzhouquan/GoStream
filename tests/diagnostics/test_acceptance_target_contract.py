@@ -26,7 +26,7 @@ STACK_ENV = {
 }
 
 
-class TargetCaptured(Exception):
+class TargetCaptured(BaseException):
     pass
 
 
@@ -137,6 +137,25 @@ class AcceptanceTargetContractTest(unittest.TestCase):
             self.assertFalse(rep["release_gate_passed"])
             self.assertEqual(rep["validation_scope"], "execution_failure")
             self.assertEqual(rep["execution_error"]["type"], "TimeoutError")
+
+    def test_feed_runtime_failure_also_emits_structured_report(self):
+        import json
+        module = importlib.import_module("feed_warm_cache_continuous")
+        with tempfile.TemporaryDirectory() as directory:
+            report_path = Path(directory) / "feed_fail.json"
+            with patch.dict(os.environ, STACK_ENV, clear=True), \
+                 patch.object(sys, "argv", ["feed_warm_cache_continuous.py", "--report", str(report_path)]), \
+                 patch.object(module, "seed_mysql_feed_db"), \
+                 patch.object(module, "run_continuous_feed_matrix", side_effect=RuntimeError("video processing failed")), \
+                 redirect_stdout(io.StringIO()):
+                code = module.main()
+            self.assertEqual(code, 1)
+            self.assertTrue(report_path.exists())
+            rep = json.loads(report_path.read_text())
+            self.assertEqual(rep["status"], "FAIL")
+            self.assertFalse(rep["release_gate_passed"])
+            self.assertEqual(rep["validation_scope"], "execution_failure")
+            self.assertEqual(rep["execution_error"]["type"], "RuntimeError")
 
     def test_group_im_execution_failure_emits_structured_report(self):
         import json
