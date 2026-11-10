@@ -1,5 +1,7 @@
 # 开发任务耗时诊断与监控
 
+2026-11-10 补充：PR #63 首轮 CI `42813554279` 的 video-recovery 安装 FFmpeg 步骤从 12:11:14Z 持续至 12:21:08Z 被 10 分钟任务上限取消，业务测试尚未开始。日志为 Azure Ubuntu HTTP 源下载，多个小包耗时 15–30 秒，部分包重试；不能把这段时间归因于 Go 测试。两个 FFmpeg 安装步骤统一改用仅限 GitHub runner 的 `tools/install_ci_ffmpeg.sh`：保留 Ubuntu 签名及 suite，切换该镜像为 Ubuntu 官方 HTTPS 源，metadata/install 分别设置 90s/240s 上限并验证真实 ffmpeg/ffprobe；安装失败依然失败，不降测试门槛。最终有效性以本 PR 最新 CI 为准。
+
 2026-11-06补充：真实取消演练发现 `InterruptedError` 信号异常会被 `subprocess.run(capture_output=True)` 底层selector当EINTR吞掉，launcher继续运行而不执行finally；原仅模拟Docker返回的信号测试没有覆盖这个等待窗口。现用 `tests/integration/launcher_lifecycle.py` 的 `LauncherInterrupted(Exception)`，IM/RabbitMQ/MinIO共用。最小真实子进程等待回归先失败后通过；真实MySQL/broker创建后SIGTERM从超过30秒不退出修复为2.206秒清理完成，exit143、资源零残留。此发现说明要同时观察信号实际退出码和清理，不能把“已发送SIGTERM”当作命令已停止。
 
 本次调查针对开发和验证流程的耗时，不是平台 API 的容量测试。原始会话记录只在本机读取；仓库内仅保留脱敏后的数值、测试名、Actions 步骤名和来源链接。

@@ -277,13 +277,7 @@ jobs:
           cache-dependency-path: go.sum
 
       - name: Ensure FFmpeg and ffprobe are available
-        run: |
-          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
-            sudo apt-get update
-            sudo apt-get install -y ffmpeg
-          fi
-          ffmpeg -version >/dev/null
-          ffprobe -version >/dev/null
+        run: bash tools/install_ci_ffmpeg.sh
 
       - name: Test real FFmpeg corruption and media diagnostics
         run: |
@@ -481,8 +475,7 @@ jobs:
           node-version: '24'
       - name: Install real FFmpeg and browser dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          bash tools/install_ci_ffmpeg.sh
           npm install -g agent-browser@0.37.1
           agent-browser install --with-deps
       - name: Run browser regression and real SQLite FFmpeg workflow
