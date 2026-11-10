@@ -105,7 +105,7 @@ def seed_mysql_feed_db(mysql_addr: str = ""):
     root = Path(__file__).resolve().parents[2]
     cmd = ["go", "run", "./tools/seed_feed_benchmark.go", "-driver", "mysql"]
     if mysql_addr:
-        dsn = f"gostream:gostream-local@tcp({mysql_addr})/gostream?charset=utf8mb4&parseTime=True&loc=Local"
+        dsn = f"gostream:gostream-local@tcp({mysql_addr})/gostream?charset=utf8mb4&parseTime=True&loc=UTC"
         cmd.extend(["-dsn", dsn])
     subprocess.run(cmd, cwd=str(root), check=True)
 
@@ -375,12 +375,12 @@ def run_feed_load_scenarios(base_urls: list[str], viewer_token: str, following_c
                     warmup_duration = warmup["duration_sec"]
                 measured = run_load_burst(base_urls, path, token, concurrency, test_sec)
                 measured.update(scene=scene, round=round_number, warmup_duration_sec=warmup_duration)
-                assert measured["successes"] > 0 and measured["total_requests"] > 0, f"{scene} has no measured samples"
-                assert measured["failures"] == 0, f"{scene} had failed or inconsistent responses"
-                assert measured["p95_ms"] is not None and measured["p95_ms"] <= 200.0, f"{scene} exceeded P95 gate"
-                assert measured["p99_ms"] is not None and measured["p99_ms"] <= 500.0, f"{scene} exceeded P99 gate"
                 print(f"  {scene} concurrency={concurrency} round={round_number}: "
                       f"requests={measured['total_requests']}, P95={measured['p95_ms']}ms, P99={measured['p99_ms']}ms")
+                assert measured["successes"] > 0 and measured["total_requests"] > 0, f"{scene} has no measured samples"
+                assert measured["failures"] == 0, f"{scene} had failed or inconsistent responses"
+                assert measured["p95_ms"] is not None and measured["p95_ms"] <= 200.0, f"{scene} exceeded P95 gate: {measured['p95_ms']}ms"
+                assert measured["p99_ms"] is not None and measured["p99_ms"] <= 500.0, f"{scene} exceeded P99 gate: {measured['p99_ms']}ms"
                 results.append(measured)
     return results
 

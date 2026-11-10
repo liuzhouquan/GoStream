@@ -11,47 +11,60 @@ import (
 // The anchor freezes time buckets across pages of one cursor traversal.
 const recommendScoreSQL = `(videos.like_count * 3 + videos.comment_count * 5 + videos.favorite_count * 4 +
 	CASE WHEN videos.created_at >= ? THEN 12 WHEN videos.created_at >= ? THEN 5 ELSE 0 END +
-	CASE WHEN EXISTS (SELECT 1 FROM follows WHERE follows.follower_id = ? AND follows.followee_id = videos.author_id) THEN 12 ELSE 0 END +
+	CASE WHEN videos.author_id IN ? THEN 12 ELSE 0 END +
 	CASE WHEN videos.author_id IN ? THEN 6 ELSE 0 END)`
 
 type recommendRanking struct {
-	anchor         time.Time
-	viewerID       uint
-	likedAuthors   []uint
-	likedAuthorSet map[uint]bool
+	anchor            time.Time
+	viewerID          uint
+	followedAuthors   []uint
+	followedAuthorSet map[uint]bool
+	likedAuthors      []uint
+	likedAuthorSet    map[uint]bool
 }
 
 func newRecommendRanking(db *gorm.DB, viewerID uint, anchor time.Time) (*recommendRanking, error) {
-	r := &recommendRanking{anchor: anchor.UTC(), viewerID: viewerID, likedAuthors: []uint{0}, likedAuthorSet: map[uint]bool{}}
+	r := &recommendRanking{
+		anchor:            anchor.UTC(),
+		viewerID:          viewerID,
+		followedAuthors:   []uint{0},
+		followedAuthorSet: map[uint]bool{},
+		likedAuthors:      []uint{0},
+		likedAuthorSet:    map[uint]bool{},
+	}
 	if viewerID == 0 {
 		return r, nil
 	}
-	var actions []VideoAction
-	if err := db.Where("user_id = ? AND kind IN ?", viewerID, []string{"like", "favorite"}).Order("id DESC").Limit(200).Find(&actions).Error; err != nil {
+	var followedIDs []uint
+	if err := db.Model(&Follow{}).Where("follower_id = ?", viewerID).Limit(500).Pluck("followee_id", &followedIDs).Error; err != nil {
 		return nil, err
 	}
-	if len(actions) == 0 {
-		return r, nil
+	for _, fid := range followedIDs {
+		if !r.followedAuthorSet[fid] {
+			r.followedAuthors = append(r.followedAuthors, fid)
+			r.followedAuthorSet[fid] = true
+		}
 	}
-	videoIDs := make([]uint, 0, len(actions))
-	for _, action := range actions {
-		videoIDs = append(videoIDs, action.VideoID)
-	}
-	var videos []Video
-	if err := db.Select("author_id").Where("id IN ?", videoIDs).Find(&videos).Error; err != nil {
+	var likedIDs []uint
+	if err := db.Model(&Video{}).
+		Distinct("author_id").
+		Joins("JOIN video_actions ON video_actions.video_id = videos.id").
+		Where("video_actions.user_id = ? AND video_actions.kind IN ?", viewerID, []string{"like", "favorite"}).
+		Limit(200).
+		Pluck("videos.author_id", &likedIDs).Error; err != nil {
 		return nil, err
 	}
-	for _, video := range videos {
-		if !r.likedAuthorSet[video.AuthorID] {
-			r.likedAuthors = append(r.likedAuthors, video.AuthorID)
-			r.likedAuthorSet[video.AuthorID] = true
+	for _, aid := range likedIDs {
+		if !r.likedAuthorSet[aid] {
+			r.likedAuthors = append(r.likedAuthors, aid)
+			r.likedAuthorSet[aid] = true
 		}
 	}
 	return r, nil
 }
 
 func (r *recommendRanking) vars() []any {
-	return []any{r.anchor.Add(-24 * time.Hour), r.anchor.Add(-7 * 24 * time.Hour), r.viewerID, r.likedAuthors}
+	return []any{r.anchor.Add(-24 * time.Hour), r.anchor.Add(-7 * 24 * time.Hour), r.followedAuthors, r.likedAuthors}
 }
 
 func (r *recommendRanking) query(q *gorm.DB, cursor feedCursor) *gorm.DB {
@@ -71,14 +84,8 @@ func (r *recommendRanking) score(db *gorm.DB, video Video) (int64, error) {
 	} else if !video.CreatedAt.Before(r.anchor.Add(-7 * 24 * time.Hour)) {
 		score += 5
 	}
-	if r.viewerID > 0 {
-		var count int64
-		if err := db.Model(&Follow{}).Where("follower_id = ? AND followee_id = ?", r.viewerID, video.AuthorID).Count(&count).Error; err != nil {
-			return 0, err
-		}
-		if count > 0 {
-			score += 12
-		}
+	if r.followedAuthorSet[video.AuthorID] {
+		score += 12
 	}
 	if r.likedAuthorSet[video.AuthorID] {
 		score += 6

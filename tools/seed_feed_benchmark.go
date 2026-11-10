@@ -32,7 +32,7 @@ func main() {
 				if mysqlAddr == "" {
 					mysqlAddr = "127.0.0.1:13307"
 				}
-				dbDSN = fmt.Sprintf("gostream:gostream-local@tcp(%s)/gostream?charset=utf8mb4&parseTime=True&loc=Local", mysqlAddr)
+				dbDSN = fmt.Sprintf("gostream:gostream-local@tcp(%s)/gostream?charset=utf8mb4&parseTime=True&loc=UTC", mysqlAddr)
 			}
 		} else {
 			dbDSN = "feed.db"

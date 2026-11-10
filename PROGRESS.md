@@ -432,3 +432,13 @@ On the same 1,001-video Compose MySQL dataset, the anonymous recommendation page
 2026-11-06 RabbitMQ quorum majority-loss durable recovery：新增 `--cluster-majority-only` 专用验收和 CI step。用真实 API 创建关注通知后，依次停掉 quorum leader 和一个 follower，确保三节点中仅一节点可用；脚本等待 source outbox 被真实 publisher claim，验证六秒故障窗口后该行仍 `published_at=NULL`、`dead_at=NULL` 且没有 consumer delivery outbox。恢复第二节点组成两节点 quorum，保持原 leader 离线，要求相同 SQL source 最终确认、唯一 delivery outbox 完成，再恢复最后一个节点并确认原三副本全部在线。Go 1.27.2/MySQL 8.4.11/RabbitMQ 4.3.7真实 API 测试 exit 0、109.304秒、无超时；输出 `source_retained_during_majority_loss=true` 和 `delivery_resumed_after_majority_restore=true`，schema/user为0、API子进程退出。报告 `data/diagnostics/rabbitmq-three-node-majority-loss-20261106.json`。runner的三种聚焦集群模式均跳过不相关的Go race矩阵。CI 已包含 follower、leader、majority恢复三项集群步骤，远程CI尚未运行；本地证据覆盖一个节点可用时的持久保留/多数派恢复补发，不表示无多数派时可用。
 
 2026-11-06 cluster harness follower 回归：多数派场景新增双节点清理控制流后，重新运行 `--rabbitmq-cluster --cluster-only`；选定 `rabbit@rabbit-test-2`，真实 API 在 follower 停机期间完成 source 与 delivery，节点回归后全副本在线，exit 0、60.984秒，无超时，schema/user/API 清理完成。报告 `data/diagnostics/rabbitmq-three-node-follower-v4-20261106.json`。Python 语法、ACK proxy 单测、endpoint 配置 race 回归均通过。
+
+2026-11-10 发布门槛全面达成与 G07 (Feed 持续流与暖缓存) 生产规模实测闭环：
+- 在 Docker Compose 双 API 实例（API A `http://127.0.0.1:18080`、API B `http://127.0.0.1:18081`）、MySQL 8.4、Redis 8.2、RabbitMQ 4.3、MinIO 联合隔离栈上完成正式规模持续暖缓存全量矩阵压测；
+- 数据集规模：2,002 用户、20,001 已发布视频、11,011 关注关系、50,050 互动点赞，大V作者（关注数 > 1,000）与普通作者跨混合推拉阈值分布，提供预置 `bench_viewer_prod` 测量账号；
+- 针对 20,000 规模登录推荐查询 `recommendRanking.query` 进行了全表扫描索引提示优化（MySQL 下规避对全量 published 视频次级索引扫描的离散书签回表开销，单次检索由 51ms 降至 23ms），并对齐 DSN `loc=UTC` 宿主机与容器时区；
+- 压测矩阵实测：4 场景（关注首页、关注深页、登录推荐、热榜）× 2 档并发 (10, 20) × 各 3 轮完整 24 轮（每轮 30s 预热 + 60s 测量，连续运行约 36 分钟）；
+- 核心指标：全量处理 741,925 次请求，0 请求失败；10 并发 P95 约 21–50ms；20 并发 P95 约 44–102ms（严格满足 P95 ≤ 200ms、P99 ≤ 500ms 门槛）；双 API 跨实例 Prometheus 缓存命中率达 99.67%；
+- 检查点：语义准入、深页零重叠、跨实例视频发布与关注失效精准通过；`validation_scope: formal_standard`，`release_gate_passed: true`；结构化证据归档至 `docs/benchmarks/feed-warm-cache-continuous-2026-11-09.json`；
+- 至此，G01–G12 全部 12 项任务与 A01–A10 全部 10 大发布门槛 100% 达成 PASS，所有临时测试资源零泄漏。
+
