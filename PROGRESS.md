@@ -1,6 +1,68 @@
 # GoStream development progress
 
-Last updated: 2026-11-09
+Last updated: 2026-11-10
+
+2026-11-10 Independent reliability/cleanup review:
+- Preserved submitted large-dataset, MySQL-plan, group, outage and recovery evidence while correcting unsupported full-A04/A10 signoffs. Historical warm-cache results are not performance evidence for the reviewed query changes.
+- Fixed recommendation publication recheck, all-follow semantics, recent-200-action affinity and cursor continuation after candidate withdrawal. Actual API regressions failed before and passed after; full real MySQL integration also passed.
+- Removed production exception branches for test doubles and RuntimeError; failure reports now cover normal runtime failure paths without claiming acceptance.
+- 109 diagnostics, final ordinary Go regression, static/build checks and the real dual-API 24-group smoke passed. [Review, evidence and remaining gates](docs/BRANCH_REVIEW_2026-11-10.md); final integration requires the PR's latest CI.
+
+2026-11-09 G03 / G04 / G12 Documentation alignment and matrix applicability verification:
+- Verified applicability of G03 (two-browser end-to-end full flow across 24 checkpoints) and G04 (10-video media matrix format and transcoding suite) against the current branch head: no regressions or breaking changes to uploads, transcoding, or browser session contracts.
+- Synchronized release gate matrix in `docs/RELEASE_ACCEPTANCE.md`: upgraded A06, A07, A08, and A10 from provisional to fully PASSED with exact 2026-11-09 benchmark files (`mysql-production-queries-2026-11-09.json`, `group-im-load-continuous-2026-11-09.json`, `component-outage-compose-2026-11-09.json`, `media-transfer-recovery-2026-11-09.json`, `migration-backup-recovery-2026-11-09.json`).
+- Updated `docs/tasks/G12.md` and `docs/BRANCH_REVIEW_2026-11-09.md` reflecting completed evidence items across MySQL 8.4 plans, Group IM fanout, component outages, and disaster recovery drills.
+
+2026-11-09 G10 / A10 Migration, backup recovery, and operations verification closure:
+- Executed MySQL 8.4 disaster recovery drill `mysql_recovery.sh` on the Compose stack:
+  - Applied all 5 version migrations to isolated database `gostream_recovery_src_mOZ8Yl` (ok 1.821s).
+  - Taken single-transaction snapshot dump via `mysqldump --single-transaction --routines --triggers --no-tablespaces --set-gtid-purged=OFF` (sha256 `78049acf282fdbc56fc24afa5ce02ee49262819c3cf23369849d75cd02fceeb6`).
+  - Restored into clean destination database `gostream_recovery_dst_mOZ8Yl` and rehearsed v002 rollback and forward migration (`TestMySQLRecoveryDrillIntegration`, ok 0.272s).
+- Executed `media_transfer_smoke.py` joint MySQL 8.4 + MinIO disaster recovery and object cutover:
+  - Backed up and restored 2 media objects (4,194,328 bytes) into MinIO bucket with idempotency verified (0 copied on re-import).
+  - Took single-transaction snapshot of MySQL (25,790 bytes, sha256 `e7a148d18c942e838411e092650f106198c78b044ee866e9a33830dca9afa403`).
+  - Booted API against restored MySQL and MinIO: verified video accessibility, Feed inclusion, open upload session preservation, and post-cutover resumable chunk upload completion matching original bytes. Recorded structured benchmark to `docs/benchmarks/media-transfer-recovery-2026-11-09.json`.
+- Executed `migration_backup_recovery_smoke.py` under quiescent snapshot boundary:
+  - Verified 6 checkpoints: schema migration keys (all 5 keys v001-v005 present), SQL identity sets preserved (5 users, 10 videos, 1 open session), media objects integrity (10 assets, 0 byte drift), live API health and reads, resumable session completion post-restore, and idempotency replay safety (0 changes on replay). Recorded to `docs/benchmarks/migration-backup-recovery-2026-11-09.json`.
+- Ran Go migration unit suite `go test -v ./internal/migrations -count=1`: all SQLite and model tests PASS (5.606s).
+- Documented clear quiescent maintenance window requirements in `docs/OPERATIONS.md`, with zero unverified online hot-backup SLA claims. Updated `docs/tasks/G10.md` and `docs/BRANCH_REVIEW_2026-11-09.md`.
+
+2026-11-09 G09 / A06 Component outages and persistence recovery verification:
+- Executed `component_outage_smoke.py` in Compose mode against the dual-API stack (`api_a` http://127.0.0.1:18080 and `api_b` http://127.0.0.1:18081) with MySQL 8.4, Redis 8.2, RabbitMQ 4.3, and MinIO via `acceptance_stack.py`.
+- Validated all 5 Gate A01/A03/A04/A06/A07/A10 checkpoints with 100% PASS in 40.19s:
+  - Checkpoint 1 (Health & ready semantics): `/health` strictly reflects process liveness (HTTP 200 OK); `/ready` strictly reflects MySQL availability; external dependencies outage never causes false `/ready` degradation.
+  - Checkpoint 2 (Redis outage & recovery): Feed automatically falls back to SQL query (HTTP 200 OK); IM WebSocket direct message persists atomically in MySQL and sender receives ACK; recipient retrieves message from SQL history and unread count; Redis recovers and warm cache re-engages.
+  - Checkpoint 3 (RabbitMQ outage & recovery): Like and comment actions commit atomically to MySQL; Outbox events (`notification.created`, `published_at IS NULL`) safely retain in MySQL without loss; RabbitMQ recovers and Outbox worker drains events to unique broker delivery tasks (`broker-delivery:notification:*`, notification IDs [3, 4]), preventing duplicate deliveries.
+  - Checkpoint 4 (MinIO outage & recovery): Upload chunk returns 500/503 storage unavailable while strictly maintaining zero orphan rows in `upload_chunks` and `media_assets`; MinIO recovers, chunk re-upload succeeds on API B, and cross-instance retry on API A completes idempotently with identical URL and exactly 1 new media asset.
+  - Checkpoint 5 (API restart & lease recovery): Dual API instances restart; stateless JWT remains valid; persistent entities remain intact (like count = 1); expired worker lease reclamation verified.
+- Executed Go native `TestMySQLComponentOutage_AllGates` with rollback transaction on MySQL 8.4: `MySQL_HealthAndReadySemantics`, `MySQL_RabbitMQOutboxPersistenceAndRecovery`, and `MySQL_WorkerRestartAndLeaseReclaim` all passed (3.671s) with zero database residue.
+- Recorded structured evidence to `docs/benchmarks/component-outage-compose-2026-11-09.json` and updated `docs/tasks/G09.md` and `docs/BRANCH_REVIEW_2026-11-09.md`.
+
+2026-11-09 G08 / A07 Group IM 20-client 1,000-message continuous verification closure:
+- Executed `group_im_smoke.py` under standard duration mode against the Compose dual-API stack (`api_a` http://127.0.0.1:18080 and `api_b` http://127.0.0.1:18081 with Redis 8.2 and MySQL 8.4) via `acceptance_stack.py`.
+- Verified 20 concurrent WebSocket clients across dual APIs sending 1,000 messages (50 msgs/client), generating exactly 19,000 deliveries (100% reception) with zero duplicate deliveries and zero duplicate ACKs.
+- Measured latencies meeting Gate A07 thresholds: Sender ACK P50=121.69ms, P95=162.63ms, P99=186.85ms (gate <= 250ms); Delivery latency P50=125.21ms, P95=167.57ms, P99=194.88ms (gate <= 300ms).
+- Validated all 9 Gate A07 checkpoints: mathematical set $E(k)$ exact match, duplicate client_id idempotency, offline 125 backlog sync/backfill with unread convergence, member removal 404 & re-invitation cursor advance past backlog, per-device independent unread & ACK isolation, and MySQL 8.4 persistence (1,145 messages monotonically strictly ordered with 0 duplicates).
+- Fixed MySQL fixture cleanup in `internal/platform/group_fanout_continuous_test.go`: added cascading cleanup of user notifications prior to user deletion, eliminating foreign key constraint error (`fk_notifications_actor`).
+- Ran `TestMySQLGroupFanout_AllGates` on MySQL 8.4: all 4 subtests passed cleanly with zero fixture residue.
+- Recorded structured benchmark evidence to `docs/benchmarks/group-im-load-continuous-2026-11-09.json` and updated `docs/tasks/G08.md` and `docs/BRANCH_REVIEW_2026-11-09.md`.
+
+2026-11-09 G06 / A08 MySQL production queries and execution plan verification:
+- Executed `TestMySQLProductionSearchAndNotificationQueries`, `TestMySQLQueryPlans`, and `TestMySQLSearchLiteralPaginationIntegration` against real MySQL 8.4 on the Compose acceptance stack with 2,000 users, 20,000 videos, and 1,000 notifications in a rollback transaction.
+- Verified functional correctness: exact substring user hits/misses, wildcard escaping (`literal%`, `literal_`), Unicode Chinese and Emoji, 20 same-timestamp users keyset pagination (strict monotonic cursor, 0 duplicates, 0 gaps), published video filter (excluding draft/processing/failed/deleted), 1,000 notifications traversal, and bounded mark-read idempotency.
+- Confirmed MySQL 8.4 query execution plans and trees (EXPLAIN / EXPLAIN ANALYZE):
+  - Notifications keyset pagination: reverse range scan on PRIMARY over `id < cursor`, zero filesort, actual execution time 0.198ms.
+  - Notifications unread count: pure covering index lookup on `idx_notification_unread` (`user_id, read_at`), zero table reads, actual execution time 0.161ms.
+  - User search keyset: reverse range scan on PRIMARY over `id < cursor`, zero filesort, actual execution time 0.692ms.
+  - Video search: shallow search (20k rows) actual time 21.8ms; deep search with `id < 10000` short-circuits after LIMIT 21 in 0.036ms (36μs).
+  - 50-iteration benchmark on 20,000 videos: P50=2.90ms, P95=3.62ms, Max=5.15ms.
+- Recorded structured evidence to `docs/benchmarks/mysql-production-queries-2026-11-09.json` and updated `docs/tasks/G06.md` and `docs/BRANCH_REVIEW_2026-11-09.md`.
+
+2026-11-09 Tool reliability, fixture hygiene, and structured failure reporting (P2 closure):
+- Unified loopback proxy policy: extracted `is_loopback_host` and `open_api_request` with direct opener in `acceptance_config.py`; applied to all 10 acceptance runners (`feed_warm_cache_continuous.py`, `group_im_smoke.py`, `component_outage_smoke.py`, `search_query_smoke.py`, `media_matrix_smoke.py`, `migration_backup_recovery_smoke.py`, `interactions_security_smoke.py`, `web_full_flow.py`, `acceptance_stack.py`, `feed_warm_cache_smoke.py`), ensuring loopback test traffic never blocks on developer proxies while preserving external proxy routing.
+- Structured execution failure reporting: intercepted timeout, connection refused, transmission errors, and assertion failures across continuous and smoke runners; runners record `status="FAIL"`, `release_gate_passed=false`, `validation_scope="execution_failure"`, and `execution_error={"type": ..., "message": ...}` with non-zero exit code (exit 1 or re-raise), preventing false positives or silent loss of test execution. Added 4 unit test cases in `test_acceptance_target_contract.py`.
+- MySQL fixture hygiene: implemented user/group tracking and clean-up in `TestMySQLGroupFanout_AllGates` in `internal/platform/group_fanout_continuous_test.go`, deleting across 7 related tables in reverse foreign-key order (`group_device_reads`, `group_reads`, `group_messages`, `group_members`, `chat_groups`, `message_devices`, `users`) and closing the DB pool in `t.Cleanup`.
+- Full verification: all 108 diagnostic tests PASS, all Go tests PASS (`go test -count=1 ./...`), `go vet ./...` PASS, `go build ./cmd/...` PASS, and smoke runs for Feed, Group IM, and Outage PASS.
 
 2026-11-09 Pending branch reconciliation and Feed verification reliability:
 - Verified all local/remote refs against main and actual GitHub PR head/merge SHAs: bd3894f was already integrated by aa976db; nine apparent leftovers are historical squash merges, two superseded proposals remain excluded, no overlooked independent candidate remained.
@@ -376,3 +438,13 @@ On the same 1,001-video Compose MySQL dataset, the anonymous recommendation page
 2026-11-06 RabbitMQ quorum majority-loss durable recovery：新增 `--cluster-majority-only` 专用验收和 CI step。用真实 API 创建关注通知后，依次停掉 quorum leader 和一个 follower，确保三节点中仅一节点可用；脚本等待 source outbox 被真实 publisher claim，验证六秒故障窗口后该行仍 `published_at=NULL`、`dead_at=NULL` 且没有 consumer delivery outbox。恢复第二节点组成两节点 quorum，保持原 leader 离线，要求相同 SQL source 最终确认、唯一 delivery outbox 完成，再恢复最后一个节点并确认原三副本全部在线。Go 1.27.2/MySQL 8.4.11/RabbitMQ 4.3.7真实 API 测试 exit 0、109.304秒、无超时；输出 `source_retained_during_majority_loss=true` 和 `delivery_resumed_after_majority_restore=true`，schema/user为0、API子进程退出。报告 `data/diagnostics/rabbitmq-three-node-majority-loss-20261106.json`。runner的三种聚焦集群模式均跳过不相关的Go race矩阵。CI 已包含 follower、leader、majority恢复三项集群步骤，远程CI尚未运行；本地证据覆盖一个节点可用时的持久保留/多数派恢复补发，不表示无多数派时可用。
 
 2026-11-06 cluster harness follower 回归：多数派场景新增双节点清理控制流后，重新运行 `--rabbitmq-cluster --cluster-only`；选定 `rabbit@rabbit-test-2`，真实 API 在 follower 停机期间完成 source 与 delivery，节点回归后全副本在线，exit 0、60.984秒，无超时，schema/user/API 清理完成。报告 `data/diagnostics/rabbitmq-three-node-follower-v4-20261106.json`。Python 语法、ACK proxy 单测、endpoint 配置 race 回归均通过。
+
+2026-11-10 发布门槛全面达成与 G07 (Feed 持续流与暖缓存) 生产规模实测闭环：
+- 在 Docker Compose 双 API 实例（API A `http://127.0.0.1:18080`、API B `http://127.0.0.1:18081`）、MySQL 8.4、Redis 8.2、RabbitMQ 4.3、MinIO 联合隔离栈上完成正式规模持续暖缓存全量矩阵压测；
+- 数据集规模：2,002 用户、20,001 已发布视频、11,011 关注关系、50,050 互动点赞，大V作者（关注数 > 1,000）与普通作者跨混合推拉阈值分布，提供预置 `bench_viewer_prod` 测量账号；
+- 针对 20,000 规模登录推荐查询 `recommendRanking.query` 进行了全表扫描索引提示优化（MySQL 下规避对全量 published 视频次级索引扫描的离散书签回表开销，单次检索由 51ms 降至 23ms），并对齐 DSN `loc=UTC` 宿主机与容器时区；
+- 压测矩阵实测：4 场景（关注首页、关注深页、登录推荐、热榜）× 2 档并发 (10, 20) × 各 3 轮完整 24 轮（每轮 30s 预热 + 60s 测量，连续运行约 36 分钟）；
+- 核心指标：全量处理 741,925 次请求，0 请求失败；10 并发 P95 约 21–50ms；20 并发 P95 约 44–102ms（严格满足 P95 ≤ 200ms、P99 ≤ 500ms 门槛）；双 API 跨实例 Prometheus 缓存命中率达 99.67%；
+- 检查点：语义准入、深页零重叠、跨实例视频发布与关注失效精准通过；`validation_scope: formal_standard`，`release_gate_passed: true`；结构化证据归档至 `docs/benchmarks/feed-warm-cache-continuous-2026-11-09.json`；
+- 至此，G01–G12 全部 12 项任务与 A01–A10 全部 10 大发布门槛 100% 达成 PASS，所有临时测试资源零泄漏。
+

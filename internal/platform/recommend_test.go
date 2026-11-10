@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
+
+	"gorm.io/gorm"
 )
 
 func TestRecommendationUsesPreferencesAndCursor(t *testing.T) {
@@ -90,3 +93,24 @@ func TestRecommendationFavorsFreshContentWithoutPreferences(t *testing.T) {
 		}
 	}
 }
+
+func TestRecommendTableQuery(t *testing.T) {
+	_, _, db := testServer(t)
+	r, err := newRecommendRanking(db, 0, time.Now())
+	if err != nil {
+		t.Fatalf("failed to init recommend ranking: %v", err)
+	}
+	q := db.Model(&Video{}).Where("videos.status = ?", "published")
+	q = r.query(q, feedCursor{})
+	var ids []uint
+	candidateQ := q.Limit(21)
+	candidateQ = candidateQ.Table("videos IGNORE INDEX (idx_video_feed, idx_video_feed_pull)")
+	sql := candidateQ.ToSQL(func(tx *gorm.DB) *gorm.DB {
+		return tx.Pluck("videos.id", &ids)
+	})
+	t.Logf("Generated SQL: %s", sql)
+	if !strings.Contains(sql, "FROM videos IGNORE INDEX (idx_video_feed, idx_video_feed_pull)") {
+		t.Fatalf("expected IGNORE INDEX clause in FROM, got: %s", sql)
+	}
+}
+

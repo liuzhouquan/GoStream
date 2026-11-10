@@ -1,0 +1,59 @@
+{
+  "date": "2026-11-10",
+  "base_commit": "350004b291f2a03f59a3f3153cdcbc9088980401",
+  "working_tree_contains_review_fixes": true,
+  "reviewed_branch": "review/reliability-and-cleanup-p2",
+  "checks": [
+    {
+      "label": "nov10-go-final-pagination",
+      "elapsed_seconds": 41.185,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "label": "nov10-final-diagnostics",
+      "elapsed_seconds": 43.712,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "label": "nov10-owned-mysql-all-verified",
+      "elapsed_seconds": 23.846,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    {
+      "label": "nov10-feed-smoke",
+      "elapsed_seconds": 10.505,
+      "exit_code": 0,
+      "timed_out": false
+    }
+  ],
+  "diagnostics_passed": 109,
+  "static_checks_exit_code": 0,
+  "owned_mysql_container_removed": true,
+  "recommendation_regressions_red_then_green": [
+    "more than 500 followed authors",
+    "recent 200 actions rather than lifetime affinity",
+    "unpublished hydration exclusion",
+    "cursor continuity after withdrawal"
+  ],
+  "smoke": {
+    "status": "PASS",
+    "mode": "sqlite",
+    "validation_scope": "component_smoke",
+    "release_gate_passed": false,
+    "full_a04_accepted": false
+  },
+  "measured_rounds": 24,
+  "code_sha256": {
+    "internal/platform/feed.go": "e543f52dc9a83659052f98d3b8c3ba9c3e958366fbc176bdb61284dc00177ad8",
+    "internal/platform/recommend.go": "02002fcfe7ba1261658de558773c07e4c578bfb986d0ef0e865c915982907702",
+    "internal/platform/recommend_regression_test.go": "4de8540b8f086ce620df688c383d0d20e4ca2f55a2d0df5a596fd3ef14d6d989",
+    "tests/integration/feed_warm_cache_continuous.py": "8fc17e06f6a6239a4df15c87f8777cd6eea6c286dad923b61931c3c460dbcf5f",
+    "tests/integration/group_im_smoke.py": "c8e1eb98d5028e3a047be0bfe8735aeec25fab57ed931f8f8a13be2341d71219",
+    "tests/diagnostics/test_acceptance_target_contract.py": "ad2a25781477d9c8789e0d5116f4704e13ef4cd296601693a3a1fefbc321e1da",
+    "tests/diagnostics/test_feed_payload_validation.py": "86bbf531830bc0a1b58e259c608adbe3cea96d76927b0c78eb0a2758a6d64081"
+  },
+  "formal_36_minute_benchmark_reexecuted": false
+}

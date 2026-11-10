@@ -1,6 +1,8 @@
 # GoStream 求职展示版 SDD 与开发任务清单
 
-更新时间：2026-11-09。目标版本：`v1.0.0`。本文件是后续 coding agent 的执行入口；产品边界见 [DELIVERY_SCOPE](DELIVERY_SCOPE.md)，验收门槛见 [TEST_STANDARD](TEST_STANDARD.md)，历史证据见 [PROGRESS](../PROGRESS.md)。SDD 在这里指以明确规格、任务和验证证据驱动开发。
+> 2026-11-10 审查入口：[生产推荐边界、可靠性修复与证据口径](BRANCH_REVIEW_2026-11-10.md)。新增大规模暖缓存、MySQL计划、群聊、故障与割接数据均保留；完整 A04 和 A10 不得由暖缓存子项或 SQLite 小样本签收，本轮查询修正后需补关联版本的性能验证。
+
+更新时间：2026-11-10。目标版本：`v1.0.0`。本文件是后续 coding agent 的执行入口；产品边界见 [DELIVERY_SCOPE](DELIVERY_SCOPE.md)，验收门槛见 [TEST_STANDARD](TEST_STANDARD.md)，历史证据见 [PROGRESS](../PROGRESS.md)。SDD 在这里指以明确规格、任务和验证证据驱动开发。
 
 > 2026-11-09 集成入口：分支分类、正式夹具保护与 loopback 代理超时修复、真实验证及剩余可执行清单见 [本轮审查](BRANCH_REVIEW_2026-11-09.md)。以下历史测试数量/本地与远程状态属于其记录时点；最终 CI 与合并状态以集成 PR 为准。正式规模 G06/G07、G08/G09 同版业务证据、G10 恢复量测仍不得提前勾选。
 

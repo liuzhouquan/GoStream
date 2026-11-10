@@ -49,7 +49,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from launcher_lifecycle import cleanup_on_interrupt
-from acceptance_config import resolve_acceptance_target
+from acceptance_config import open_api_request, resolve_acceptance_target
 
 
 def free_port() -> int:
@@ -73,7 +73,7 @@ def call_api(base: str, path: str, method: str = "GET", token: str = "", device_
     req = Request(base + path, data=body, headers=headers, method=method)
     t0 = time.monotonic()
     try:
-        with urlopen(req, timeout=15) as resp:
+        with open_api_request(req, timeout=15) as resp:
             data = resp.read()
             elapsed_ms = (time.monotonic() - t0) * 1000
             ct = resp.headers.get_content_type()
@@ -103,7 +103,7 @@ def wait_url_ready(url: str, timeout: float = 15.0):
     while time.monotonic() - start < timeout:
         try:
             req = Request(url + "/ready", method="GET")
-            with urlopen(req, timeout=1) as resp:
+            with open_api_request(req, timeout=1) as resp:
                 if resp.status == 200:
                     return
         except Exception:
@@ -757,114 +757,134 @@ def main():
     tokens = None
     device_ids = None
 
-    with ExitStack() as stack:
-        if mode == "compose":
-            api_a, api_b = external_api_a, external_api_b
-            pids = {"driver": os.getpid()}
-        else:
-            temp_dir = stack.enter_context(tempfile.TemporaryDirectory(prefix="gostream_group_im_"))
-            db_path = os.path.join(temp_dir, "group_im.db")
-            media_dir = os.path.join(temp_dir, "media")
-            os.makedirs(media_dir, exist_ok=True)
-            secret = "group-im-signing-secret-at-least-32-bytes"
+    try:
+        with ExitStack() as stack:
+            if mode == "compose":
+                api_a, api_b = external_api_a, external_api_b
+                pids = {"driver": os.getpid()}
+            else:
+                temp_dir = stack.enter_context(tempfile.TemporaryDirectory(prefix="gostream_group_im_"))
+                db_path = os.path.join(temp_dir, "group_im.db")
+                media_dir = os.path.join(temp_dir, "media")
+                os.makedirs(media_dir, exist_ok=True)
+                secret = "group-im-signing-secret-at-least-32-bytes"
 
-            root = Path(__file__).resolve().parents[2]
-            server_bin = os.path.join(temp_dir, "server_bin")
-            miniredis_bin = os.path.join(temp_dir, "miniredis_bin")
+                root = Path(__file__).resolve().parents[2]
+                server_bin = os.path.join(temp_dir, "server_bin")
+                miniredis_bin = os.path.join(temp_dir, "miniredis_bin")
 
-            print("Building server & miniredis binaries...")
-            subprocess.run(["go", "build", "-o", server_bin, "./cmd/gostream"], check=True, cwd=str(root))
-            subprocess.run(["go", "build", "-o", miniredis_bin, "./tools/miniredis_shim.go"], check=True, cwd=str(root))
+                print("Building server & miniredis binaries...")
+                subprocess.run(["go", "build", "-o", server_bin, "./cmd/gostream"], check=True, cwd=str(root))
+                subprocess.run(["go", "build", "-o", miniredis_bin, "./tools/miniredis_shim.go"], check=True, cwd=str(root))
 
-            redis_port = free_port()
-            redis_addr = f"127.0.0.1:{redis_port}"
+                redis_port = free_port()
+                redis_addr = f"127.0.0.1:{redis_port}"
 
-            port_a = free_port()
-            port_b = free_port()
-            api_a = f"http://127.0.0.1:{port_a}"
-            api_b = f"http://127.0.0.1:{port_b}"
+                port_a = free_port()
+                port_b = free_port()
+                api_a = f"http://127.0.0.1:{port_a}"
+                api_b = f"http://127.0.0.1:{port_b}"
 
-            stack.enter_context(cleanup_on_interrupt())
+                stack.enter_context(cleanup_on_interrupt())
 
-            p_redis = subprocess.Popen([miniredis_bin, "-addr", redis_addr], stdout=subprocess.PIPE, stderr=sys.stderr)
-            line = p_redis.stdout.readline().decode()
-            if "MINIREDIS_READY" not in line:
-                raise RuntimeError(f"MiniRedis failed to report readiness: {line}")
-            print(f"Redis ready at: {redis_addr}")
+                p_redis = subprocess.Popen([miniredis_bin, "-addr", redis_addr], stdout=subprocess.PIPE, stderr=sys.stderr)
+                line = p_redis.stdout.readline().decode()
+                if "MINIREDIS_READY" not in line:
+                    raise RuntimeError(f"MiniRedis failed to report readiness: {line}")
+                print(f"Redis ready at: {redis_addr}")
 
-            env_base = {
-                "PATH": os.environ.get("PATH", ""),
-                "DB_DRIVER": "sqlite",
-                "DB_DSN": f"{db_path}?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1&_txlock=immediate",
-                "REDIS_ADDR": redis_addr,
-                "MEDIA_DIR": media_dir,
-                "MEDIA_STORE": "local",
-                "JWT_SECRET": secret,
-            }
-            env_a = dict(env_base, ADDR=f"127.0.0.1:{port_a}")
-            env_b = dict(env_base, ADDR=f"127.0.0.1:{port_b}")
+                env_base = {
+                    "PATH": os.environ.get("PATH", ""),
+                    "DB_DRIVER": "sqlite",
+                    "DB_DSN": f"{db_path}?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1&_txlock=immediate",
+                    "REDIS_ADDR": redis_addr,
+                    "MEDIA_DIR": media_dir,
+                    "MEDIA_STORE": "local",
+                    "JWT_SECRET": secret,
+                }
+                env_a = dict(env_base, ADDR=f"127.0.0.1:{port_a}")
+                env_b = dict(env_base, ADDR=f"127.0.0.1:{port_b}")
 
-            p_a = subprocess.Popen([server_bin], env=env_a)
-            p_b = None
+                p_a = subprocess.Popen([server_bin], env=env_a)
+                p_b = None
 
-            def stop_processes():
-                for p in (p_a, p_b, p_redis):
-                    if p and p.poll() is None:
-                        p.terminate()
-                        try:
-                            p.wait(timeout=3)
-                        except subprocess.TimeoutExpired:
-                            p.kill()
+                def stop_processes():
+                    for p in (p_a, p_b, p_redis):
+                        if p and p.poll() is None:
+                            p.terminate()
+                            try:
+                                p.wait(timeout=3)
+                            except subprocess.TimeoutExpired:
+                                p.kill()
 
-            stack.callback(stop_processes)
-            wait_url_ready(api_a, timeout=15)
+                stack.callback(stop_processes)
+                wait_url_ready(api_a, timeout=15)
 
-            # Populate 20 accounts in SQLite and generate tokens directly
-            print("Populating 20 test accounts and generating signed tokens...")
-            conn = sqlite3.connect(db_path)
-            now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-            pw_hash = bcrypt.hashpw(b"Password123!", bcrypt.gensalt(rounds=10)).decode()
-            accounts = []
-            tokens = []
-            device_ids = []
-            users = []
-            for i in range(1, 21):
-                accounts.append(i)
-                users.append((i, f"gfanout_u{i:02d}", pw_hash, f"Nick_{i:02d}", now_str))
-                tok = jwt.encode({"sub": i, "iat": int(time.time()), "exp": int(time.time()) + 86400}, secret, algorithm="HS256")
-                tokens.append(tok)
-                device_ids.append(test_uuid(i - 1))
-            conn.executemany("INSERT INTO users (id, username, password_hash, nickname, created_at) VALUES (?, ?, ?, ?, ?)", users)
-            conn.commit()
-            conn.close()
+                # Populate 20 accounts in SQLite and generate tokens directly
+                print("Populating 20 test accounts and generating signed tokens...")
+                conn = sqlite3.connect(db_path)
+                now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                pw_hash = bcrypt.hashpw(b"Password123!", bcrypt.gensalt(rounds=10)).decode()
+                accounts = []
+                tokens = []
+                device_ids = []
+                users = []
+                for i in range(1, 21):
+                    accounts.append(i)
+                    users.append((i, f"gfanout_u{i:02d}", pw_hash, f"Nick_{i:02d}", now_str))
+                    tok = jwt.encode({"sub": i, "iat": int(time.time()), "exp": int(time.time()) + 86400}, secret, algorithm="HS256")
+                    tokens.append(tok)
+                    device_ids.append(test_uuid(i - 1))
+                conn.executemany("INSERT INTO users (id, username, password_hash, nickname, created_at) VALUES (?, ?, ?, ?, ?)", users)
+                conn.commit()
+                conn.close()
 
-            p_b = subprocess.Popen([server_bin], env=env_b)
-            wait_url_ready(api_b, timeout=15)
+                p_b = subprocess.Popen([server_bin], env=env_b)
+                wait_url_ready(api_b, timeout=15)
 
-            pids = {
-                "api_a": p_a.pid,
-                "api_b": p_b.pid,
-                "driver": os.getpid(),
-            }
+                pids = {
+                    "api_a": p_a.pid,
+                    "api_b": p_b.pid,
+                    "driver": os.getpid(),
+                }
 
-        print(f"Running group fanout acceptance: API A={api_a}, API B={api_b}...")
-        results = run_group_fanout_matrix(
-            api_a, api_b, msgs_per_client, pids, accounts, tokens, device_ids,
-            db_path=db_path,
-        )
-        report.update(results)
-        all_passed = bool(results.get("checkpoints")) and all(results["checkpoints"].values())
-        report["status"] = "PASS" if all_passed else "FAIL"
-        report["release_gate_passed"] = all_passed and args.duration_mode == "standard" and mode == "compose"
-        if not report["release_gate_passed"]:
-            unverified = []
-            if mode != "compose":
-                unverified.append("real Compose stack with dual API and Redis required for formal gate")
-            if args.duration_mode != "standard":
-                unverified.append("duration_mode must be standard (1000 messages)")
-            if not results.get("checkpoints", {}).get("sql_facts_consistent_zero_duplicates"):
-                unverified.append("SQL facts verification did not pass")
-            report["unverified_requirements"] = unverified
+            print(f"Running group fanout acceptance: API A={api_a}, API B={api_b}...")
+            results = run_group_fanout_matrix(
+                api_a, api_b, msgs_per_client, pids, accounts, tokens, device_ids,
+                db_path=db_path,
+            )
+            report.update(results)
+            all_passed = bool(results.get("checkpoints")) and all(results["checkpoints"].values())
+            report["status"] = "PASS" if all_passed else "FAIL"
+            report["release_gate_passed"] = all_passed and args.duration_mode == "standard" and mode == "compose"
+            if not report["release_gate_passed"]:
+                unverified = []
+                if mode != "compose":
+                    unverified.append("real Compose stack with dual API and Redis required for formal gate")
+                if args.duration_mode != "standard":
+                    unverified.append("duration_mode must be standard (1000 messages)")
+                if not results.get("checkpoints", {}).get("sql_facts_consistent_zero_duplicates"):
+                    unverified.append("SQL facts verification did not pass")
+                report["unverified_requirements"] = unverified
+    except Exception as err:
+        elapsed = time.time() - start_time
+        report["elapsed_seconds"] = round(elapsed, 2)
+        report["status"] = "FAIL"
+        report["release_gate_passed"] = False
+        report["validation_scope"] = "execution_failure"
+        report["execution_error"] = {
+            "type": err.__class__.__name__,
+            "message": str(err),
+        }
+        report["unverified_requirements"] = [
+            f"execution failed: [{err.__class__.__name__}] {err}"
+        ]
+        out_path = Path(args.report)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        print(f"Group IM execution failed: [{err.__class__.__name__}] {err}", file=sys.stderr)
+        return 1
 
     elapsed = time.time() - start_time
     report["elapsed_seconds"] = round(elapsed, 2)

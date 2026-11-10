@@ -52,22 +52,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests/integration"))
 
 from launcher_lifecycle import cleanup_on_interrupt
-from acceptance_config import resolve_acceptance_target
-
-
-# Local acceptance traffic must not queue behind a developer's outbound proxy.
-_DIRECT_API_OPENER = build_opener(ProxyHandler({}))
-
-
-def open_api_request(request: Request, timeout: float):
-    host = urllib.parse.urlsplit(request.full_url).hostname or ""
-    loopback = host.lower() == "localhost"
-    try:
-        loopback = loopback or ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        pass
-    opener = _DIRECT_API_OPENER.open if loopback else urlopen
-    return opener(request, timeout=timeout)
+from acceptance_config import open_api_request, resolve_acceptance_target
 
 
 def free_port() -> int:
@@ -120,7 +105,7 @@ def seed_mysql_feed_db(mysql_addr: str = ""):
     root = Path(__file__).resolve().parents[2]
     cmd = ["go", "run", "./tools/seed_feed_benchmark.go", "-driver", "mysql"]
     if mysql_addr:
-        dsn = f"gostream:gostream-local@tcp({mysql_addr})/gostream?charset=utf8mb4&parseTime=True&loc=Local"
+        dsn = f"gostream:gostream-local@tcp({mysql_addr})/gostream?charset=utf8mb4&parseTime=True&loc=UTC"
         cmd.extend(["-dsn", dsn])
     subprocess.run(cmd, cwd=str(root), check=True)
 
@@ -390,12 +375,12 @@ def run_feed_load_scenarios(base_urls: list[str], viewer_token: str, following_c
                     warmup_duration = warmup["duration_sec"]
                 measured = run_load_burst(base_urls, path, token, concurrency, test_sec)
                 measured.update(scene=scene, round=round_number, warmup_duration_sec=warmup_duration)
-                assert measured["successes"] > 0 and measured["total_requests"] > 0, f"{scene} has no measured samples"
-                assert measured["failures"] == 0, f"{scene} had failed or inconsistent responses"
-                assert measured["p95_ms"] is not None and measured["p95_ms"] <= 200.0, f"{scene} exceeded P95 gate"
-                assert measured["p99_ms"] is not None and measured["p99_ms"] <= 500.0, f"{scene} exceeded P99 gate"
                 print(f"  {scene} concurrency={concurrency} round={round_number}: "
                       f"requests={measured['total_requests']}, P95={measured['p95_ms']}ms, P99={measured['p99_ms']}ms")
+                assert measured["successes"] > 0 and measured["total_requests"] > 0, f"{scene} has no measured samples"
+                assert measured["failures"] == 0, f"{scene} had failed or inconsistent responses"
+                assert measured["p95_ms"] is not None and measured["p95_ms"] <= 200.0, f"{scene} exceeded P95 gate: {measured['p95_ms']}ms"
+                assert measured["p99_ms"] is not None and measured["p99_ms"] <= 500.0, f"{scene} exceeded P99 gate: {measured['p99_ms']}ms"
                 results.append(measured)
     return results
 
@@ -757,168 +742,188 @@ def main():
     db_path = ""
     mysql_addr = ""
 
-    with ExitStack() as stack:
-        if mode == "compose":
-            api_a, api_b = external_api_a, external_api_b
-            mysql_addr = os.environ.get("GOSTREAM_MYSQL_ADDR", "")
-            if getattr(args, "formal_dataset", False):
-                scale_info = check_dataset_scale(mode, mysql_addr=mysql_addr)
-                report["dataset_scale"] = scale_info
-                if not scale_info.get("meets_formal_scale", False):
-                    print("Formal dataset verification requested (--formal-dataset), but dataset scale does not meet formal criteria.", file=sys.stderr)
-                    print(f"Observed scale: {scale_info}", file=sys.stderr)
-                    return write_rejection("rejected_insufficient_scale", [
-                        f"formal dataset scale requirement not met: minimum 2,000 users, 20,000 published videos, 10,000 follows, 50,000 interactions, and hybrid threshold authors; "
-                        f"observed users={scale_info.get('users', 0)}, published_videos={scale_info.get('published_videos', 0)}, "
-                        f"videos={scale_info.get('videos', 0)}, follows={scale_info.get('follows', 0)}, interactions={scale_info.get('interactions', 0)}, "
-                        f"has_high_author={scale_info.get('has_high_author', False)}, has_low_author={scale_info.get('has_low_author', False)}"
-                    ])
+    try:
+        with ExitStack() as stack:
+            if mode == "compose":
+                api_a, api_b = external_api_a, external_api_b
+                mysql_addr = os.environ.get("GOSTREAM_MYSQL_ADDR", "")
+                if getattr(args, "formal_dataset", False):
+                    scale_info = check_dataset_scale(mode, mysql_addr=mysql_addr)
+                    report["dataset_scale"] = scale_info
+                    if not scale_info.get("meets_formal_scale", False):
+                        print("Formal dataset verification requested (--formal-dataset), but dataset scale does not meet formal criteria.", file=sys.stderr)
+                        print(f"Observed scale: {scale_info}", file=sys.stderr)
+                        return write_rejection("rejected_insufficient_scale", [
+                            f"formal dataset scale requirement not met: minimum 2,000 users, 20,000 published videos, 10,000 follows, 50,000 interactions, and hybrid threshold authors; "
+                            f"observed users={scale_info.get('users', 0)}, published_videos={scale_info.get('published_videos', 0)}, "
+                            f"videos={scale_info.get('videos', 0)}, follows={scale_info.get('follows', 0)}, interactions={scale_info.get('interactions', 0)}, "
+                            f"has_high_author={scale_info.get('has_high_author', False)}, has_low_author={scale_info.get('has_low_author', False)}"
+                        ])
+                else:
+                    print(f"Seeding smoke feed fixture into Compose MySQL (addr: {mysql_addr})...")
+                    seed_mysql_feed_db(mysql_addr)
             else:
-                print(f"Seeding smoke feed fixture into Compose MySQL (addr: {mysql_addr})...")
-                seed_mysql_feed_db(mysql_addr)
-        else:
-            temp_dir = stack.enter_context(tempfile.TemporaryDirectory(prefix="gostream_warm_feed_"))
-            db_path = os.path.join(temp_dir, "feed.db")
-            media_dir = os.path.join(temp_dir, "media")
-            os.makedirs(media_dir, exist_ok=True)
-            secret = "feed-warm-cache-jwt-secret-at-least-32-bytes"
+                temp_dir = stack.enter_context(tempfile.TemporaryDirectory(prefix="gostream_warm_feed_"))
+                db_path = os.path.join(temp_dir, "feed.db")
+                media_dir = os.path.join(temp_dir, "media")
+                os.makedirs(media_dir, exist_ok=True)
+                secret = "feed-warm-cache-jwt-secret-at-least-32-bytes"
 
-            root = Path(__file__).resolve().parents[2]
-            server_bin = os.path.join(temp_dir, "server_bin")
-            miniredis_bin = os.path.join(temp_dir, "miniredis_bin")
+                root = Path(__file__).resolve().parents[2]
+                server_bin = os.path.join(temp_dir, "server_bin")
+                miniredis_bin = os.path.join(temp_dir, "miniredis_bin")
 
-            print("Building server & miniredis binaries...")
-            subprocess.run(["go", "build", "-o", server_bin, "./cmd/gostream"], check=True, cwd=str(root))
-            subprocess.run(["go", "build", "-o", miniredis_bin, "./tools/miniredis_shim.go"], check=True, cwd=str(root))
+                print("Building server & miniredis binaries...")
+                subprocess.run(["go", "build", "-o", server_bin, "./cmd/gostream"], check=True, cwd=str(root))
+                subprocess.run(["go", "build", "-o", miniredis_bin, "./tools/miniredis_shim.go"], check=True, cwd=str(root))
 
-            redis_port = free_port()
-            redis_addr = f"127.0.0.1:{redis_port}"
+                redis_port = free_port()
+                redis_addr = f"127.0.0.1:{redis_port}"
 
-            port_a = free_port()
-            port_b = free_port()
-            api_a = f"http://127.0.0.1:{port_a}"
-            api_b = f"http://127.0.0.1:{port_b}"
+                port_a = free_port()
+                port_b = free_port()
+                api_a = f"http://127.0.0.1:{port_a}"
+                api_b = f"http://127.0.0.1:{port_b}"
 
-            stack.enter_context(cleanup_on_interrupt())
+                stack.enter_context(cleanup_on_interrupt())
 
-            # 1. Start MiniRedis
-            p_redis = subprocess.Popen([miniredis_bin, "-addr", redis_addr], stdout=subprocess.PIPE, stderr=sys.stderr)
-            line = p_redis.stdout.readline().decode()
-            if "MINIREDIS_READY" not in line:
-                raise RuntimeError(f"MiniRedis failed to report readiness: {line}")
-            print(f"Redis ready at: {redis_addr}")
+                # 1. Start MiniRedis
+                p_redis = subprocess.Popen([miniredis_bin, "-addr", redis_addr], stdout=subprocess.PIPE, stderr=sys.stderr)
+                line = p_redis.stdout.readline().decode()
+                if "MINIREDIS_READY" not in line:
+                    raise RuntimeError(f"MiniRedis failed to report readiness: {line}")
+                print(f"Redis ready at: {redis_addr}")
 
-            env_base = {
-                "PATH": os.environ.get("PATH", ""),
-                "DB_DRIVER": "sqlite",
-                "DB_DSN": f"{db_path}?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1",
-                "REDIS_ADDR": redis_addr,
-                "MEDIA_DIR": media_dir,
-                "MEDIA_STORE": "local",
-                "JWT_SECRET": secret,
-                "FEED_FANOUT_MAX_FOLLOWERS": "1000",
-            }
-            env_a = dict(env_base, ADDR=f"127.0.0.1:{port_a}")
-            env_b = dict(env_base, ADDR=f"127.0.0.1:{port_b}")
+                env_base = {
+                    "PATH": os.environ.get("PATH", ""),
+                    "DB_DRIVER": "sqlite",
+                    "DB_DSN": f"{db_path}?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1",
+                    "REDIS_ADDR": redis_addr,
+                    "MEDIA_DIR": media_dir,
+                    "MEDIA_STORE": "local",
+                    "JWT_SECRET": secret,
+                    "FEED_FANOUT_MAX_FOLLOWERS": "1000",
+                }
+                env_a = dict(env_base, ADDR=f"127.0.0.1:{port_a}")
+                env_b = dict(env_base, ADDR=f"127.0.0.1:{port_b}")
 
-            # 2. Start API A
-            p_a = subprocess.Popen([server_bin], env=env_a)
-            p_b = None
+                # 2. Start API A
+                p_a = subprocess.Popen([server_bin], env=env_a)
+                p_b = None
 
-            def stop_processes():
-                for p in (p_a, p_b, p_redis):
-                    if p and p.poll() is None:
-                        p.terminate()
-                        try:
-                            p.wait(timeout=3)
-                        except subprocess.TimeoutExpired:
-                            p.kill()
+                def stop_processes():
+                    for p in (p_a, p_b, p_redis):
+                        if p and p.poll() is None:
+                            p.terminate()
+                            try:
+                                p.wait(timeout=3)
+                            except subprocess.TimeoutExpired:
+                                p.kill()
 
-            stack.callback(stop_processes)
-            wait_url_ready(api_a, timeout=15)
+                stack.callback(stop_processes)
+                wait_url_ready(api_a, timeout=15)
 
-            # 3. Populate benchmark fixture in SQLite
-            print("Populating benchmark feed dataset (10 authors, 120 videos, inboxes)...")
-            populate_benchmark_feed_db(db_path)
+                # 3. Populate benchmark fixture in SQLite
+                print("Populating benchmark feed dataset (10 authors, 120 videos, inboxes)...")
+                populate_benchmark_feed_db(db_path)
 
-            # 4. Start API B
-            p_b = subprocess.Popen([server_bin], env=env_b)
-            wait_url_ready(api_b, timeout=15)
-            tracked_pids = [p_a.pid, p_b.pid]
+                # 4. Start API B
+                p_b = subprocess.Popen([server_bin], env=env_b)
+                wait_url_ready(api_b, timeout=15)
+                tracked_pids = [p_a.pid, p_b.pid]
 
-        if scale_info is None:
-            db_path_for_check = db_path if mode == "sqlite" else ""
-            scale_info = check_dataset_scale(mode, db_path=db_path_for_check, mysql_addr=mysql_addr if mode == "compose" else "")
-            report["dataset_scale"] = scale_info
+            if scale_info is None:
+                db_path_for_check = db_path if mode == "sqlite" else ""
+                scale_info = check_dataset_scale(mode, db_path=db_path_for_check, mysql_addr=mysql_addr if mode == "compose" else "")
+                report["dataset_scale"] = scale_info
 
-        if getattr(args, "formal_dataset", False) and not scale_info.get("meets_formal_scale", False):
-            print("Formal dataset verification requested (--formal-dataset), but dataset scale does not meet formal criteria.", file=sys.stderr)
-            print(f"Observed scale: {scale_info}", file=sys.stderr)
-            return write_rejection("rejected_insufficient_scale", [
-                f"formal dataset scale requirement not met: minimum 2,000 users, 20,000 published videos, 10,000 follows, 50,000 interactions, and hybrid threshold authors; "
-                f"observed users={scale_info.get('users', 0)}, published_videos={scale_info.get('published_videos', 0)}, "
-                f"videos={scale_info.get('videos', 0)}, follows={scale_info.get('follows', 0)}, interactions={scale_info.get('interactions', 0)}, "
-                f"has_high_author={scale_info.get('has_high_author', False)}, has_low_author={scale_info.get('has_low_author', False)}"
-            ])
-
-        print(f"Running continuous warm-cache acceptance: API A={api_a}, API B={api_b}...")
-        results = run_continuous_feed_matrix(
-            api_a, api_b,
-            warmup_sec=args.warmup_seconds,
-            test_sec=args.duration_seconds,
-            rounds=args.rounds,
-            tracked_pids=tracked_pids,
-        )
-        report.update(results)
-        if mode == "compose" and args.formal_dataset:
-            report["dataset_scale_before_load"] = scale_info
-            scale_info = check_dataset_scale(mode, mysql_addr=mysql_addr)
-            report["dataset_scale"] = scale_info
-            if not scale_info.get("meets_formal_scale", False):
-                return write_rejection("rejected_scale_changed", [
-                    "formal dataset no longer meets scale requirements after the measured load"
-                ])
-        all_passed = bool(report.get("checkpoints")) and all(report["checkpoints"].values())
-        report["status"] = "PASS" if all_passed else "FAIL"
-
-        coverage_issues = feed_load_coverage_issues(report.get("rounds", []))
-        report["load_coverage_issues"] = coverage_issues
-
-        is_formal_config = (
-            mode == "compose"
-            and getattr(args, "formal_dataset", False)
-            and scale_info.get("meets_formal_scale", False)
-            and args.warmup_seconds >= 30.0
-            and args.duration_seconds >= 60.0
-            and args.rounds >= 3
-            and not coverage_issues
-        )
-
-        if is_formal_config and all_passed:
-            report["validation_scope"] = "formal_standard"
-            report["release_gate_passed"] = True
-            report["unverified_requirements"] = []
-        else:
-            report["validation_scope"] = "component_smoke"
-            report["release_gate_passed"] = False
-            unverified = []
-            if mode != "compose":
-                unverified.append("real Compose stack with MySQL 8.4 and Redis 8.2 required for formal gate")
-            if not getattr(args, "formal_dataset", False) or not scale_info.get("meets_formal_scale", False):
-                unverified.append(
-                    f"production scale dataset (minimum 2,000 users, 20,000 published videos, 10,000 follows, 50,000 interactions, and authors across hybrid threshold) required for formal gate; "
+            if getattr(args, "formal_dataset", False) and not scale_info.get("meets_formal_scale", False):
+                print("Formal dataset verification requested (--formal-dataset), but dataset scale does not meet formal criteria.", file=sys.stderr)
+                print(f"Observed scale: {scale_info}", file=sys.stderr)
+                return write_rejection("rejected_insufficient_scale", [
+                    f"formal dataset scale requirement not met: minimum 2,000 users, 20,000 published videos, 10,000 follows, 50,000 interactions, and hybrid threshold authors; "
                     f"observed users={scale_info.get('users', 0)}, published_videos={scale_info.get('published_videos', 0)}, "
                     f"videos={scale_info.get('videos', 0)}, follows={scale_info.get('follows', 0)}, interactions={scale_info.get('interactions', 0)}, "
                     f"has_high_author={scale_info.get('has_high_author', False)}, has_low_author={scale_info.get('has_low_author', False)}"
-                )
-            unverified.extend(coverage_issues)
-            if args.warmup_seconds < 30.0:
-                unverified.append(f"warmup_seconds ({args.warmup_seconds}s) < required 30s")
-            if args.duration_seconds < 60.0:
-                unverified.append(f"duration_seconds ({args.duration_seconds}s) < required 60s")
-            if args.rounds < 3:
-                unverified.append(f"rounds ({args.rounds}) < required 3 rounds")
-            report["unverified_requirements"] = unverified
+                ])
+
+            print(f"Running continuous warm-cache acceptance: API A={api_a}, API B={api_b}...")
+            results = run_continuous_feed_matrix(
+                api_a, api_b,
+                warmup_sec=args.warmup_seconds,
+                test_sec=args.duration_seconds,
+                rounds=args.rounds,
+                tracked_pids=tracked_pids,
+            )
+            report.update(results)
+            if mode == "compose" and args.formal_dataset:
+                report["dataset_scale_before_load"] = scale_info
+                scale_info = check_dataset_scale(mode, mysql_addr=mysql_addr)
+                report["dataset_scale"] = scale_info
+                if not scale_info.get("meets_formal_scale", False):
+                    return write_rejection("rejected_scale_changed", [
+                        "formal dataset no longer meets scale requirements after the measured load"
+                    ])
+            all_passed = bool(report.get("checkpoints")) and all(report["checkpoints"].values())
+            report["status"] = "PASS" if all_passed else "FAIL"
+
+            coverage_issues = feed_load_coverage_issues(report.get("rounds", []))
+            report["load_coverage_issues"] = coverage_issues
+
+            is_formal_config = (
+                mode == "compose"
+                and getattr(args, "formal_dataset", False)
+                and scale_info.get("meets_formal_scale", False)
+                and args.warmup_seconds >= 30.0
+                and args.duration_seconds >= 60.0
+                and args.rounds >= 3
+                and not coverage_issues
+            )
+
+            if is_formal_config and all_passed:
+                report["validation_scope"] = "formal_standard"
+                report["release_gate_passed"] = True
+                report["unverified_requirements"] = []
+            else:
+                report["validation_scope"] = "component_smoke"
+                report["release_gate_passed"] = False
+                unverified = []
+                if mode != "compose":
+                    unverified.append("real Compose stack with MySQL 8.4 and Redis 8.2 required for formal gate")
+                if not getattr(args, "formal_dataset", False) or not scale_info.get("meets_formal_scale", False):
+                    unverified.append(
+                        f"production scale dataset (minimum 2,000 users, 20,000 published videos, 10,000 follows, 50,000 interactions, and authors across hybrid threshold) required for formal gate; "
+                        f"observed users={scale_info.get('users', 0)}, published_videos={scale_info.get('published_videos', 0)}, "
+                        f"videos={scale_info.get('videos', 0)}, follows={scale_info.get('follows', 0)}, interactions={scale_info.get('interactions', 0)}, "
+                        f"has_high_author={scale_info.get('has_high_author', False)}, has_low_author={scale_info.get('has_low_author', False)}"
+                    )
+                unverified.extend(coverage_issues)
+                if args.warmup_seconds < 30.0:
+                    unverified.append(f"warmup_seconds ({args.warmup_seconds}s) < required 30s")
+                if args.duration_seconds < 60.0:
+                    unverified.append(f"duration_seconds ({args.duration_seconds}s) < required 60s")
+                if args.rounds < 3:
+                    unverified.append(f"rounds ({args.rounds}) < required 3 rounds")
+                report["unverified_requirements"] = unverified
+    except Exception as err:
+        elapsed = time.time() - start_time
+        report["elapsed_seconds"] = round(elapsed, 2)
+        report["status"] = "FAIL"
+        report["release_gate_passed"] = False
+        report["validation_scope"] = "execution_failure"
+        report["execution_error"] = {
+            "type": err.__class__.__name__,
+            "message": str(err),
+        }
+        report["unverified_requirements"] = [
+            f"execution failed: [{err.__class__.__name__}] {err}"
+        ]
+        out_path = Path(args.report)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+        print(f"Feed continuous execution failed: [{err.__class__.__name__}] {err}", file=sys.stderr)
+        return 1
 
     elapsed = time.time() - start_time
     report["elapsed_seconds"] = round(elapsed, 2)

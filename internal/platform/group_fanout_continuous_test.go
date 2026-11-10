@@ -890,6 +890,60 @@ func TestMySQLGroupFanout_AllGates(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	var (
+		cleanupMu     sync.Mutex
+		cleanUserIDs  []uint
+		cleanGroupIDs []uint
+	)
+	trackUser := func(id uint) uint {
+		cleanupMu.Lock()
+		cleanUserIDs = append(cleanUserIDs, id)
+		cleanupMu.Unlock()
+		return id
+	}
+	trackGroup := func(id uint) uint {
+		cleanupMu.Lock()
+		cleanGroupIDs = append(cleanGroupIDs, id)
+		cleanupMu.Unlock()
+		return id
+	}
+	t.Cleanup(func() {
+		cleanupMu.Lock()
+		defer cleanupMu.Unlock()
+		if err := db.Transaction(func(tx *gorm.DB) error {
+			if len(cleanGroupIDs) > 0 {
+				for _, model := range []any{&GroupDeviceRead{}, &GroupRead{}, &GroupMessage{}, &GroupMember{}} {
+					if err := tx.Where("group_id IN ?", cleanGroupIDs).Delete(model).Error; err != nil {
+						return err
+					}
+				}
+				if err := tx.Where("id IN ?", cleanGroupIDs).Delete(&ChatGroup{}).Error; err != nil {
+					return err
+				}
+			}
+			if len(cleanUserIDs) > 0 {
+				if err := tx.Where("user_id IN ? OR actor_id IN ?", cleanUserIDs, cleanUserIDs).Delete(&Notification{}).Error; err != nil {
+					return err
+				}
+				if err := tx.Where("user_id IN ?", cleanUserIDs).Delete(&MessageDevice{}).Error; err != nil {
+					return err
+				}
+				if err := tx.Where("id IN ?", cleanUserIDs).Delete(&User{}).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Errorf("clean MySQL group fanout fixture: %v", err)
+		}
+	})
+
 	gin.SetMode(gin.TestMode)
 	s := NewServer(db, "mysql-group-fanout-jwt-secret-at-least-32-bytes", t.TempDir())
 
@@ -911,10 +965,13 @@ func TestMySQLGroupFanout_AllGates(t *testing.T) {
 
 	t.Run("MySQL_DuplicateClientIDIdempotency", func(t *testing.T) {
 		tag := fmt.Sprintf("%d", time.Now().UnixNano())
-		_, tok1 := registerUserWithPeer(t, h, "my_idemp_u1_"+tag, 1)
+		u1ID, tok1 := registerUserWithPeer(t, h, "my_idemp_u1_"+tag, 1)
+		trackUser(u1ID)
 		u2ID, tok2 := registerUserWithPeer(t, h, "my_idemp_u2_"+tag, 2)
+		trackUser(u2ID)
 
 		grp := createGroupWithPeer(t, h, tok1, "MySQL Idempotency Group")
+		trackGroup(grp.ID)
 		addMemberWithPeer(t, h, tok1, grp.ID, u2ID)
 
 		sock1 := newGroupWsSocket(t, wsURL, tok1, testUUID(101))
@@ -951,10 +1008,13 @@ func TestMySQLGroupFanout_AllGates(t *testing.T) {
 
 	t.Run("MySQL_PerDeviceUnreadAndACK", func(t *testing.T) {
 		tag := fmt.Sprintf("%d", time.Now().UnixNano())
-		_, tok1 := registerUserWithPeer(t, h, "my_pdev_u1_"+tag, 1)
+		u1ID, tok1 := registerUserWithPeer(t, h, "my_pdev_u1_"+tag, 1)
+		trackUser(u1ID)
 		u2ID, tok2 := registerUserWithPeer(t, h, "my_pdev_u2_"+tag, 2)
+		trackUser(u2ID)
 
 		grp := createGroupWithPeer(t, h, tok1, "MySQL PerDevice Group")
+		trackGroup(grp.ID)
 		addMemberWithPeer(t, h, tok1, grp.ID, u2ID)
 
 		devA := testUUID(201)
@@ -1030,10 +1090,13 @@ func TestMySQLGroupFanout_AllGates(t *testing.T) {
 
 	t.Run("MySQL_RemovalAndReinviteAdvance", func(t *testing.T) {
 		tag := fmt.Sprintf("%d", time.Now().UnixNano())
-		_, tok1 := registerUserWithPeer(t, h, "my_rem_u1_"+tag, 1)
+		u1ID, tok1 := registerUserWithPeer(t, h, "my_rem_u1_"+tag, 1)
+		trackUser(u1ID)
 		u2ID, tok2 := registerUserWithPeer(t, h, "my_rem_u2_"+tag, 2)
+		trackUser(u2ID)
 
 		grp := createGroupWithPeer(t, h, tok1, "MySQL Removal Group")
+		trackGroup(grp.ID)
 		addMemberWithPeer(t, h, tok1, grp.ID, u2ID)
 
 		sock1 := newGroupWsSocket(t, wsURL, tok1, testUUID(301))
@@ -1098,6 +1161,7 @@ func TestMySQLGroupFanout_AllGates(t *testing.T) {
 		clients := make([]clientInfo, clientCount)
 		for i := 0; i < clientCount; i++ {
 			uid, tok := registerUserWithPeer(t, h, fmt.Sprintf("my_fan_%s_%02d", tag, i), i)
+			trackUser(uid)
 			dev := testUUID(400 + i)
 			sock := newGroupWsSocket(t, wsURL, tok, dev)
 			defer sock.conn.Close()
@@ -1105,6 +1169,7 @@ func TestMySQLGroupFanout_AllGates(t *testing.T) {
 		}
 
 		grp := createGroupWithPeer(t, h, clients[0].Token, "MySQL 20-Client Matrix")
+		trackGroup(grp.ID)
 		for i := 1; i < clientCount; i++ {
 			addMemberWithPeer(t, h, clients[0].Token, grp.ID, clients[i].ID)
 		}

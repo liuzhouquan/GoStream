@@ -1,0 +1,32 @@
+{
+  "video_id": 1,
+  "media_url": "/media/b077439f68c0b47ef211188199f23f62.mp4",
+  "resumed_url": "/media/99706f6dfc9749b91825d3ff7451eadf.mp4",
+  "database": "mysql",
+  "sql_backup_bytes": 25790,
+  "sql_backup_sha256": "e7a148d18c942e838411e092650f106198c78b044ee866e9a33830dca9afa403",
+  "import": {
+    "objects": 2,
+    "copied": 2,
+    "existing": 0,
+    "bytes": 4194328
+  },
+  "import_repeat": {
+    "objects": 2,
+    "copied": 0,
+    "existing": 2,
+    "bytes": 0
+  },
+  "backup": {
+    "objects": 2,
+    "copied": 2,
+    "existing": 0,
+    "bytes": 4194328
+  },
+  "restore": {
+    "objects": 2,
+    "copied": 2,
+    "existing": 0,
+    "bytes": 4194328
+  }
+}

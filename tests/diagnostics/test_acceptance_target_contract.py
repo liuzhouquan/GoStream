@@ -26,7 +26,7 @@ STACK_ENV = {
 }
 
 
-class TargetCaptured(Exception):
+class TargetCaptured(BaseException):
     pass
 
 
@@ -89,6 +89,109 @@ class AcceptanceTargetContractTest(unittest.TestCase):
                     with self.assertRaisesRegex(NotImplementedError, "MySQL/MinIO"):
                         module.main()
                 self.assertFalse(report.exists())
+
+    def test_is_loopback_host_classification(self):
+        from acceptance_config import is_loopback_host
+        self.assertTrue(is_loopback_host("127.0.0.1"))
+        self.assertTrue(is_loopback_host("127.0.0.2"))
+        self.assertTrue(is_loopback_host("localhost"))
+        self.assertTrue(is_loopback_host("::1"))
+        self.assertTrue(is_loopback_host("[::1]"))
+
+        self.assertFalse(is_loopback_host(""))
+        self.assertFalse(is_loopback_host("example.com"))
+        self.assertFalse(is_loopback_host("192.168.1.100"))
+        self.assertFalse(is_loopback_host("10.0.0.1"))
+
+    def test_open_api_request_routes_loopback_to_direct_opener(self):
+        from acceptance_config import open_api_request, _DIRECT_API_OPENER
+        from unittest.mock import MagicMock
+
+        with patch.object(_DIRECT_API_OPENER, "open", return_value=MagicMock()) as mock_direct, \
+             patch("acceptance_config.urlopen", return_value=MagicMock()) as mock_urlopen:
+            open_api_request("http://127.0.0.1:18080/ready", timeout=5)
+            mock_direct.assert_called_once()
+            mock_urlopen.assert_not_called()
+
+        with patch.object(_DIRECT_API_OPENER, "open", return_value=MagicMock()) as mock_direct, \
+             patch("acceptance_config.urlopen", return_value=MagicMock()) as mock_urlopen:
+            open_api_request("http://example.com/api", timeout=5)
+            mock_direct.assert_not_called()
+            mock_urlopen.assert_called_once()
+
+    def test_feed_continuous_execution_failure_emits_structured_report(self):
+        import json
+        module = importlib.import_module("feed_warm_cache_continuous")
+        with tempfile.TemporaryDirectory() as directory:
+            report_path = Path(directory) / "feed_fail.json"
+            with patch.dict(os.environ, STACK_ENV, clear=True), \
+                 patch.object(sys, "argv", ["feed_warm_cache_continuous.py", "--report", str(report_path)]), \
+                 patch.object(module, "seed_mysql_feed_db"), \
+                 patch.object(module, "run_continuous_feed_matrix", side_effect=TimeoutError("simulated connection timeout")), \
+                 redirect_stdout(io.StringIO()):
+                code = module.main()
+            self.assertEqual(code, 1)
+            self.assertTrue(report_path.exists())
+            rep = json.loads(report_path.read_text())
+            self.assertEqual(rep["status"], "FAIL")
+            self.assertFalse(rep["release_gate_passed"])
+            self.assertEqual(rep["validation_scope"], "execution_failure")
+            self.assertEqual(rep["execution_error"]["type"], "TimeoutError")
+
+    def test_feed_runtime_failure_also_emits_structured_report(self):
+        import json
+        module = importlib.import_module("feed_warm_cache_continuous")
+        with tempfile.TemporaryDirectory() as directory:
+            report_path = Path(directory) / "feed_fail.json"
+            with patch.dict(os.environ, STACK_ENV, clear=True), \
+                 patch.object(sys, "argv", ["feed_warm_cache_continuous.py", "--report", str(report_path)]), \
+                 patch.object(module, "seed_mysql_feed_db"), \
+                 patch.object(module, "run_continuous_feed_matrix", side_effect=RuntimeError("video processing failed")), \
+                 redirect_stdout(io.StringIO()):
+                code = module.main()
+            self.assertEqual(code, 1)
+            self.assertTrue(report_path.exists())
+            rep = json.loads(report_path.read_text())
+            self.assertEqual(rep["status"], "FAIL")
+            self.assertFalse(rep["release_gate_passed"])
+            self.assertEqual(rep["validation_scope"], "execution_failure")
+            self.assertEqual(rep["execution_error"]["type"], "RuntimeError")
+
+    def test_group_im_execution_failure_emits_structured_report(self):
+        import json
+        module = importlib.import_module("group_im_smoke")
+        with tempfile.TemporaryDirectory() as directory:
+            report_path = Path(directory) / "group_fail.json"
+            with patch.dict(os.environ, STACK_ENV, clear=True), \
+                 patch.object(sys, "argv", ["group_im_smoke.py", "--report", str(report_path)]), \
+                 patch.object(module, "run_group_fanout_matrix", side_effect=ConnectionRefusedError("simulated connection refused")), \
+                 redirect_stdout(io.StringIO()):
+                code = module.main()
+            self.assertEqual(code, 1)
+            self.assertTrue(report_path.exists())
+            rep = json.loads(report_path.read_text())
+            self.assertEqual(rep["status"], "FAIL")
+            self.assertFalse(rep["release_gate_passed"])
+            self.assertEqual(rep["validation_scope"], "execution_failure")
+            self.assertEqual(rep["execution_error"]["type"], "ConnectionRefusedError")
+
+    def test_component_outage_execution_failure_emits_structured_report(self):
+        import json
+        module = importlib.import_module("component_outage_smoke")
+        with tempfile.TemporaryDirectory() as directory:
+            report_path = Path(directory) / "outage_fail.json"
+            with patch.dict(os.environ, STACK_ENV, clear=True), \
+                 patch.object(sys, "argv", ["component_outage_smoke.py", "--mode", "compose", "--report", str(report_path)]), \
+                 patch.object(module.ComponentOutageRunner, "run_all", side_effect=AssertionError("simulated outage assert fail")), \
+                 redirect_stdout(io.StringIO()):
+                with self.assertRaises(AssertionError):
+                    module.main()
+            self.assertTrue(report_path.exists())
+            rep = json.loads(report_path.read_text())
+            self.assertEqual(rep["status"], "FAIL")
+            self.assertFalse(rep["release_gate_passed"])
+            self.assertEqual(rep["validation_scope"], "execution_failure")
+            self.assertEqual(rep["execution_error"]["type"], "AssertionError")
 
 
 if __name__ == "__main__":

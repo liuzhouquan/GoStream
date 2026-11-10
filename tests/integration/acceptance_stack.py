@@ -31,6 +31,7 @@ from urllib.request import Request, urlopen
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests/integration"))
 from launcher_lifecycle import LauncherInterrupted, cleanup_on_interrupt, finish_process_start
+from acceptance_config import open_api_request
 
 
 DEFAULT_COMPOSE_FILES = [
@@ -293,7 +294,7 @@ class AcceptanceStack:
         """HTTP GET probe returning (status_code, parsed_json_or_text)."""
         req = Request(url, headers={"User-Agent": "GoStream-Acceptance-Launcher"})
         try:
-            with urlopen(req, timeout=timeout) as resp:
+            with open_api_request(req, timeout=timeout) as resp:
                 raw = resp.read().decode("utf-8", errors="replace")
                 try:
                     return resp.status, json.loads(raw)

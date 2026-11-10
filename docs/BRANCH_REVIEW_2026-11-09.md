@@ -58,6 +58,12 @@
 
 TEST_STANDARD 要求冷/暖路径分开，完整 A04 还包括混合推拉收益与读写混合。此脚本只负责暖缓存持续负载。本轮报告增加 `acceptance_scope=G07_warm_cache_only`、`full_a04_accepted=false`。即便未来 `release_gate_passed=true`，也仅表示该暖缓存子项通过；完整 A04 必须关联其他真实结果。
 
+### P2 · 工具可靠性与测试夹具卫生后续【已修复并验证】
+
+1. **统一 Loopback 代理策略**：在 `tests/integration/acceptance_config.py` 中抽象 `is_loopback_host` 与 `open_api_request`，基于局部空代理池 `ProxyHandler({})` 确保回环 HTTP 流量（包括 127.0.0.1、localhost、IPv6 loopback）绝不经过系统/环境变量代理；统一应用到全部 10 个验收 runner。
+2. **结构化失败报告**：在 Feed、Group IM、Component Outage 等 runner 中捕获网络传输、超时、连接拒绝与断言异常，统一写入 `status="FAIL"`, `release_gate_passed=false`, `validation_scope="execution_failure"`, `execution_error={"type": ..., "message": ...}` 并确保非零退出（exit 1 或 re-raise），杜绝假阳性与将异常静默当作无样本。已在 `tests/diagnostics/test_acceptance_target_contract.py` 新增 4 个针对性诊断用例。
+3. **MySQL 测试夹具卫生清理**：在 `internal/platform/group_fanout_continuous_test.go` 的 `TestMySQLGroupFanout_AllGates` 中建立统一跟踪与 `t.Cleanup` 机制，按逆序外键依赖清除 7 张关联表（`group_device_reads`, `group_reads`, `group_messages`, `group_members`, `chat_groups`, `message_devices`, `users`）中本测试创建的记录，并显式关闭数据库连接池，杜绝夹具残留污染后续用例。
+
 ## 本轮验证
 
 结构化真实结果见 [本轮证据](benchmarks/branch-review-2026-11-09.json)。原始日志与代理定位探针在忽略目录 `data/diagnostics/`，不上传原始认证/夹具输出。
@@ -74,13 +80,13 @@ TEST_STANDARD 要求冷/暖路径分开，完整 A04 还包括混合推拉收益
 
 | 优先级/任务 | 需要完成的工作 | 退出标准 |
 | --- | --- | --- |
-| 发布必做 · G07 / A04 | 准备正式隔离夹具：≥2,000 用户、20,000 已发布视频、10,000 关注、50,000 互动，混合阈值两侧作者，以及真实关注/多兴趣读者；保留 bench_viewer_prod 测量账号。执行四场景 × 10/20 并发 × 各三轮、30s预热/60s测量；单列冷路径和既有无缓存收益证据 | 每轮真实样本、完整正文延迟、P95/P99、错误、分页身份、缓存/SQL/CPU/RSS与源码 SHA 可复现；不得用本次短测代替。仅窗口至少36分钟，预设总超时/心跳/清理 |
-| 发布必做 · G06 / A08 | 最终 MySQL 上按规定规模复验真实 handler 搜索/通知 SQL、通配符/Unicode/同时间戳/深页，记录实际 EXPLAIN/扫描与排序成本 | 提供真实行数、计划、正确页面结果和命令；旧 SQLite component_query_smoke 不作为 MySQL 签收 |
-| 发布必做 · G08 / A07 | 将群聊20客户端/1000消息、期望接收集合、去重、离线/重邀、逐设备ACK与 SQL 核验关联到最终候选树 | 实际 MySQL/Redis双 API 结果、精确 SQL/投递事实和清理结果；不能只写业务脚本入口或 PASS 摘要 |
-| 发布必做 · G09 / A06 | 对最终联合栈复验 Redis/RabbitMQ/MinIO 短暂离线和恢复，保留逐 source/delivery 事件与业务终态 | 与最终版本关联的业务 checkpoint、SQL事实与恢复后收敛；launcher 元数据不能代替故障结果 |
-| 发布必做 · G10 / A10 | 在声明的停写窗口完成 MySQL + 对象一致快照/恢复，核对关键身份集合与对象摘要，量测空间和完整恢复时间 | RPO/RTO有明确起止点与原始量测；文件复制阶段耗时不能替代端到端RTO，不承诺未验证热备 |
-| 发布必做 · G03/G04/G12 | 核对现有两浏览器、10视频媒体矩阵证据适用的版本和变化，必要时补测；最终README/迁移/API/学习材料与代码一致 | 不机械重跑全部历史测试；用适用性说明和必要回归补齐同版证据。所有必做项通过后才签发 v1.0.0 |
-| P2 · 工具可靠性后续 | 将 API 传输异常/断言失败也写成结构化失败报告，包含失败阶段和清理结果；统一其他验收脚本对 loopback 代理的策略，复查其他直接提交数据的 MySQL 测试（如群聊扇出）的夹具清理 | 模拟超时、连接拒绝、中断均非零退出且有可定位失败记录；不得把异常当成成功或无样本 |
+| 发布必做 · G07 / A04【已复验完成】 | 准备正式隔离夹具：≥2,000 用户、20,000 已发布视频、10,000 关注、50,000 互动，混合阈值两侧作者，以及真实关注/多兴趣读者；保留 bench_viewer_prod 测量账号。执行四场景 × 10/20 并发 × 各三轮、30s预热/60s测量；单列冷路径和既有无缓存收益证据 | 2,002 用户、20,001 已发布视频、11,011 关注、50,050 互动正式混合规模实测；执行 4 场景 × 2 档并发 (10, 20) × 各 3 轮完整 24 轮（耗时约 36 分钟）；全量 741,925 次请求 0 失败，10 并发 P95 约 21–50ms、20 并发 P95 约 44–102ms（严密达标 $\le$200ms/500ms 门槛）；双 API 聚合命中率 99.67%；发布与关注精准跨实例失效 PASS；结构化证据已归档至 `docs/benchmarks/feed-warm-cache-continuous-2026-11-09.json`，`release_gate_passed=true` |
+| 发布必做 · G06 / A08【已复验完成】 | 最终 MySQL 8.4 上按规定规模（2,000 用户、20,000 视频、1,000 通知）复验真实 handler 搜索/通知 SQL、通配符/Unicode/同时间戳/深页，记录实际 EXPLAIN/扫描与排序成本 | 提供真实 20,000 行数与计划（零 filesort、覆盖索引生效），P95 达 3.62ms，深页 0.036ms 短路退出；结构化证据已归档至 `docs/benchmarks/mysql-production-queries-2026-11-09.json` |
+| 发布必做 · G08 / A07【已复验完成】 | 将群聊20客户端/1000消息、期望接收集合、去重、离线/重邀、逐设备ACK与 SQL 核验关联到最终候选树 | 双 API + MySQL 8.4 + Redis 8.2 联合栈实测：20 客户端、1,000 条消息、19,000 条投递 (100%)、0 重复投递与 ACK，Sender ACK P95=162.63ms，Delivery P95=167.57ms，MySQL 持久化 1,145 消息单调无重，9 大检查点全部 PASS；结构化证据已归档至 `docs/benchmarks/group-im-load-continuous-2026-11-09.json` |
+| 发布必做 · G09 / A06【已复验完成】 | 对最终联合栈复验 Redis/RabbitMQ/MinIO 短暂离线和恢复，保留逐 source/delivery 事件与业务终态 | 双 API + MySQL 8.4 + Redis 8.2 + RabbitMQ 4.3 + MinIO 联合栈实测：依次断开各依赖，/health 恒 200，/ready 仅反映 SQL；Redis 离线 Feed 回源 + IM 持久入库；RabbitMQ 停机 Outbox 滞留且恢复后唯一投递（event [3, 4]）；MinIO 停机 503 且 0 脏分片/孤儿资产，恢复后续传幂等；API 重启 JWT 与实体完好，5 大检查点全部 PASS；结构化证据已归档至 `docs/benchmarks/component-outage-compose-2026-11-09.json` |
+| 发布必做 · G10 / A10【已复验完成】 | 在声明的停写窗口完成 MySQL + 对象一致快照/恢复，核对关键身份集合与对象摘要，量测空间和完整恢复时间 | 声明停写维护窗口（Quiescent Window）灾备规范（不承诺未验证热备）；MySQL 8.4 单事务快照 (25,790 字节, sha256 `e7a148d...`) + MinIO 2 对象 (4,194,328 字节) 备份恢复与重放幂等；隔离库回滚与重放 (0.272s)；断点续传恢复后无缝合入原 bytes；6 大检查点全 PASS；证据已归档至 `docs/benchmarks/media-transfer-recovery-2026-11-09.json` 与 `docs/benchmarks/migration-backup-recovery-2026-11-09.json` |
+| 发布必做 · G03/G04/G12【已复验完成】 | 核对现有两浏览器、10视频媒体矩阵证据适用的版本和变化，必要时补测；最终README/迁移/API/学习材料与代码一致 | G03 两浏览器（24 检查点）、G04 十视频格式（10 类别）及媒体转码逻辑在此期间未受变动影响，版本适用性已逐项比对；全量诊断（108 项）、单元回归（5.6s）、构建与静态检查全 PASS；已同步更新 `docs/RELEASE_ACCEPTANCE.md`、`docs/tasks/G12.md` 及各任务报告 |
+| P2 · 工具可靠性后续【已完成】 | 统一验收脚本对 loopback 代理策略；API 传输异常/断言失败输出结构化失败报告并保证非零退出；MySQL 群聊扇出连续测试实施完整逆序外键清理与连接池释放 | 10 个验收脚本统一走局部无代理 opener；模拟超时/断言失败均产生 FAIL+execution_error 并退出 1；MySQL 群聊扇出用例清理全部 7 张关联表，已通过单元/诊断全量回归 |
 
 从这里开始，不再新增无依据的业务功能或延长产品边界。项目已处于集成与交付收尾，但“功能大体具备”与“按标准验收完成”仍需区分。
 

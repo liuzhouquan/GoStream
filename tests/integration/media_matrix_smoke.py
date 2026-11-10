@@ -43,6 +43,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from launcher_lifecycle import cleanup_on_interrupt
+from acceptance_config import open_api_request
 
 
 CHUNK_SIZE = 4 << 20  # 4 MiB
@@ -96,7 +97,7 @@ def call_api(base, path, method="GET", token="", body=None, content_type="applic
         headers["Content-Type"] = content_type
     req = Request(base + path, data=body, headers=headers, method=method)
     try:
-        with urlopen(req, timeout=25) as resp:
+        with open_api_request(req, timeout=25) as resp:
             data = resp.read()
             ct = resp.headers.get_content_type()
             return resp.status, json.loads(data) if ct == "application/json" else data
@@ -656,7 +657,7 @@ def main():
                 deadline = time.monotonic() + timeout
                 while time.monotonic() < deadline:
                     try:
-                        with urlopen(f"{url}/ready", timeout=1) as resp:
+                        with open_api_request(f"{url}/ready", timeout=1) as resp:
                             if resp.status == 200:
                                 return True
                     except Exception:

@@ -148,6 +148,7 @@ func (s *Server) feed(c *gin.Context) {
 	cursorTime := cur.createdTime()
 	var recommendation *recommendRanking
 	var items []Video
+	recommendMoreCandidates := false
 	if scene == "recommend" {
 		anchor := time.Now().UTC()
 		if cur.Anchor > 0 {
@@ -184,6 +185,32 @@ func (s *Server) feed(c *gin.Context) {
 	if err == nil {
 		if scene == "following" {
 			items, err = loadFeedCandidateRows(q.Limit(limit+1), scene, s.metrics)
+		} else if scene == "recommend" {
+			candidateSQLStart := time.Now()
+			var ids []uint
+			candidateQ := q.Limit(limit + 1)
+			if db.Dialector.Name() == "mysql" {
+				candidateQ = candidateQ.Table("videos IGNORE INDEX (idx_video_feed, idx_video_feed_pull)")
+			}
+			err = candidateQ.Pluck("videos.id", &ids).Error
+			recommendMoreCandidates = len(ids) > limit
+			if err == nil && len(ids) > 0 {
+				var rawItems []Video
+				err = db.Where("id IN ? AND status = ?", ids, "published").Find(&rawItems).Error
+				if err == nil {
+					itemMap := make(map[uint]Video, len(rawItems))
+					for _, item := range rawItems {
+						itemMap[item.ID] = item
+					}
+					items = make([]Video, 0, len(ids))
+					for _, id := range ids {
+						if item, ok := itemMap[id]; ok {
+							items = append(items, item)
+						}
+					}
+				}
+			}
+			s.metrics.observeFeedStage(scene, "candidate_sql", candidateSQLStart, err)
 		} else {
 			candidateSQLStart := time.Now()
 			err = q.Limit(limit + 1).Find(&items).Error
@@ -200,8 +227,9 @@ func (s *Server) feed(c *gin.Context) {
 		respondError(c, 500, "could not load feed")
 		return
 	}
-	more := len(items) > limit
-	if more {
+	// A withdrawn candidate may shrink hydration without exhausting the ranked query.
+	more := len(items) > limit || (scene == "recommend" && recommendMoreCandidates && len(items) > 0)
+	if len(items) > limit {
 		items = items[:limit]
 	}
 	interactionStart := time.Now()

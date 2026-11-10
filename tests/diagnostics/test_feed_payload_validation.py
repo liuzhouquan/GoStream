@@ -208,10 +208,13 @@ class FeedPayloadValidationTest(unittest.TestCase):
                  patch.object(continuous, "seed_mysql_feed_db") as seed, \
                  patch.object(continuous, "run_continuous_feed_matrix", side_effect=RuntimeError("matrix reached")) as matrix, \
                  patch.object(sys, "argv", ["feed", "--mode", "compose", "--formal-dataset", "--report", report_file]):
-                with self.assertRaisesRegex(RuntimeError, "matrix reached"):
-                    continuous.main()
+                self.assertEqual(continuous.main(), 1)
                 matrix.assert_called_once()
                 seed.assert_not_called()
+                import json
+                result = json.loads(Path(report_file).read_text())
+                self.assertEqual(result["execution_error"]["type"], "RuntimeError")
+                self.assertFalse(result["release_gate_passed"])
 
     def test_formal_compose_rechecks_scale_after_load_before_signoff(self):
         import tempfile
