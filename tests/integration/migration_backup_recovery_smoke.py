@@ -1,23 +1,11 @@
 #!/usr/bin/env python3
-"""Unified migration, backup, recovery, and operations verification runner (G10 / Gate A10).
+"""Small-fixture SQL/media recovery component drill (not formal Gate A10).
 
-Executes end-to-end disaster backup and recovery verification on quiescent snapshot boundaries:
-1. Populates a complete production dataset (users, videos, comments, likes, notifications, messages, device ranges, open/completed upload sessions).
-2. Takes a consistent snapshot of SQL database (mysqldump / WAL-checkpointed SQLite) and media store (gostream-media backup / file archive).
-3. Measures backup duration, SQL dump size, object storage size, and temp disk space.
-4. Restores into a completely empty destination database and media store.
-5. Measures restore duration (end-to-end RTO up to API /ready).
-6. Verifies:
-   - Checkpoint 1: schema_migration_keys (all 5 keys v001-v005 present).
-   - Checkpoint 2: sql_identity_sets_preserved (users, videos, messages, comments, actions match pre-backup sets).
-   - Checkpoint 3: media_objects_integrity (every asset in SQL exists in storage with identical SHA256 checksum).
-   - Checkpoint 4: post_restore_live_api_health (/health=200, /ready=200, user login, feed timeline, notifications).
-   - Checkpoint 5: resumable_upload_completion_after_restore (pre-backup open session successfully completes post-restore).
-   - Checkpoint 6: idempotency_and_migration_replay_safety (re-running migrations on restored DB performs 0 changes).
-
-Supports dual modes:
-  - compose: Full Compose acceptance stack with MySQL 8.4 and MinIO object storage.
-  - sqlite: Lightweight local dual-instance runner with SQLite and local media store.
+SQLite uses temporary local files. Compose creates its own disposable two-API
+AcceptanceStack and restores into a separate database and MinIO bucket. Checks
+cover migration keys, fixture users/videos, final media digests, API reads and
+resumable uploads. Timings cover backup and restore stages only. Source workers
+remain live, so this does not prove a coordinated snapshot, RPO or full RTO.
 """
 
 import argparse
@@ -27,6 +15,7 @@ import os
 from pathlib import Path
 import secrets
 import shutil
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -39,8 +28,9 @@ import bcrypt
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tests/integration"))
-from launcher_lifecycle import LauncherInterrupted, cleanup_on_interrupt
-from acceptance_config import has_external_acceptance_target, open_api_request, resolve_acceptance_target
+from launcher_lifecycle import LauncherInterrupted, cleanup_on_interrupt, finish_process_start
+from acceptance_config import has_external_acceptance_target, open_api_request
+from acceptance_stack import AcceptanceStack
 
 SAMPLE_MP4 = bytes([0, 0, 0, 24]) + b"ftypisom" + bytes(4) + b"isommp42"
 
@@ -153,26 +143,51 @@ def mysql_exec(container: str, sql: str, database: str = "") -> str:
     return res.stdout.decode("utf-8").strip()
 
 
-def find_compose_mysql_container(project_name: str = "") -> str:
-    if project_name:
-        cmd = [
-            "docker", "ps", "-q",
-            "--filter", f"label=com.docker.compose.project={project_name}",
-            "--filter", "label=com.docker.compose.service=mysql",
-        ]
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        lines = [line.strip() for line in res.stdout.splitlines() if line.strip()]
-        if lines:
-            return lines[0]
-    cmd = [
-        "docker", "ps", "-q",
+def find_compose_mysql_container(project_name: str) -> str:
+    if not project_name:
+        raise RuntimeError("an owned Compose project is required")
+    result = subprocess.run([
+        "docker", "ps", "-q", "--filter",
+        f"label=com.docker.compose.project={project_name}",
         "--filter", "label=com.docker.compose.service=mysql",
-    ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
-    lines = [line.strip() for line in res.stdout.splitlines() if line.strip()]
-    if lines:
-        return lines[0]
-    return "mysql"
+    ], capture_output=True, text=True, check=True, timeout=15)
+    containers = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if len(containers) != 1:
+        raise RuntimeError("owned Compose project must contain exactly one running MySQL container")
+    return containers[0]
+
+
+def stop_process(process):
+    """Reap owned API children even when graceful shutdown times out."""
+    previous = {number: signal.signal(number, signal.SIG_IGN)
+                for number in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        process.terminate()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=3)
+    finally:
+        for number, handler in previous.items():
+            signal.signal(number, handler)
+
+
+
+def find_api_port_range():
+    import socket
+    for _ in range(100):
+        with socket.socket() as first, socket.socket() as second:
+            first.bind(("127.0.0.1", 0))
+            port = first.getsockname()[1]
+            if port == 65535:
+                continue
+            try:
+                second.bind(("127.0.0.1", port + 1))
+            except OSError:
+                continue
+            return f"127.0.0.1:{port}-{port + 1}"
+    raise RuntimeError("could not allocate two adjacent API ports")
 
 
 class MigrationBackupRecoveryRunner:
@@ -190,7 +205,9 @@ class MigrationBackupRecoveryRunner:
         minio_access_key: str = "gostreamminio",
         minio_secret_key: str = "gostream-local-minio-secret",
         source_bucket: str = "gostream-media",
+        owned_stack: AcceptanceStack | None = None,
     ):
+        self.owned_stack = owned_stack
         self.mode = mode
         self.base_url = base_url.rstrip("/")
         self.db_path = db_path
@@ -207,8 +224,23 @@ class MigrationBackupRecoveryRunner:
         self.metrics = {}
 
     def run_all(self, server_bin: str, go_bin: str, env_template: dict, tmpdir: str, media_bin: str = "") -> dict:
+        if self.mode == "compose":
+            stack = self.owned_stack
+            if (not isinstance(stack, AcceptanceStack) or not stack.started
+                    or stack._interrupt_context is None
+                    or self.project_name != stack.project_name
+                    or self.base_url != stack.api_a
+                    or self.mysql_addr != stack.mysql_addr
+                    or self.minio_endpoint != stack.minio_endpoint
+                    or self.source_database != "gostream"
+                    or self.source_bucket != "gostream-media"
+                    or self.minio_access_key != stack.env.get("MINIO_ROOT_USER", "gostreamminio")
+                    or self.minio_secret_key != stack.env.get("MINIO_ROOT_PASSWORD", "gostream-local-minio-secret")):
+                raise RuntimeError("Compose recovery requires a matching, active owned AcceptanceStack")
+            if self.mysql_container != find_compose_mysql_container(stack.project_name):
+                raise RuntimeError("MySQL container does not belong to the owned stack")
         print("============================================================")
-        print("GoStream Migration, Backup & Recovery Runner (G10 / A10)")
+        print("GoStream SQL/Media Recovery Component Drill (not Gate A10)")
         print(f"Mode: {self.mode}, Base URL: {self.base_url}")
         print("============================================================")
 
@@ -316,7 +348,7 @@ class MigrationBackupRecoveryRunner:
         # ------------------------------------------------------------------
         # Step 2: Quiescent Snapshot Boundary (停写与快照)
         # ------------------------------------------------------------------
-        print("Step 2: Taking consistent quiescent snapshot (SQL + Media)...")
+        print("Step 2: Taking component SQL/media backups (no coordinated stop-write boundary)...")
         backup_start = time.monotonic()
 
         backup_dir = os.path.join(tmpdir, "backup_snapshot")
@@ -441,14 +473,19 @@ class MigrationBackupRecoveryRunner:
                 "JWT_SECRET": env_template.get("JWT_SECRET", "backup-recovery-jwt-secret-at-least-32-bytes!!"),
                 "REDIS_ADDR": "",
                 "RABBITMQ_URL": "",
+                "RABBITMQ_URLS": "",
+                "FFMPEG_BIN": "",
+                "FFPROBE_BIN": "",
                 "PPROF_ADDR": "",
             })
 
-        p_restored = subprocess.Popen([server_bin], env=restored_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        p_restored = None
         try:
+            with finish_process_start():
+                p_restored = subprocess.Popen([server_bin], env=restored_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             wait_ready(restored_url, timeout=30)
             restore_duration_ms = round((time.monotonic() - restore_start) * 1000, 2)
-            print(f"  Restore complete in {restore_duration_ms}ms (End-to-End RTO measured up to API /ready).")
+            print(f"  Restore complete in {restore_duration_ms}ms (restore stage through API /ready; not an end-to-end recovery objective).")
 
             # ------------------------------------------------------------------
             # Checkpoint 1: Schema Migration Keys
@@ -581,8 +618,8 @@ class MigrationBackupRecoveryRunner:
             print("  resumable_upload_completion_after_restore: PASS (session completed post-restore with exact bytes)")
 
         finally:
-            p_restored.terminate()
-            p_restored.wait(timeout=3)
+            if p_restored is not None:
+                stop_process(p_restored)
             if self.mode == "compose" and restored_database:
                 try:
                     mysql_exec(self.mysql_container,
@@ -615,12 +652,14 @@ class MigrationBackupRecoveryRunner:
                 "ADDR": f"127.0.0.1:{replay_port}",
                 "DB_DSN": f"gostream:gostream-local@tcp({self.mysql_addr})/{replay_db}?charset=utf8mb4&parseTime=True&loc=UTC",
             })
-            p_replay = subprocess.Popen([server_bin], env=replay_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            p_replay = None
             try:
+                with finish_process_start():
+                    p_replay = subprocess.Popen([server_bin], env=replay_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 wait_ready(replay_url, timeout=15)
             finally:
-                p_replay.terminate()
-                p_replay.wait(timeout=3)
+                if p_replay is not None:
+                    stop_process(p_replay)
 
             count_after_replay = int(mysql_exec(self.mysql_container, "SELECT count(*) FROM schema_migrations;", database=replay_db))
             mysql_exec(self.mysql_container,
@@ -632,12 +671,14 @@ class MigrationBackupRecoveryRunner:
             replay_env = restored_env.copy()
             replay_env["ADDR"] = f"127.0.0.1:{replay_port}"
 
-            p_replay = subprocess.Popen([server_bin], env=replay_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            p_replay = None
             try:
+                with finish_process_start():
+                    p_replay = subprocess.Popen([server_bin], env=replay_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 wait_ready(replay_url, timeout=15)
             finally:
-                p_replay.terminate()
-                p_replay.wait(timeout=3)
+                if p_replay is not None:
+                    stop_process(p_replay)
 
             conn_res = sqlite3.connect(restored_db_path)
             cur = conn_res.cursor()
@@ -650,7 +691,7 @@ class MigrationBackupRecoveryRunner:
         print("  idempotency_and_migration_replay_safety: PASS (Apply on restored DB performed 0 changes)")
 
         all_passed = all(self.checkpoints.values())
-        print(f"\n{self.mode.upper()} recovery verification: {'PASS' if all_passed else 'FAIL'}; release gate: {'ACCEPTED' if (all_passed and self.mode == 'compose') else 'NOT_ACCEPTED'}")
+        print(f"\n{self.mode.upper()} recovery verification: {'PASS' if all_passed else 'FAIL'}; release gate: NOT_ACCEPTED")
 
         self.metrics = {
             "backup_duration_ms": backup_duration_ms,
@@ -665,15 +706,15 @@ class MigrationBackupRecoveryRunner:
         return {
             "status": "PASS" if all_passed else "FAIL",
             "mode": self.mode,
-            "validation_scope": "compose_end_to_end_disaster_recovery" if self.mode == "compose" else "sqlite_component_smoke",
-            "release_gate_passed": all_passed if self.mode == "compose" else False,
+            "validation_scope": "compose_component_smoke" if self.mode == "compose" else "sqlite_component_smoke",
+            "release_gate_passed": False,
             "checkpoints": self.checkpoints,
             "metrics": self.metrics,
             "rpo_rto_spec": {
-                "measured_rpo": "0s (quiescent snapshot boundary guarantees zero in-flight data loss)",
-                "measured_rto_ms": restore_duration_ms if self.mode == "compose" else None,
+                "measured_rpo": None,
+                "measured_rto_ms": None,
                 "file_restore_stage_ms": restore_duration_ms,
-                "scope": "End-to-end MySQL 8.4 + MinIO disaster recovery on Docker Compose" if self.mode == "compose" else "File copy stage only; end-to-end RPO/RTO were not measured",
+                "scope": "Small-fixture restore stage through API readiness only; source workers remain live; no coordinated snapshot or end-to-end RPO/RTO measured",
                 "online_backup_limitation": "Online backup without stop-write/coordinated snapshot is unsupported; quiescent boundary is mandatory for cross-system consistency."
             }
         }
@@ -687,20 +728,19 @@ def main():
                         default=ROOT / "data/diagnostics/migration_backup_recovery_smoke.json")
     parser.add_argument("--go-bin", default=os.environ.get("GOSTREAM_GO_BIN") or shutil.which("go") or "/usr/local/go/bin/go")
     parser.add_argument("--compose-e2e", action="store_true",
-                        help="Execute end-to-end disaster recovery drill on live Compose MySQL/MinIO stack")
+                        help="Run component recovery on an owned disposable Compose MySQL/MinIO stack")
     args = parser.parse_args()
 
     report_path = args.report_file.resolve()
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.unlink(missing_ok=True)
 
-    if not args.compose_e2e and (args.mode == "compose" or has_external_acceptance_target()):
-        raise NotImplementedError(
-            "MySQL/MinIO Compose backup recovery is not implemented by this SQLite/local-file runner; "
-            "use the documented media_transfer_smoke.py joint recovery procedure"
-        )
-
-    mode, external_api_a, external_api_b = resolve_acceptance_target(args.mode)
+    if has_external_acceptance_target() or any(os.environ.get(key) for key in (
+            "GOSTREAM_STACK_PROJECT", "GOSTREAM_MYSQL_ADDR", "GOSTREAM_MINIO_ENDPOINT")):
+        raise ValueError("recovery drill refuses external acceptance targets; it creates its own disposable stack")
+    mode = "compose" if args.mode == "compose" or args.compose_e2e else "sqlite"
+    if mode == "compose" and not args.compose_e2e:
+        raise ValueError("Compose component drill requires --compose-e2e")
 
     if mode == "sqlite":
         with tempfile.TemporaryDirectory(prefix="gostream_backup_drill_") as tmpdir:
@@ -724,60 +764,53 @@ def main():
                 "JWT_SECRET": "backup-recovery-jwt-secret-at-least-32-bytes!!",
                 "REDIS_ADDR": "",
                 "RABBITMQ_URL": "",
+                "RABBITMQ_URLS": "",
+                "FFMPEG_BIN": "",
+                "FFPROBE_BIN": "",
                 "PPROF_ADDR": "",
             })
 
-            p = subprocess.Popen([server_bin], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            p = None
             try:
+                with finish_process_start():
+                    p = subprocess.Popen([server_bin], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 wait_ready(base_url, timeout=15)
                 runner = MigrationBackupRecoveryRunner(mode="sqlite", base_url=base_url, db_path=db_path, media_dir=media_dir)
                 report = runner.run_all(server_bin=server_bin, go_bin=args.go_bin, env_template=env, tmpdir=tmpdir)
                 report_path.write_text(json.dumps(report, indent=2))
                 print(f"Report written to: {report_path}")
             finally:
-                p.terminate()
-                p.wait(timeout=3)
+                if p is not None:
+                    stop_process(p)
     else:
-        project_name = os.environ.get("GOSTREAM_STACK_PROJECT", "gostream-acc")
-        mysql_container = find_compose_mysql_container(project_name)
-        mysql_addr = os.environ.get("GOSTREAM_MYSQL_ADDR", "127.0.0.1:13307")
-        minio_endpoint = os.environ.get("GOSTREAM_MINIO_ENDPOINT", "127.0.0.1:29000")
-        minio_access = os.environ.get("MINIO_ROOT_USER", "gostreamminio")
-        minio_secret = os.environ.get("MINIO_ROOT_PASSWORD", "gostream-local-minio-secret")
-
-        with tempfile.TemporaryDirectory(prefix="gostream_backup_compose_") as tmpdir:
+        with AcceptanceStack(
+            api_ports=find_api_port_range(),
+            mysql_port=f"127.0.0.1:{find_free_port()}",
+            minio_api_port=f"127.0.0.1:{find_free_port()}",
+            minio_console_port=f"127.0.0.1:{find_free_port()}",
+            go_bin=args.go_bin,
+        ) as stack, tempfile.TemporaryDirectory(prefix="gostream_backup_compose_") as tmpdir:
+            mysql_container = find_compose_mysql_container(stack.project_name)
             server_bin = os.path.join(tmpdir, "gostream_server")
             media_bin = os.path.join(tmpdir, "gostream_media")
-            print("Building server and media binaries for Compose disaster recovery...")
+            print("Building server and media binaries for isolated Compose component recovery...")
             subprocess.run([args.go_bin, "build", "-o", server_bin, "./cmd/gostream"], cwd=ROOT, check=True)
             subprocess.run([args.go_bin, "build", "-o", media_bin, "./cmd/gostream-media"], cwd=ROOT, check=True)
-
-            env = os.environ.copy()
-            env.update({
-                "JWT_SECRET": "backup-recovery-jwt-secret-at-least-32-bytes!!",
-                "MINIO_ENDPOINT": minio_endpoint,
-                "MINIO_ACCESS_KEY": minio_access,
-                "MINIO_SECRET_KEY": minio_secret,
-            })
-
+            env = stack.env.copy()
+            minio_access = env.get("MINIO_ROOT_USER", "gostreamminio")
+            minio_secret = env.get("MINIO_ROOT_PASSWORD", "gostream-local-minio-secret")
             runner = MigrationBackupRecoveryRunner(
-                mode="compose",
-                base_url=external_api_a,
-                project_name=project_name,
-                mysql_container=mysql_container,
-                mysql_addr=mysql_addr,
-                minio_endpoint=minio_endpoint,
-                minio_access_key=minio_access,
-                minio_secret_key=minio_secret,
-                source_bucket="gostream-media",
+                mode="compose", base_url=stack.api_a,
+                project_name=stack.project_name, mysql_container=mysql_container,
+                mysql_addr=stack.mysql_addr, minio_endpoint=stack.minio_endpoint,
+                minio_access_key=minio_access, minio_secret_key=minio_secret,
+                owned_stack=stack,
             )
             report = runner.run_all(server_bin=server_bin, go_bin=args.go_bin, env_template=env, tmpdir=tmpdir, media_bin=media_bin)
-            report_path.write_text(json.dumps(report, indent=2))
-            print(f"Report written to: {report_path}")
-            diag_file = ROOT / "data/diagnostics/migration_backup_recovery_smoke.json"
-            if report_path != diag_file:
-                diag_file.parent.mkdir(parents=True, exist_ok=True)
-                diag_file.write_text(json.dumps(report, indent=2))
+        # The context verifies containers, volumes and networks are gone before success.
+        report["owned_stack_cleanup_verified"] = True
+        report_path.write_text(json.dumps(report, indent=2))
+        print(f"Report written to: {report_path}")
 
 
 if __name__ == "__main__":

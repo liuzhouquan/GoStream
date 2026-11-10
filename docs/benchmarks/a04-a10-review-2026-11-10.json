@@ -1,0 +1,70 @@
+{
+  "status": "PASS",
+  "mode": "compose",
+  "validation_scope": "compose_component_smoke",
+  "release_gate_passed": false,
+  "checkpoints": {
+    "schema_migration_keys": true,
+    "sql_identity_sets_preserved": true,
+    "media_objects_integrity": true,
+    "post_restore_live_api_health": true,
+    "resumable_upload_completion_after_restore": true,
+    "idempotency_and_migration_replay_safety": true
+  },
+  "metrics": {
+    "backup_duration_ms": 604.31,
+    "restore_duration_ms": 2203.44,
+    "sql_backup_bytes": 36671,
+    "media_objects_bytes": 4472714,
+    "media_assets_count": 10,
+    "users_count": 5,
+    "videos_count": 10
+  },
+  "rpo_rto_spec": {
+    "measured_rpo": null,
+    "measured_rto_ms": null,
+    "file_restore_stage_ms": 2203.44,
+    "scope": "Small-fixture restore stage through API readiness only; source workers remain live; no coordinated snapshot or end-to-end RPO/RTO measured",
+    "online_backup_limitation": "Online backup without stop-write/coordinated snapshot is unsupported; quiescent boundary is mandatory for cross-system consistency."
+  },
+  "owned_stack_cleanup_verified": true,
+  "verification": {
+    "source_base_commit": "f79321e921abeb06043b7151b4a4b54b305db1be",
+    "source_dirty": true,
+    "runner_sha256": "548088bf525fe65050b6601be88b3df75fb9933f09c736741ee575400091606e",
+    "command": "python3 tests/integration/migration_backup_recovery_smoke.py --mode compose --compose-e2e --go-bin /usr/local/go/bin/go --report data/diagnostics/a10-final-owned-compose-result.json",
+    "go_version": "go version go1.27.2 linux/amd64",
+    "total_elapsed_seconds": 103.262,
+    "scope": "5-user/10-video component drill only; not formal A10; source code fingerprint associates this dirty review tree with the run."
+  },
+  "checks": {
+    "go_test_all": {
+      "exit_code": 0,
+      "elapsed_seconds": 41.34,
+      "external_dependencies": "Unconfigured component cases may skip; real MySQL/MinIO recovery separately exercised above."
+    },
+    "diagnostics": {
+      "exit_code": 0,
+      "tests_run": 116,
+      "skipped": 3,
+      "elapsed_seconds": 44.121
+    },
+    "static_checks": {
+      "exit_code": 0,
+      "commands": [
+        "go vet ./...",
+        "go build ./cmd/...",
+        "node --check web/app.js",
+        "git diff --check"
+      ]
+    },
+    "new_isolation_regressions": {
+      "passed": 7,
+      "red_phase": {
+        "tests_run": 5,
+        "failures": 3,
+        "errors": 2
+      }
+    }
+  }
+}

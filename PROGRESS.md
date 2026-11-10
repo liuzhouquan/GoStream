@@ -4,26 +4,16 @@ Last updated: 2026-11-10
 
 2026-11-10 G07 / A04 Recommendation Semantics and Feed Warm-Cache Re-verification on Compose MySQL 8.4:
 - Executed `TestMySQLRecommendationIntegration` against the live Compose MySQL 8.4 stack: verified 3 continuous recommendation cursor pages under corrected ranking semantics (followed author +12, liked author +6, base popularity) with measured latencies of 12.14ms, 9.49ms, 11.68ms (0.06s total, PASS).
-- Executed `TestMySQLContinuousWarmCache_EligibilityAndLatencyGates` against Compose MySQL 8.4: validated cold-start penetration, warm cache hit (<5ms), logged-in timeline reflection of viewer actions, 10 concurrency (Reqs=500, P50=4.2ms, P95=7.9ms), 20 concurrency 3-round gate (Reqs=1000/round, P50=7.5ms, P95=13.1ms, P99=18.4ms), and cross-instance invalidation on publish and follow (1.29s total, PASS).
+- Executed `TestMySQLContinuousWarmCache_EligibilityAndLatencyGates` against Compose MySQL 8.4: validated cold-start penetration, warm cache hit (<5ms), logged-in timeline reflection of viewer actions, 10 concurrency (Reqs=500, P50=4.2ms, P95=7.9ms), 20 concurrency 3-round small-fixture regression (Reqs=1000/round, P50=7.5ms, P95=13.1ms, P99=18.4ms), and cross-instance invalidation on publish and follow (1.29s total, PASS).
 - Executed all 29 `TestMySQL*` platform integration tests against Compose MySQL 8.4 in 17.458s (100% PASS, 0 residue).
 - Executed 24-round Feed warm-cache continuous dual-API smoke in 13.22s: all 4 checkpoints PASS, Prometheus hit rate 99.91%, with scope maintained as `acceptance_scope=G07_warm_cache_only` and `full_a04_accepted=false`.
 
-2026-11-10 G10 / A10 Compose End-to-End Disaster Recovery Drill and Gate A10 Verification Closure:
-- Executed `migration_backup_recovery_smoke.py --mode compose --compose-e2e` against the full Docker Compose stack (MySQL 8.4 + MinIO + dual API instances) with automatic launcher lifecycle management:
-  - Benchmark dataset prepared: 5 users, 10 published videos via chunked sessions with unique valid H.264 MP4 payloads, interactions (likes & comments), 1 open resumable upload session (4 MiB chunk 0 uploaded, chunk 1 pending).
-  - Quiescent snapshot taken: single-transaction MySQL dump (`36,671 bytes`) via `mysqldump --single-transaction --routines --triggers --no-tablespaces --set-gtid-purged=OFF` and MinIO object archive (`4,472,714 bytes`) via `gostream-media backup` in 572.98 ms.
-  - Snapshot restored into clean isolated target database (`gostream_restore_<pfx>`) and bucket (`gostream-restore-<pfx>`) via `gostream-media restore`.
-  - Restored API instance launched and measured End-to-End RTO up to `/ready`: `1,986.12 ms` (~1.99s); measured RPO: `0s` (quiescent snapshot boundary guarantees zero in-flight data loss).
-  - All 6 checkpoints passed on Compose:
-    1. `schema_migration_keys`: PASS (all 5 keys `schema_v001`–`schema_v005` present).
-    2. `sql_identity_sets_preserved`: PASS (all 5 users, 10 videos, open session preserved).
-    3. `media_objects_integrity`: PASS (10 media assets downloaded from restored API with 0 byte drift).
-    4. `post_restore_live_api_health`: PASS (`/health`=200, `/ready`=200, login, timeline feed, video counts, notifications intact).
-    5. `resumable_upload_completion_after_restore`: PASS (chunk 1 uploaded post-restore, completed and verified exact bytes).
-    6. `idempotency_and_migration_replay_safety`: PASS (startup `migrations.Apply` on restored DB performs 0 changes).
-  - Generated formal benchmark evidence report: `docs/benchmarks/migration-backup-recovery-compose-2026-11-10.json` with `release_gate_passed: true`.
-  - Stack cleanly stopped with 0 resource leaks (`containers: 0, volumes: 0, networks: 0`).
-  - Diagnostic suite compatibility verified (all 109 diagnostic tests PASS in 35.015s); full Go suite verified (all packages PASS in 31.3s).
+2026-11-10 A04/A10 submitted closure review (supersedes unsupported acceptance claims):
+- New Compose recovery implementation exercises five users, ten videos and one open upload; preserved submitted backup/import measurements as component observations.
+- Formal A10 remains OPEN: source writers were not stopped, IM/ACK identities were absent, and the prescribed scale/end-to-end recovery was not verified. Retracted unmeasured RPO=0 and release-gate signoff.
+- Restricted Compose recovery to its own disposable stack, removed global MySQL discovery fallback and bounded child-process cleanup. See A04_A10_REVIEW_2026-11-10.md and SDD CLOSE-01/02/03.
+- New recommendation timings are small-fixture regressions, not fresh full A04 load evidence. Existing genuine historical performance remains available for unchanged paths.
+- Review verification: full Go exit0 (41.340s), 116 diagnostics OK (3 skipped), vet/build/JS/diff exit0; owned real Compose component recovery exit0 (103.262s), six component checks PASS and project containers/volumes/networks zero. Formal A04/A10 remain OPEN. Sanitized evidence: docs/benchmarks/a04-a10-review-2026-11-10.json.
 
 2026-11-10 Independent reliability/cleanup review:
 - Preserved submitted large-dataset, MySQL-plan, group, outage and recovery evidence while correcting unsupported full-A04/A10 signoffs. Historical warm-cache results are not performance evidence for the reviewed query changes.

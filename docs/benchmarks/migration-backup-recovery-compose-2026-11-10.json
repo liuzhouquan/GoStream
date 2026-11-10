@@ -1,8 +1,8 @@
 {
   "status": "PASS",
   "mode": "compose",
-  "validation_scope": "compose_end_to_end_disaster_recovery",
-  "release_gate_passed": true,
+  "validation_scope": "compose_component_smoke",
+  "release_gate_passed": false,
   "checkpoints": {
     "schema_migration_keys": true,
     "sql_identity_sets_preserved": true,
@@ -21,10 +21,16 @@
     "videos_count": 10
   },
   "rpo_rto_spec": {
-    "measured_rpo": "0s (quiescent snapshot boundary guarantees zero in-flight data loss)",
-    "measured_rto_ms": 1986.12,
+    "measured_rpo": null,
+    "measured_rto_ms": null,
     "file_restore_stage_ms": 1986.12,
-    "scope": "End-to-end MySQL 8.4 + MinIO disaster recovery on Docker Compose",
+    "scope": "Submitted small-fixture SQL/object import to one API SQL readiness; formal recovery not verified",
     "online_backup_limitation": "Online backup without stop-write/coordinated snapshot is unsupported; quiescent boundary is mandatory for cross-system consistency."
+  },
+  "submitted_source_commit": "392df1b",
+  "review": {
+    "status": "NOT_ACCEPTED_AS_A10",
+    "reason": "No enforced quiescence; 5 users/10 videos; missing IM/ACK identity sets; ready checks SQL only. Submitted measurements retained, not independently rerun or formal RPO/RTO.",
+    "report": "docs/A04_A10_REVIEW_2026-11-10.md"
   }
 }
