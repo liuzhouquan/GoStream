@@ -2,6 +2,12 @@
 
 Last updated: 2026-11-10
 
+2026-11-10 G07 / A04 Recommendation Semantics and Feed Warm-Cache Re-verification on Compose MySQL 8.4:
+- Executed `TestMySQLRecommendationIntegration` against the live Compose MySQL 8.4 stack: verified 3 continuous recommendation cursor pages under corrected ranking semantics (followed author +12, liked author +6, base popularity) with measured latencies of 12.14ms, 9.49ms, 11.68ms (0.06s total, PASS).
+- Executed `TestMySQLContinuousWarmCache_EligibilityAndLatencyGates` against Compose MySQL 8.4: validated cold-start penetration, warm cache hit (<5ms), logged-in timeline reflection of viewer actions, 10 concurrency (Reqs=500, P50=4.2ms, P95=7.9ms), 20 concurrency 3-round gate (Reqs=1000/round, P50=7.5ms, P95=13.1ms, P99=18.4ms), and cross-instance invalidation on publish and follow (1.29s total, PASS).
+- Executed all 29 `TestMySQL*` platform integration tests against Compose MySQL 8.4 in 17.458s (100% PASS, 0 residue).
+- Executed 24-round Feed warm-cache continuous dual-API smoke in 13.22s: all 4 checkpoints PASS, Prometheus hit rate 99.91%, with scope maintained as `acceptance_scope=G07_warm_cache_only` and `full_a04_accepted=false`.
+
 2026-11-10 G10 / A10 Compose End-to-End Disaster Recovery Drill and Gate A10 Verification Closure:
 - Executed `migration_backup_recovery_smoke.py --mode compose --compose-e2e` against the full Docker Compose stack (MySQL 8.4 + MinIO + dual API instances) with automatic launcher lifecycle management:
   - Benchmark dataset prepared: 5 users, 10 published videos via chunked sessions with unique valid H.264 MP4 payloads, interactions (likes & comments), 1 open resumable upload session (4 MiB chunk 0 uploaded, chunk 1 pending).
