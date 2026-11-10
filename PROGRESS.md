@@ -2,6 +2,22 @@
 
 Last updated: 2026-11-10
 
+2026-11-10 G07 / A04 Recommendation Semantics and Feed Warm-Cache Re-verification on Compose MySQL 8.4:
+- Executed `TestMySQLRecommendationIntegration` against the live Compose MySQL 8.4 stack: verified 3 continuous recommendation cursor pages under corrected ranking semantics (followed author +12, liked author +6, base popularity) with measured latencies of 12.14ms, 9.49ms, 11.68ms (0.06s total, PASS).
+- Executed `TestMySQLContinuousWarmCache_EligibilityAndLatencyGates` against Compose MySQL 8.4: validated cold-start penetration, warm cache hit (<5ms), logged-in timeline reflection of viewer actions, 10 concurrency (Reqs=500, P50=4.2ms, P95=7.9ms), 20 concurrency 3-round small-fixture regression (Reqs=1000/round, P50=7.5ms, P95=13.1ms, P99=18.4ms), and cross-instance invalidation on publish and follow (1.29s total, PASS).
+- Executed all 29 `TestMySQL*` platform integration tests against Compose MySQL 8.4 in 17.458s (100% PASS, 0 residue).
+- Executed 24-round Feed warm-cache continuous dual-API smoke in 13.22s: all 4 checkpoints PASS, Prometheus hit rate 99.91%, with scope maintained as `acceptance_scope=G07_warm_cache_only` and `full_a04_accepted=false`.
+
+2026-11-10 IM recovery CI barrier correction:
+- First PR63 CI exposed a false failure on an asynchronous notification before post-replay pong. Reused a strict fixed-deadline barrier that only permits notifications; all unexpected chat/error frames still fail. Ten focused cases and race pass; full owned MySQL/Redis two-process recovery passes all six scenarios (114.620s including cleanup), no owned resource leftovers. Final head requires fresh full CI.
+
+2026-11-10 A04/A10 submitted closure review (supersedes unsupported acceptance claims):
+- New Compose recovery implementation exercises five users, ten videos and one open upload; preserved submitted backup/import measurements as component observations.
+- Formal A10 remains OPEN: source writers were not stopped, IM/ACK identities were absent, and the prescribed scale/end-to-end recovery was not verified. Retracted unmeasured RPO=0 and release-gate signoff.
+- Restricted Compose recovery to its own disposable stack, removed global MySQL discovery fallback and bounded child-process cleanup. See A04_A10_REVIEW_2026-11-10.md and SDD CLOSE-01/02/03.
+- New recommendation timings are small-fixture regressions, not fresh full A04 load evidence. Existing genuine historical performance remains available for unchanged paths.
+- Review verification: full Go exit0 (41.340s), 116 diagnostics OK (3 skipped), vet/build/JS/diff exit0; owned real Compose component recovery exit0 (103.262s), six component checks PASS and project containers/volumes/networks zero. Formal A04/A10 remain OPEN. Sanitized evidence: docs/benchmarks/a04-a10-review-2026-11-10.json.
+
 2026-11-10 Independent reliability/cleanup review:
 - Preserved submitted large-dataset, MySQL-plan, group, outage and recovery evidence while correcting unsupported full-A04/A10 signoffs. Historical warm-cache results are not performance evidence for the reviewed query changes.
 - Fixed recommendation publication recheck, all-follow semantics, recent-200-action affinity and cursor continuation after candidate withdrawal. Actual API regressions failed before and passed after; full real MySQL integration also passed.

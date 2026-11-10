@@ -111,5 +111,5 @@ docker compose -f docker-compose.yml -f docker-compose.object.yml down -v
 
 1. **核心架构与功能闭环**：所有业务功能路径（双 API、MySQL、Redis、RabbitMQ、MinIO、FFmpeg）已在 Compose 联合环境实测通过，R1–R4 假阳性与凭据泄漏隐患已修复；
 2. **验收口径修正（2026-11-10）**：新增 20,000 规模暖缓存 JSON 自述 `acceptance_scope=G07_warm_cache_only`、`full_a04_accepted=false`，不能关闭完整 A04；本轮推荐查询正确性修正后，还需关联修正版本的性能结果。原数据保留为历史记录，未补造缺失的测试 SHA。
-3. **恢复边界**：新增 SQLite 恢复 JSON 明确 `release_gate_passed=false`、RPO/RTO 未测量；MySQL/MinIO 两对象割接与快照结果证明局部能力，不能替代规定规模及端到端恢复量测，A10 保持待验收。
+3. **恢复边界**：新增 SQLite 恢复 JSON 明确 `release_gate_passed=false`、RPO/RTO 未测量；MySQL/MinIO 两对象割接与快照结果证明局部能力，不能替代规定规模及端到端恢复量测，A10 保持待验收。新增 Compose 小规模恢复 runner 的停写、身份集合及资源隔离问题见 [A04/A10 审查](A04_A10_REVIEW_2026-11-10.md)，不能按原 JSON 的 release_gate=true 签收。
 4. **发布候选状态**：仍为 v1.0-RC1，尚未全量验收。新增查询计划、群聊及故障结果保留；准确复核与后续操作见 [2026-11-10审查](BRANCH_REVIEW_2026-11-10.md)。

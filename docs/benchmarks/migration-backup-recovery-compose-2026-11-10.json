@@ -1,0 +1,36 @@
+{
+  "status": "PASS",
+  "mode": "compose",
+  "validation_scope": "compose_component_smoke",
+  "release_gate_passed": false,
+  "checkpoints": {
+    "schema_migration_keys": true,
+    "sql_identity_sets_preserved": true,
+    "media_objects_integrity": true,
+    "post_restore_live_api_health": true,
+    "resumable_upload_completion_after_restore": true,
+    "idempotency_and_migration_replay_safety": true
+  },
+  "metrics": {
+    "backup_duration_ms": 572.98,
+    "restore_duration_ms": 1986.12,
+    "sql_backup_bytes": 36671,
+    "media_objects_bytes": 4472714,
+    "media_assets_count": 10,
+    "users_count": 5,
+    "videos_count": 10
+  },
+  "rpo_rto_spec": {
+    "measured_rpo": null,
+    "measured_rto_ms": null,
+    "file_restore_stage_ms": 1986.12,
+    "scope": "Submitted small-fixture SQL/object import to one API SQL readiness; formal recovery not verified",
+    "online_backup_limitation": "Online backup without stop-write/coordinated snapshot is unsupported; quiescent boundary is mandatory for cross-system consistency."
+  },
+  "submitted_source_commit": "392df1b",
+  "review": {
+    "status": "NOT_ACCEPTED_AS_A10",
+    "reason": "No enforced quiescence; 5 users/10 videos; missing IM/ACK identity sets; ready checks SQL only. Submitted measurements retained, not independently rerun or formal RPO/RTO.",
+    "report": "docs/A04_A10_REVIEW_2026-11-10.md"
+  }
+}

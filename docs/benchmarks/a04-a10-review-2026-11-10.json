@@ -1,0 +1,102 @@
+{
+  "status": "PASS",
+  "mode": "compose",
+  "validation_scope": "compose_component_smoke",
+  "release_gate_passed": false,
+  "checkpoints": {
+    "schema_migration_keys": true,
+    "sql_identity_sets_preserved": true,
+    "media_objects_integrity": true,
+    "post_restore_live_api_health": true,
+    "resumable_upload_completion_after_restore": true,
+    "idempotency_and_migration_replay_safety": true
+  },
+  "metrics": {
+    "backup_duration_ms": 604.31,
+    "restore_duration_ms": 2203.44,
+    "sql_backup_bytes": 36671,
+    "media_objects_bytes": 4472714,
+    "media_assets_count": 10,
+    "users_count": 5,
+    "videos_count": 10
+  },
+  "rpo_rto_spec": {
+    "measured_rpo": null,
+    "measured_rto_ms": null,
+    "file_restore_stage_ms": 2203.44,
+    "scope": "Small-fixture restore stage through API readiness only; source workers remain live; no coordinated snapshot or end-to-end RPO/RTO measured",
+    "online_backup_limitation": "Online backup without stop-write/coordinated snapshot is unsupported; quiescent boundary is mandatory for cross-system consistency."
+  },
+  "owned_stack_cleanup_verified": true,
+  "verification": {
+    "source_base_commit": "f79321e921abeb06043b7151b4a4b54b305db1be",
+    "source_dirty": true,
+    "runner_sha256": "548088bf525fe65050b6601be88b3df75fb9933f09c736741ee575400091606e",
+    "command": "python3 tests/integration/migration_backup_recovery_smoke.py --mode compose --compose-e2e --go-bin /usr/local/go/bin/go --report data/diagnostics/a10-final-owned-compose-result.json",
+    "go_version": "go version go1.27.2 linux/amd64",
+    "total_elapsed_seconds": 103.262,
+    "scope": "5-user/10-video component drill only; not formal A10; source code fingerprint associates this dirty review tree with the run."
+  },
+  "checks": {
+    "go_test_all": {
+      "exit_code": 0,
+      "elapsed_seconds": 41.34,
+      "external_dependencies": "Unconfigured component cases may skip; real MySQL/MinIO recovery separately exercised above."
+    },
+    "diagnostics": {
+      "exit_code": 0,
+      "tests_run": 116,
+      "skipped": 3,
+      "elapsed_seconds": 44.121
+    },
+    "static_checks": {
+      "exit_code": 0,
+      "commands": [
+        "go vet ./...",
+        "go build ./cmd/...",
+        "node --check web/app.js",
+        "git diff --check"
+      ]
+    },
+    "new_isolation_regressions": {
+      "passed": 7,
+      "red_phase": {
+        "tests_run": 5,
+        "failures": 3,
+        "errors": 2
+      }
+    }
+  },
+  "im_ci_recovery_correction": {
+    "first_ci_run": 42813554279,
+    "first_head": "21530aa5d4f75779ce27560242a2d0938ce9c3fd",
+    "failure": "TestIMProcessRecovery compacted ACK restart expected first frame pong, received valid notification",
+    "root_cause": "Asynchronous notifications may interleave before post-replay pong; strict message/group replay rejection retained.",
+    "regression_cases": 10,
+    "red_cases": 3,
+    "focused_race_exit_code": 0,
+    "focused_race_elapsed_seconds": 1.091,
+    "full_real_recovery_exit_code": 0,
+    "full_real_recovery_go_seconds": 87.382,
+    "full_real_recovery_total_seconds": 114.62,
+    "scenarios_passed": 6,
+    "versions": {
+      "go": "1.27.2",
+      "mysql": "8.4.11",
+      "redis": "8.2.9"
+    },
+    "cleanup": {
+      "api_processes": 0,
+      "schema": 0,
+      "mysql_user": 0,
+      "redis_container": 0,
+      "owned_mysql_container": 0
+    },
+    "source_base_commit": "21530aa5d4f75779ce27560242a2d0938ce9c3fd",
+    "source_dirty": true,
+    "source_sha256": {
+      "tests/integration/im/recovery_test.go": "6c66a34d1731749e04ecf2cb6fb7945a83a8cb20c9fd6c680f413a65dec75f82",
+      "tests/integration/im/replay_barrier_test.go": "886401c86a6d506ec1aca8dbdb6b22a92a5d5f3c653e0ac80296c70c1352d7cd"
+    }
+  }
+}

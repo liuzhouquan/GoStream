@@ -75,7 +75,7 @@ class AcceptanceTargetContractTest(unittest.TestCase):
         mixed["API_A"] = "http://127.0.0.1:9991"
         self.assertEqual(resolve_acceptance_target("auto", mixed)[1], STACK_ENV["GOSTREAM_API_A"])
 
-    def test_unimplemented_compose_backup_never_starts_sqlite(self):
+    def test_rejected_compose_backup_never_starts_sqlite(self):
         module = importlib.import_module("migration_backup_recovery_smoke")
         for args, env in ((["--mode", "compose"], {}), ([], STACK_ENV),
                           (["--mode", "sqlite"], STACK_ENV)):
@@ -86,7 +86,7 @@ class AcceptanceTargetContractTest(unittest.TestCase):
                      patch.object(sys, "argv", [module.__name__, *args, "--report-file", str(report)]), \
                      patch.object(module.subprocess, "run", side_effect=AssertionError("must not build/start SQLite")), \
                      redirect_stdout(io.StringIO()):
-                    with self.assertRaisesRegex(NotImplementedError, "MySQL/MinIO"):
+                    with self.assertRaises(ValueError):
                         module.main()
                 self.assertFalse(report.exists())
 
