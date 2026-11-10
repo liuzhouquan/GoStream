@@ -708,9 +708,19 @@ def main():
     print("=" * 60)
 
     start_time = time.time()
+    git_info = {"commit": "unknown", "branch": "unknown", "dirty": False}
+    try:
+        sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(ROOT), text=True).strip()
+        status = subprocess.check_output(["git", "status", "--porcelain"], cwd=str(ROOT), text=True).strip()
+        branch = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(ROOT), text=True).strip()
+        git_info = {"commit": sha, "branch": branch, "dirty": bool(status)}
+    except Exception:
+        pass
+
     report = {
         "status": "FAIL",
         "mode": mode,
+        "git": git_info,
         "warmup_seconds": args.warmup_seconds,
         "duration_seconds": args.duration_seconds,
         "concurrency": args.concurrency,
