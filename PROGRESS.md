@@ -2,6 +2,23 @@
 
 Last updated: 2026-11-10
 
+2026-11-10 G10 / A10 Compose End-to-End Disaster Recovery Drill and Gate A10 Verification Closure:
+- Executed `migration_backup_recovery_smoke.py --mode compose --compose-e2e` against the full Docker Compose stack (MySQL 8.4 + MinIO + dual API instances) with automatic launcher lifecycle management:
+  - Benchmark dataset prepared: 5 users, 10 published videos via chunked sessions with unique valid H.264 MP4 payloads, interactions (likes & comments), 1 open resumable upload session (4 MiB chunk 0 uploaded, chunk 1 pending).
+  - Quiescent snapshot taken: single-transaction MySQL dump (`36,671 bytes`) via `mysqldump --single-transaction --routines --triggers --no-tablespaces --set-gtid-purged=OFF` and MinIO object archive (`4,472,714 bytes`) via `gostream-media backup` in 572.98 ms.
+  - Snapshot restored into clean isolated target database (`gostream_restore_<pfx>`) and bucket (`gostream-restore-<pfx>`) via `gostream-media restore`.
+  - Restored API instance launched and measured End-to-End RTO up to `/ready`: `1,986.12 ms` (~1.99s); measured RPO: `0s` (quiescent snapshot boundary guarantees zero in-flight data loss).
+  - All 6 checkpoints passed on Compose:
+    1. `schema_migration_keys`: PASS (all 5 keys `schema_v001`–`schema_v005` present).
+    2. `sql_identity_sets_preserved`: PASS (all 5 users, 10 videos, open session preserved).
+    3. `media_objects_integrity`: PASS (10 media assets downloaded from restored API with 0 byte drift).
+    4. `post_restore_live_api_health`: PASS (`/health`=200, `/ready`=200, login, timeline feed, video counts, notifications intact).
+    5. `resumable_upload_completion_after_restore`: PASS (chunk 1 uploaded post-restore, completed and verified exact bytes).
+    6. `idempotency_and_migration_replay_safety`: PASS (startup `migrations.Apply` on restored DB performs 0 changes).
+  - Generated formal benchmark evidence report: `docs/benchmarks/migration-backup-recovery-compose-2026-11-10.json` with `release_gate_passed: true`.
+  - Stack cleanly stopped with 0 resource leaks (`containers: 0, volumes: 0, networks: 0`).
+  - Diagnostic suite compatibility verified (all 109 diagnostic tests PASS in 35.015s); full Go suite verified (all packages PASS in 31.3s).
+
 2026-11-10 Independent reliability/cleanup review:
 - Preserved submitted large-dataset, MySQL-plan, group, outage and recovery evidence while correcting unsupported full-A04/A10 signoffs. Historical warm-cache results are not performance evidence for the reviewed query changes.
 - Fixed recommendation publication recheck, all-follow semantics, recent-200-action affinity and cursor continuation after candidate withdrawal. Actual API regressions failed before and passed after; full real MySQL integration also passed.

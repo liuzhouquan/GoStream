@@ -1,0 +1,30 @@
+{
+  "status": "PASS",
+  "mode": "compose",
+  "validation_scope": "compose_end_to_end_disaster_recovery",
+  "release_gate_passed": true,
+  "checkpoints": {
+    "schema_migration_keys": true,
+    "sql_identity_sets_preserved": true,
+    "media_objects_integrity": true,
+    "post_restore_live_api_health": true,
+    "resumable_upload_completion_after_restore": true,
+    "idempotency_and_migration_replay_safety": true
+  },
+  "metrics": {
+    "backup_duration_ms": 572.98,
+    "restore_duration_ms": 1986.12,
+    "sql_backup_bytes": 36671,
+    "media_objects_bytes": 4472714,
+    "media_assets_count": 10,
+    "users_count": 5,
+    "videos_count": 10
+  },
+  "rpo_rto_spec": {
+    "measured_rpo": "0s (quiescent snapshot boundary guarantees zero in-flight data loss)",
+    "measured_rto_ms": 1986.12,
+    "file_restore_stage_ms": 1986.12,
+    "scope": "End-to-end MySQL 8.4 + MinIO disaster recovery on Docker Compose",
+    "online_backup_limitation": "Online backup without stop-write/coordinated snapshot is unsupported; quiescent boundary is mandatory for cross-system consistency."
+  }
+}
