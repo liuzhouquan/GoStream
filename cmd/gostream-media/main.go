@@ -76,9 +76,9 @@ func run(args []string) error {
 		if err != nil {
 			return fmt.Errorf("connect database: %w", err)
 		}
-		sqlDB, err := db.DB()
-		if err != nil {
-			return err
+		sqlDB, sqlErr := db.DB()
+		if sqlErr != nil {
+			return sqlErr
 		}
 		defer sqlDB.Close()
 		report, err = platform.ImportLocalMedia(ctx, db, *dir, store)

@@ -34,15 +34,18 @@ if not scale.get("meets_formal_scale"):
 print("Scale check: PASS")
 '
 
+REPORT_FILE="${GOSTREAM_FEED_REPORT:-docs/benchmarks/feed-warm-cache-continuous-2026-11-10.json}"
+
 echo "[4/4] Executing 36-minute formal feed warm-cache load matrix..."
 echo "Matrix: 4 scenes (following, following_deep, recommend_logged_in, hot) x 2 concurrencies (10, 20) x 3 rounds = 24 rounds"
 echo "Timing: 30s warmup + 60s measurement per round = 90s/round (~36 minutes total)"
+echo "Target report: $REPORT_FILE"
 python3 tests/integration/feed_warm_cache_continuous.py \
   --mode compose \
   --formal-dataset \
   --warmup-seconds 30 \
   --duration-seconds 60 \
   --rounds 3 \
-  --report docs/benchmarks/feed-warm-cache-continuous-2026-11-09.json
+  --report "$REPORT_FILE"
 
 echo "Formal feed continuous verification completed successfully!"

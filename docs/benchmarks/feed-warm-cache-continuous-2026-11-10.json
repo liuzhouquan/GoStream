@@ -1,0 +1,939 @@
+{
+  "status": "PASS",
+  "mode": "compose",
+  "git": {
+    "commit": "8bef0c56d5714eff480daa4c1bb597b43c3efde5",
+    "branch": "feat/close-01-feed-performance",
+    "dirty": false
+  },
+  "warmup_seconds": 30.0,
+  "duration_seconds": 60.0,
+  "concurrency": 20,
+  "rounds_count": 3,
+  "acceptance_scope": "G07_warm_cache_only",
+  "full_a04_accepted": false,
+  "dataset_scale": {
+    "users": 2002,
+    "published_videos": 20001,
+    "videos": 20001,
+    "follows": 11011,
+    "interactions": 50050,
+    "has_high_author": true,
+    "has_low_author": true,
+    "meets_formal_scale": true
+  },
+  "checkpoints": {
+    "semantic_eligibility": true,
+    "concurrency_10": true,
+    "concurrency_20_three_rounds": true,
+    "cache_invalidation_verified": true
+  },
+  "rounds": [
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 30339,
+      "successes": 30339,
+      "failures": 0,
+      "requests_per_sec": 505.6,
+      "statuses": {
+        "200": 30339
+      },
+      "p50_ms": 15.4,
+      "p95_ms": 41.47,
+      "p99_ms": 73.9,
+      "bytes_transferred": 310671360,
+      "scene": "following",
+      "round": 1,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 44887,
+      "successes": 44887,
+      "failures": 0,
+      "requests_per_sec": 748.0,
+      "statuses": {
+        "200": 44887
+      },
+      "p50_ms": 12.46,
+      "p95_ms": 20.45,
+      "p99_ms": 25.48,
+      "bytes_transferred": 459642880,
+      "scene": "following",
+      "round": 2,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 49752,
+      "successes": 49752,
+      "failures": 0,
+      "requests_per_sec": 829.1,
+      "statuses": {
+        "200": 49752
+      },
+      "p50_ms": 11.32,
+      "p95_ms": 18.25,
+      "p99_ms": 21.95,
+      "bytes_transferred": 509460480,
+      "scene": "following",
+      "round": 3,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 39907,
+      "successes": 39907,
+      "failures": 0,
+      "requests_per_sec": 665.0,
+      "statuses": {
+        "200": 39907
+      },
+      "p50_ms": 14.07,
+      "p95_ms": 21.33,
+      "p99_ms": 25.86,
+      "bytes_transferred": 408727494,
+      "scene": "following_deep",
+      "round": 1,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 39840,
+      "successes": 39840,
+      "failures": 0,
+      "requests_per_sec": 663.9,
+      "statuses": {
+        "200": 39840
+      },
+      "p50_ms": 14.1,
+      "p95_ms": 21.27,
+      "p99_ms": 25.57,
+      "bytes_transferred": 408041280,
+      "scene": "following_deep",
+      "round": 2,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 39532,
+      "successes": 39532,
+      "failures": 0,
+      "requests_per_sec": 658.8,
+      "statuses": {
+        "200": 39532
+      },
+      "p50_ms": 14.17,
+      "p95_ms": 21.57,
+      "p99_ms": 26.15,
+      "bytes_transferred": 404886744,
+      "scene": "following_deep",
+      "round": 3,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.03,
+      "total_requests": 17432,
+      "successes": 17432,
+      "failures": 0,
+      "requests_per_sec": 290.4,
+      "statuses": {
+        "200": 17432
+      },
+      "p50_ms": 33.1,
+      "p95_ms": 42.39,
+      "p99_ms": 49.94,
+      "bytes_transferred": 179218392,
+      "scene": "recommend_logged_in",
+      "round": 1,
+      "warmup_duration_sec": 30.03
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.03,
+      "total_requests": 17513,
+      "successes": 17513,
+      "failures": 0,
+      "requests_per_sec": 291.8,
+      "statuses": {
+        "200": 17513
+      },
+      "p50_ms": 32.97,
+      "p95_ms": 41.76,
+      "p99_ms": 48.84,
+      "bytes_transferred": 180051153,
+      "scene": "recommend_logged_in",
+      "round": 2,
+      "warmup_duration_sec": 30.02
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.03,
+      "total_requests": 17779,
+      "successes": 17779,
+      "failures": 0,
+      "requests_per_sec": 296.2,
+      "statuses": {
+        "200": 17779
+      },
+      "p50_ms": 32.53,
+      "p95_ms": 40.84,
+      "p99_ms": 48.49,
+      "bytes_transferred": 182785899,
+      "scene": "recommend_logged_in",
+      "round": 3,
+      "warmup_duration_sec": 30.03
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 43853,
+      "successes": 43853,
+      "failures": 0,
+      "requests_per_sec": 730.8,
+      "statuses": {
+        "200": 43853
+      },
+      "p50_ms": 11.7,
+      "p95_ms": 23.13,
+      "p99_ms": 45.71,
+      "bytes_transferred": 450940399,
+      "scene": "hot",
+      "round": 1,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 39238,
+      "successes": 39238,
+      "failures": 0,
+      "requests_per_sec": 653.9,
+      "statuses": {
+        "200": 39238
+      },
+      "p50_ms": 13.91,
+      "p95_ms": 23.91,
+      "p99_ms": 32.25,
+      "bytes_transferred": 403484354,
+      "scene": "hot",
+      "round": 2,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 40840,
+      "successes": 40840,
+      "failures": 0,
+      "requests_per_sec": 680.5,
+      "statuses": {
+        "200": 40840
+      },
+      "p50_ms": 13.41,
+      "p95_ms": 23.29,
+      "p99_ms": 30.8,
+      "bytes_transferred": 419957720,
+      "scene": "hot",
+      "round": 3,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.02,
+      "total_requests": 44099,
+      "successes": 44099,
+      "failures": 0,
+      "requests_per_sec": 734.8,
+      "statuses": {
+        "200": 44099
+      },
+      "p50_ms": 25.6,
+      "p95_ms": 44.48,
+      "p99_ms": 55.76,
+      "bytes_transferred": 451573760,
+      "scene": "following",
+      "round": 1,
+      "warmup_duration_sec": 30.03
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.02,
+      "total_requests": 39229,
+      "successes": 39229,
+      "failures": 0,
+      "requests_per_sec": 653.6,
+      "statuses": {
+        "200": 39229
+      },
+      "p50_ms": 23.45,
+      "p95_ms": 46.36,
+      "p99_ms": 60.92,
+      "bytes_transferred": 401704960,
+      "scene": "following",
+      "round": 2,
+      "warmup_duration_sec": 30.02
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.01,
+      "total_requests": 45234,
+      "successes": 45234,
+      "failures": 0,
+      "requests_per_sec": 753.8,
+      "statuses": {
+        "200": 45234
+      },
+      "p50_ms": 21.86,
+      "p95_ms": 41.29,
+      "p99_ms": 52.86,
+      "bytes_transferred": 463196160,
+      "scene": "following",
+      "round": 3,
+      "warmup_duration_sec": 30.02
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.02,
+      "total_requests": 37136,
+      "successes": 37136,
+      "failures": 0,
+      "requests_per_sec": 618.8,
+      "statuses": {
+        "200": 37136
+      },
+      "p50_ms": 28.91,
+      "p95_ms": 49.24,
+      "p99_ms": 61.08,
+      "bytes_transferred": 380346912,
+      "scene": "following_deep",
+      "round": 1,
+      "warmup_duration_sec": 30.02
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.03,
+      "total_requests": 32370,
+      "successes": 32370,
+      "failures": 0,
+      "requests_per_sec": 539.3,
+      "statuses": {
+        "200": 32370
+      },
+      "p50_ms": 33.86,
+      "p95_ms": 59.43,
+      "p99_ms": 75.11,
+      "bytes_transferred": 331533540,
+      "scene": "following_deep",
+      "round": 2,
+      "warmup_duration_sec": 30.03
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.02,
+      "total_requests": 33157,
+      "successes": 33157,
+      "failures": 0,
+      "requests_per_sec": 552.4,
+      "statuses": {
+        "200": 33157
+      },
+      "p50_ms": 26.21,
+      "p95_ms": 54.89,
+      "p99_ms": 71.04,
+      "bytes_transferred": 339593994,
+      "scene": "following_deep",
+      "round": 3,
+      "warmup_duration_sec": 30.03
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.05,
+      "total_requests": 18630,
+      "successes": 18630,
+      "failures": 0,
+      "requests_per_sec": 310.2,
+      "statuses": {
+        "200": 18630
+      },
+      "p50_ms": 58.94,
+      "p95_ms": 103.15,
+      "p99_ms": 131.54,
+      "bytes_transferred": 191535030,
+      "scene": "recommend_logged_in",
+      "round": 1,
+      "warmup_duration_sec": 30.04
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.04,
+      "total_requests": 18843,
+      "successes": 18843,
+      "failures": 0,
+      "requests_per_sec": 313.8,
+      "statuses": {
+        "200": 18843
+      },
+      "p50_ms": 57.97,
+      "p95_ms": 101.6,
+      "p99_ms": 128.37,
+      "bytes_transferred": 193724883,
+      "scene": "recommend_logged_in",
+      "round": 2,
+      "warmup_duration_sec": 30.04
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.06,
+      "total_requests": 18990,
+      "successes": 18990,
+      "failures": 0,
+      "requests_per_sec": 316.2,
+      "statuses": {
+        "200": 18990
+      },
+      "p50_ms": 57.35,
+      "p95_ms": 101.61,
+      "p99_ms": 131.54,
+      "bytes_transferred": 195236190,
+      "scene": "recommend_logged_in",
+      "round": 3,
+      "warmup_duration_sec": 30.04
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.02,
+      "total_requests": 46050,
+      "successes": 46050,
+      "failures": 0,
+      "requests_per_sec": 767.3,
+      "statuses": {
+        "200": 46050
+      },
+      "p50_ms": 24.19,
+      "p95_ms": 41.94,
+      "p99_ms": 54.98,
+      "bytes_transferred": 473532150,
+      "scene": "hot",
+      "round": 1,
+      "warmup_duration_sec": 30.02
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.01,
+      "total_requests": 49346,
+      "successes": 49346,
+      "failures": 0,
+      "requests_per_sec": 822.2,
+      "statuses": {
+        "200": 49346
+      },
+      "p50_ms": 22.6,
+      "p95_ms": 38.89,
+      "p99_ms": 50.57,
+      "bytes_transferred": 507424918,
+      "scene": "hot",
+      "round": 2,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.01,
+      "total_requests": 52156,
+      "successes": 52156,
+      "failures": 0,
+      "requests_per_sec": 869.1,
+      "statuses": {
+        "200": 52156
+      },
+      "p50_ms": 21.49,
+      "p95_ms": 36.28,
+      "p99_ms": 46.39,
+      "bytes_transferred": 536320148,
+      "scene": "hot",
+      "round": 3,
+      "warmup_duration_sec": 30.01
+    }
+  ],
+  "concurrency_20_rounds": [
+    {
+      "concurrency": 20,
+      "duration_sec": 60.02,
+      "total_requests": 44099,
+      "successes": 44099,
+      "failures": 0,
+      "requests_per_sec": 734.8,
+      "statuses": {
+        "200": 44099
+      },
+      "p50_ms": 25.6,
+      "p95_ms": 44.48,
+      "p99_ms": 55.76,
+      "bytes_transferred": 451573760,
+      "scene": "following",
+      "round": 1,
+      "warmup_duration_sec": 30.03
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.02,
+      "total_requests": 39229,
+      "successes": 39229,
+      "failures": 0,
+      "requests_per_sec": 653.6,
+      "statuses": {
+        "200": 39229
+      },
+      "p50_ms": 23.45,
+      "p95_ms": 46.36,
+      "p99_ms": 60.92,
+      "bytes_transferred": 401704960,
+      "scene": "following",
+      "round": 2,
+      "warmup_duration_sec": 30.02
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.01,
+      "total_requests": 45234,
+      "successes": 45234,
+      "failures": 0,
+      "requests_per_sec": 753.8,
+      "statuses": {
+        "200": 45234
+      },
+      "p50_ms": 21.86,
+      "p95_ms": 41.29,
+      "p99_ms": 52.86,
+      "bytes_transferred": 463196160,
+      "scene": "following",
+      "round": 3,
+      "warmup_duration_sec": 30.02
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.02,
+      "total_requests": 37136,
+      "successes": 37136,
+      "failures": 0,
+      "requests_per_sec": 618.8,
+      "statuses": {
+        "200": 37136
+      },
+      "p50_ms": 28.91,
+      "p95_ms": 49.24,
+      "p99_ms": 61.08,
+      "bytes_transferred": 380346912,
+      "scene": "following_deep",
+      "round": 1,
+      "warmup_duration_sec": 30.02
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.03,
+      "total_requests": 32370,
+      "successes": 32370,
+      "failures": 0,
+      "requests_per_sec": 539.3,
+      "statuses": {
+        "200": 32370
+      },
+      "p50_ms": 33.86,
+      "p95_ms": 59.43,
+      "p99_ms": 75.11,
+      "bytes_transferred": 331533540,
+      "scene": "following_deep",
+      "round": 2,
+      "warmup_duration_sec": 30.03
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.02,
+      "total_requests": 33157,
+      "successes": 33157,
+      "failures": 0,
+      "requests_per_sec": 552.4,
+      "statuses": {
+        "200": 33157
+      },
+      "p50_ms": 26.21,
+      "p95_ms": 54.89,
+      "p99_ms": 71.04,
+      "bytes_transferred": 339593994,
+      "scene": "following_deep",
+      "round": 3,
+      "warmup_duration_sec": 30.03
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.05,
+      "total_requests": 18630,
+      "successes": 18630,
+      "failures": 0,
+      "requests_per_sec": 310.2,
+      "statuses": {
+        "200": 18630
+      },
+      "p50_ms": 58.94,
+      "p95_ms": 103.15,
+      "p99_ms": 131.54,
+      "bytes_transferred": 191535030,
+      "scene": "recommend_logged_in",
+      "round": 1,
+      "warmup_duration_sec": 30.04
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.04,
+      "total_requests": 18843,
+      "successes": 18843,
+      "failures": 0,
+      "requests_per_sec": 313.8,
+      "statuses": {
+        "200": 18843
+      },
+      "p50_ms": 57.97,
+      "p95_ms": 101.6,
+      "p99_ms": 128.37,
+      "bytes_transferred": 193724883,
+      "scene": "recommend_logged_in",
+      "round": 2,
+      "warmup_duration_sec": 30.04
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.06,
+      "total_requests": 18990,
+      "successes": 18990,
+      "failures": 0,
+      "requests_per_sec": 316.2,
+      "statuses": {
+        "200": 18990
+      },
+      "p50_ms": 57.35,
+      "p95_ms": 101.61,
+      "p99_ms": 131.54,
+      "bytes_transferred": 195236190,
+      "scene": "recommend_logged_in",
+      "round": 3,
+      "warmup_duration_sec": 30.04
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.02,
+      "total_requests": 46050,
+      "successes": 46050,
+      "failures": 0,
+      "requests_per_sec": 767.3,
+      "statuses": {
+        "200": 46050
+      },
+      "p50_ms": 24.19,
+      "p95_ms": 41.94,
+      "p99_ms": 54.98,
+      "bytes_transferred": 473532150,
+      "scene": "hot",
+      "round": 1,
+      "warmup_duration_sec": 30.02
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.01,
+      "total_requests": 49346,
+      "successes": 49346,
+      "failures": 0,
+      "requests_per_sec": 822.2,
+      "statuses": {
+        "200": 49346
+      },
+      "p50_ms": 22.6,
+      "p95_ms": 38.89,
+      "p99_ms": 50.57,
+      "bytes_transferred": 507424918,
+      "scene": "hot",
+      "round": 2,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 20,
+      "duration_sec": 60.01,
+      "total_requests": 52156,
+      "successes": 52156,
+      "failures": 0,
+      "requests_per_sec": 869.1,
+      "statuses": {
+        "200": 52156
+      },
+      "p50_ms": 21.49,
+      "p95_ms": 36.28,
+      "p99_ms": 46.39,
+      "bytes_transferred": 536320148,
+      "scene": "hot",
+      "round": 3,
+      "warmup_duration_sec": 30.01
+    }
+  ],
+  "metrics_summary": {
+    "cache_hits": 786353.0,
+    "cache_misses": 2454.0,
+    "cache_hit_rate_pct": 99.69
+  },
+  "concurrency_10_stats": {
+    "concurrency": 10,
+    "duration_sec": 60.01,
+    "total_requests": 30339,
+    "successes": 30339,
+    "failures": 0,
+    "requests_per_sec": 505.6,
+    "statuses": {
+      "200": 30339
+    },
+    "p50_ms": 15.4,
+    "p95_ms": 41.47,
+    "p99_ms": 73.9,
+    "bytes_transferred": 310671360,
+    "scene": "following",
+    "round": 1,
+    "warmup_duration_sec": 30.01
+  },
+  "concurrency_10_rounds": [
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 30339,
+      "successes": 30339,
+      "failures": 0,
+      "requests_per_sec": 505.6,
+      "statuses": {
+        "200": 30339
+      },
+      "p50_ms": 15.4,
+      "p95_ms": 41.47,
+      "p99_ms": 73.9,
+      "bytes_transferred": 310671360,
+      "scene": "following",
+      "round": 1,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 44887,
+      "successes": 44887,
+      "failures": 0,
+      "requests_per_sec": 748.0,
+      "statuses": {
+        "200": 44887
+      },
+      "p50_ms": 12.46,
+      "p95_ms": 20.45,
+      "p99_ms": 25.48,
+      "bytes_transferred": 459642880,
+      "scene": "following",
+      "round": 2,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 49752,
+      "successes": 49752,
+      "failures": 0,
+      "requests_per_sec": 829.1,
+      "statuses": {
+        "200": 49752
+      },
+      "p50_ms": 11.32,
+      "p95_ms": 18.25,
+      "p99_ms": 21.95,
+      "bytes_transferred": 509460480,
+      "scene": "following",
+      "round": 3,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 39907,
+      "successes": 39907,
+      "failures": 0,
+      "requests_per_sec": 665.0,
+      "statuses": {
+        "200": 39907
+      },
+      "p50_ms": 14.07,
+      "p95_ms": 21.33,
+      "p99_ms": 25.86,
+      "bytes_transferred": 408727494,
+      "scene": "following_deep",
+      "round": 1,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 39840,
+      "successes": 39840,
+      "failures": 0,
+      "requests_per_sec": 663.9,
+      "statuses": {
+        "200": 39840
+      },
+      "p50_ms": 14.1,
+      "p95_ms": 21.27,
+      "p99_ms": 25.57,
+      "bytes_transferred": 408041280,
+      "scene": "following_deep",
+      "round": 2,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 39532,
+      "successes": 39532,
+      "failures": 0,
+      "requests_per_sec": 658.8,
+      "statuses": {
+        "200": 39532
+      },
+      "p50_ms": 14.17,
+      "p95_ms": 21.57,
+      "p99_ms": 26.15,
+      "bytes_transferred": 404886744,
+      "scene": "following_deep",
+      "round": 3,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.03,
+      "total_requests": 17432,
+      "successes": 17432,
+      "failures": 0,
+      "requests_per_sec": 290.4,
+      "statuses": {
+        "200": 17432
+      },
+      "p50_ms": 33.1,
+      "p95_ms": 42.39,
+      "p99_ms": 49.94,
+      "bytes_transferred": 179218392,
+      "scene": "recommend_logged_in",
+      "round": 1,
+      "warmup_duration_sec": 30.03
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.03,
+      "total_requests": 17513,
+      "successes": 17513,
+      "failures": 0,
+      "requests_per_sec": 291.8,
+      "statuses": {
+        "200": 17513
+      },
+      "p50_ms": 32.97,
+      "p95_ms": 41.76,
+      "p99_ms": 48.84,
+      "bytes_transferred": 180051153,
+      "scene": "recommend_logged_in",
+      "round": 2,
+      "warmup_duration_sec": 30.02
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.03,
+      "total_requests": 17779,
+      "successes": 17779,
+      "failures": 0,
+      "requests_per_sec": 296.2,
+      "statuses": {
+        "200": 17779
+      },
+      "p50_ms": 32.53,
+      "p95_ms": 40.84,
+      "p99_ms": 48.49,
+      "bytes_transferred": 182785899,
+      "scene": "recommend_logged_in",
+      "round": 3,
+      "warmup_duration_sec": 30.03
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 43853,
+      "successes": 43853,
+      "failures": 0,
+      "requests_per_sec": 730.8,
+      "statuses": {
+        "200": 43853
+      },
+      "p50_ms": 11.7,
+      "p95_ms": 23.13,
+      "p99_ms": 45.71,
+      "bytes_transferred": 450940399,
+      "scene": "hot",
+      "round": 1,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 39238,
+      "successes": 39238,
+      "failures": 0,
+      "requests_per_sec": 653.9,
+      "statuses": {
+        "200": 39238
+      },
+      "p50_ms": 13.91,
+      "p95_ms": 23.91,
+      "p99_ms": 32.25,
+      "bytes_transferred": 403484354,
+      "scene": "hot",
+      "round": 2,
+      "warmup_duration_sec": 30.01
+    },
+    {
+      "concurrency": 10,
+      "duration_sec": 60.01,
+      "total_requests": 40840,
+      "successes": 40840,
+      "failures": 0,
+      "requests_per_sec": 680.5,
+      "statuses": {
+        "200": 40840
+      },
+      "p50_ms": 13.41,
+      "p95_ms": 23.29,
+      "p99_ms": 30.8,
+      "bytes_transferred": 419957720,
+      "scene": "hot",
+      "round": 3,
+      "warmup_duration_sec": 30.01
+    }
+  ],
+  "dataset_scale_before_load": {
+    "users": 2001,
+    "published_videos": 20000,
+    "videos": 20000,
+    "follows": 11010,
+    "interactions": 50050,
+    "has_high_author": true,
+    "has_low_author": true,
+    "meets_formal_scale": true
+  },
+  "load_coverage_issues": [],
+  "validation_scope": "formal_standard",
+  "release_gate_passed": true,
+  "unverified_requirements": [],
+  "elapsed_seconds": 26393.97
+}

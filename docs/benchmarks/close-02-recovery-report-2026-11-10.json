@@ -1,0 +1,65 @@
+{
+  "status": "PASS",
+  "mode": "compose",
+  "validation_scope": "historical_recovery_insufficient_coverage",
+  "release_gate_passed": false,
+  "formal_scale": true,
+  "checkpoints": {
+    "schema_migration_keys": true,
+    "sql_identity_sets_preserved": true,
+    "media_objects_integrity": true,
+    "post_restore_live_api_health": true,
+    "resumable_upload_completion_after_restore": true,
+    "idempotency_and_migration_replay_safety": true
+  },
+  "metrics": {
+    "backup_duration_ms": 3405.41,
+    "restore_duration_ms": 32514.98,
+    "restore_ready_duration_ms": 32514.98,
+    "recovery_end_to_end_duration_ms": 35614.64,
+    "sql_backup_bytes": 93966996,
+    "sql_backup_sha256": "86cea44951cc2bd6d37ace0f1d832d3230fe425eb4761d704e51e795c6ca0d9e",
+    "media_objects_bytes": 4472714,
+    "media_objects_count": 31,
+    "media_assets_count": 20,
+    "users_count": 5,
+    "videos_count": 10,
+    "peak_temp_space_bytes": 153465035
+  },
+  "scale_metrics": {
+    "total_users": 2005,
+    "total_published_videos": 20010,
+    "total_follows": 11001,
+    "total_actions": 50002,
+    "total_comments": 2,
+    "total_direct_messages": 2,
+    "total_groups": 1,
+    "total_group_messages": 1,
+    "total_notifications": 10
+  },
+  "rpo_rto_spec": {
+    "measured_rpo": null,
+    "measured_rto_ms": null,
+    "restore_ready_stage_ms": 32514.98,
+    "recovery_end_to_end_ms": 35614.64,
+    "backup_stage_ms": 3405.41,
+    "scope": "Formal Gate A10 verified disaster recovery on Compose MySQL 8.4 and MinIO under quiescent maintenance window",
+    "quiescent_maintenance_window": {
+      "verified": true,
+      "source_api_stopped": true,
+      "pending_transcodes": 0,
+      "pending_fanouts": 0,
+      "open_sessions": 1,
+      "outbox_events_published": 20,
+      "outbox_events_pending": 0
+    },
+    "online_backup_limitation": "Online backup without stop-write/coordinated snapshot is unsupported; quiescent boundary is mandatory for cross-system consistency."
+  },
+  "owned_stack_cleanup_verified": true,
+  "review": {
+    "status": "SUPERSEDED_BY_FULL_VERIFICATION",
+    "reason": "Old CLI swallowed import errors, seeded media absent; subset/count assertions do not verify full frozen identities. Original measurements retained, formal acceptance withdrawn.",
+    "report": "docs/PR64_REVIEW_2026-11-11.md",
+    "replacement": "docs/benchmarks/pr64-recovery-verified-2026-11-11.json"
+  }
+}

@@ -1,6 +1,67 @@
 # GoStream development progress
 
-Last updated: 2026-11-10
+Last updated: 2026-11-11
+
+2026-11-11 CI multi-device replay-barrier correction:
+- CI99e6ded exposed a steady-delivery test reading an initial replay duplicate as the second live message. Controlled SQL scheduling reproduced oldID1/expected2 with only2 persistedrows. Strict pong barriers on all initial and newly replayed devices fix setup ordering; all delivery assertions remain. Ordinary50/race20 PASS; temporary SQL injection removed.
+- Preserve a separate IM load-registration EOF before the measured workload as unconfirmed POST-03; no speculative transport fix, POST retry, rate-limit or bcrypt relaxation. New head requires the complete8-job CI again.
+
+2026-11-11 Formal recovery report contract alignment:
+- Reproduced the legacy ten-asset assertion rejecting the real130-asset formal report. Keep original checkpoint/error assertions, compare against exact frozen SQL/object/row totals, and add corrupted-aggregate rejection cases. Focused4 testsPASS; final diagnostics123 OK(2 missing-report skips),42.389s. Final CI must match latesthead.
+
+2026-11-11 PR64 independent final-delivery review:
+- Fixed production gostream-media import-local error shadowing: three real SQLite error-propagation regressions failed before and pass with race after; old zero-object import no longer reports success.
+- Formal recovery now uses 100 real shared seeded objects, full frozen SQL fingerprints, all referenced objects/bucket digests, exact unread and migration replay checks. Real MySQL8.4/MinIO PASS: 23tables / 2,003,037rows / 131objects, RPO0 at verified stop-write boundary; ready58.475s / business+resume63.160s, total command367.413s; owned stack cleanup verified.
+- Ran six real component failure windows (snapshot/import/objects/API/replay/SIGTERM), PASS318.285s, no owned containers/volumes/networks/host APIs. No whole-runner mock substituted for stage execution.
+- Go full PASS56.711s; diagnostics122 OK(3 missing-report skips), wrapper42.433s; vet/build/JS/diff PASS. A04 existing 24-round and six mixed results remain applicable to unchanged Feed production code.
+- Current delivery rules and optional pending risks are in SDD; final PR64 head must pass all8 remote CI jobs and merged tree match before completion signoff. Preserve prior failed/insufficient reports as historical.
+- Review: docs/PR64_REVIEW_2026-11-11.md; evidence: docs/benchmarks/pr64-recovery-verified-2026-11-11.json and pr64-recovery-faults-2026-11-11.json.
+
+
+2026-11-11 CLOSE-03 / G12 Final Delivery Closure (Local Gates & 8 CI Equivalents Verified; Remote PR/CI Pending Merge to main):
+- Audited `git diff main..43b5b30`, docs, and recovery tooling on branch `feat/close-03-final-delivery`:
+  - **P1 bug found, reproduced, and fixed**: In `tests/integration/migration_backup_recovery_smoke.py`, `verify_quiescence()` raised `RuntimeError` inside `try: ... except Exception: pass`, silently swallowing a live responding source API, and did not check `owned_stack.api_b` in compose mode (while SQLite `media_objects_count` also counted directories). Added `test_verify_quiescence_rejects_responding_source_api` in `tests/diagnostics/test_recovery_isolation.py` first to prove failure (`AssertionError: RuntimeError not raised`), narrowed exception catching to `(OSError, URLError)` outside the liveness check across `[base_url, api_a, api_b]` and restricted object counting to files, and verified live via `--mode sqlite` (`11` real media files, quiescence enforced) and all `117` diagnostic unit tests.
+  - **Documentation & A01-A12 unification**: Synchronized `README.md`, `docs/SDD.md`, `docs/RELEASE_ACCEPTANCE.md` (upgraded A10 to PASS via CLOSE-02, fixed A11 test path, added Section 2.1 exact A01-A12 source/command/report index table, corrected Demo Runbook `.env` overwrite risk & overlay flags), `docs/TEST_STANDARD.md`, `docs/OPERATIONS.md`, `docs/tasks/G07.md`, `docs/tasks/G10.md`, and `docs/tasks/G12.md`, keeping all historical notes labeled as historical. Verified `docs/LOCAL_STUDY_GUIDE.md` remains local and git-ignored (`.git/info/exclude`, `git ls-files` count 0).
+- **Executed local equivalents of all 8 `.github/workflows/ci.yml` jobs & Demo Compose probe** (using disposable containers/ports; zero temporary residue, existing `gostream-*` demo containers/volumes untouched):
+  - `quality` (`ci-quality-core.json`, `300.54s`, exit 0): Go `go1.27.2` verified, `tests/diagnostics/test_*.py` (`117 tests in 36.097s`, 0 skipped), `go test -count=1 ./...` & `go test -race -count=1 ./...` (8 packages with tests `ok`, `cmd/gostream-media` no test files), `BenchmarkFollowingFeed` PASS (`0.039s`), `go vet ./...`, `go build ./cmd/...`, `node --check web/app.js`, `test_feed_a04.py` (4), `test_feed_a04_mixed.py` (33), `test_rabbitmq_ack_proxy.py` (1), and all 3 `docker compose ... config` checks PASS.
+  - `redis-integration`: `TestRateLimiterRealRedisIntegration` + `TestFollowingFeedCacheCrossInstanceRealRedis` against isolated `redis:8.2.9` PASS (`0.286s`).
+  - `mysql-integration` (`ci-mysql-integration.json`, `145.612s`, exit 0): all 9 CI steps against isolated `mysql:8.4` PASS (migrations, legacy adoption, v002/v005 upgrades, schema parity, `mysql_recovery.sh`, 28 `TestMySQL*` tests, explicit `GOSTREAM_TEST_ACK_QUERY_PROFILE=1` profile `71.11s`, `-race -count=3` group/ACK tests `9.442s`).
+  - `minio-integration` (`ci-minio-integration.json`, `47.748s`, exit 0): all 8 CI steps against isolated `mysql:8.4` + `gostream-minio:source-7aac2a2c5b7c` PASS (including `media_transfer_smoke.py` and `-race` lease/outage/matrix checks).
+  - `rabbitmq-integration` (`ci-rabbitmq-integration.json`, `423.931s`, exit 0): all 4 CI suites (`rabbitmq_smoke.py` default + `--cluster-only`, `--cluster-leader-only`, `--cluster-majority-only`) against isolated `mysql:8.4` + RabbitMQ 4.3.7 PASS.
+  - `im-integration` (`ci-im-integration.json`, `498.888s`, exit 0): all 8 CI suites (`default`, `feed-cache`, `feed-cache-load`, `fanout-drain`, `load`, `load --race-load`, `group-load`, `--check-timeout-cleanup`) PASS.
+  - `video-recovery-integration` & `browser-workflow`: host PATH lacks system `/usr/bin/ffmpeg` (CI uses `tools/install_ci_ffmpeg.sh`); ran via host FFmpeg binary + repo `tools/ffprobe_shim.py`: `test_media_matrix.py` (7 tests OK, 0 skipped), `video_recovery_restart.py` PASS, `web_action_counts.py`, `web_stored_session.py`, `web_group_sync.py`, and `web_full_flow.py` (`24/24` checkpoints PASS, `25.124s`).
+  - Demo Compose dual-API probe (`acceptance_stack.py --probe-only`, `103.462s`, exit 0): fresh image build + `/health` & `/ready` across API A/B + zero cleanup residue (`containers=0, volumes=0, networks=0`).
+- **Remaining remote release gate**: Push `feat/close-03-final-delivery`, open the PR against `main`, confirm all 8 remote GitHub Actions CI jobs pass on the final PR head commit, and merge into `main` (verifying merge tree consistency) before declaring `v1.0.0`.
+
+2026-11-11 CLOSE-01 / G07 Final Feed Version Performance Acceptance (Gate A04 ACCEPTED):
+- Audited `TEST_STANDARD` A04 items against `git diff a6708f0..HEAD` on branch `feat/close-01-feed-performance` (commit `8bef0c56d5714eff480daa4c1bb597b43c3efde5`, clean tree):
+  - `internal/platform/following_feed.go` and `internal/platform/feed_fanout.go` unchanged (`0` lines modified); historical sustained fanout drain (`docs/benchmarks/feed-fanout-sustained-drain-30s-2026-11-05.json`, 120 videos x 320 followers, 38,400 inbox rows, max drain 1.264s, 0 job errors) remains valid (`已有且仍适用`).
+  - `internal/platform/feed.go` (`recommend` branch) and `internal/platform/recommend.go` modified in the 2026-11-10 reliability fixes: re-verified end-to-end on clean final source `8bef0c5` across both Compose warm/uncached continuous matrix and isolated MySQL 8.4 cold-SQL mixed read-write matrix (`本次通过`), while preserving historical `feed-warm-cache-continuous-2026-11-09.json` and `feed-a04-inbox-first-2026-11-04.json` untouched.
+- Executed full 24-round continuous Feed matrix (`python3 tests/integration/acceptance_stack.py --no-build -- ./tests/integration/run_formal_feed.sh`, wrapped by `tools/task_timing.py`) on formal dataset scale (2,002 users, 20,001 published videos, 11,011 follows, 50,050 interactions):
+  - Active execution time: 2,240.249s (~37.34 min, 0 timeout; raw JSON `elapsed_seconds: 26393.97` spans WSL2 host suspend/resume while each round ran `30.01s` warmup + `60.01s` measure).
+  - 856,152 requests across 24 rounds (`following`, `following_deep`, `recommend_logged_in`, `hot` x concurrency 10/20 x 3 rounds), 0 failures; P95 max 103.15ms (`recommend_logged_in` c=20, SQL uncached <= 200ms); P99 max 131.54ms (<= 500ms); `cache_hits=786353.0`, `cache_misses=2454.0`, `cache_hit_rate_pct=99.69` (only `following` page 1 & `hot` hit Redis; `recommend_logged_in` & `following_deep` execute uncached SQL and are not labeled as cache hits); cross-instance publish/follow invalidation PASS; 0 Docker residue. Report: `docs/benchmarks/feed-warm-cache-continuous-2026-11-10.json`.
+- Executed isolated MySQL 8.4 cold-SQL (`REDIS_ADDR=""`) 70/20/10 mixed read-write matrix (`tests/integration/feed_a04_mixed.py --interpolate-params`, 20 workers, 30s warmup + 60s measure x 3 rounds/mode + 20 real publishes/round, 1,900,000 `feed_inboxes` rows per fixture, wrapped by `tools/task_timing.py`, 1,275.205s):
+  - 196,612 mixed requests across 6 acceptance rounds, 0 failures; 120 publishes, 0 failures; DB pool wait = `0 / 0.000s / 0 max-idle closures`; `counter_mismatches=0`, `feed_visibility_failures=0`, `outbox_pending=0`, `outbox_dead=0`, `fanout_pending=0`; Hybrid fanout `20/20` jobs completed/round, max drain 0.117325s.
+  - Client `feed_following` P95 median: SQL-only 34.016 ms vs Hybrid 22.325 ms (**34.37%** improvement >= 20% gate, `target_met: true`).
+  - Cold-SQL `feed_recommend` (29,493 reqs across all 6 rounds, 0 failures): P50 47.128-57.114 ms, P95 69.105-87.579 ms, P99 82.086-105.395 ms; Cold-SQL `feed_hot`: P95 117.125-137.541 ms, P99 134.357-161.945 ms, 0 failures. Diagnostic pprof & Performance Schema deltas captured; `summary.json` recorded `diagnostic_output_missing` due to relative `--report-dir` vs `go test` package cwd, while the generated MySQL 8.4 `EXPLAIN ANALYZE` plans (SQL-only 2.61ms / 1,205 rows vs Hybrid 0.692ms / 25 inbox rows) were recovered from `internal/platform/data/...` into `data/diagnostics/feed-a04-mixed-2026-11-11/` and summarized in `docs/benchmarks/feed-a04-mixed-2026-11-11.json`. Clean teardown with 0 Docker container/volume leftovers. Report: `docs/benchmarks/feed-a04-mixed-2026-11-11.json`.
+
+2026-11-10 CLOSE-02 / G10 Formal Scale Disaster Recovery Acceptance (Gate A10 ACCEPTED):
+- Executed `migration_backup_recovery_smoke.py --mode compose --compose-e2e --formal-scale` on ephemeral Docker Compose AcceptanceStack:
+  - Preserved full formal hybrid scale: 2,005 users, 20,010 published videos, 11,001 follows, 50,002 interactions, 2 comments (root + author reply), 2 direct messages with device ACK compaction (`message_device_ack_ranges`), 1 chat group with device read cursor (`group_device_reads`), 10 notifications (all columns verified via SQL), and 1 open upload session (4 MiB chunk 0).
+  - True quiescent maintenance window verified: drained in-flight transcodes and feed fanouts to 0, stopped source API instances, asserted connection refused, 0 pending transcodes, 0 pending fanouts, 1 open upload session, 20 published outbox events, 0 pending outbox events.
+  - Snapshot backup: single-transaction mysqldump (93,966,996 bytes, SHA-256 `86cea44951cc2bd6d37ace0f1d832d3230fe425eb4761d704e51e795c6ca0d9e`) + MinIO bucket export in 3,405.41 ms (~3.4s). Peak temporary disk space: 153,465,035 bytes (~146.4 MB).
+  - Restored into clean destination MySQL 8.4 database and clean MinIO bucket. Restored API reached `/ready` in 32,514.98 ms (~32.5s).
+  - All 6 checkpoints PASS:
+    1. `schema_migration_keys`: all 5 migration keys present.
+    2. `sql_identity_sets_preserved`: exact ID sets and details verified across all 15 entity types and formal scale metrics.
+    3. `media_objects_integrity`: SHA-256 digests verified across media assets with zero byte drift.
+    4. `post_restore_live_api_health`: login, feed, video counts, comments, notifications, chat, and live write (user 2 likes video 0 on restored database) all intact.
+    5. `resumable_upload_completion_after_restore`: second chunk uploaded to open session and completed with exact SHA-256.
+    6. `idempotency_and_migration_replay_safety`: rerun `migrations.Apply` on restored database performed 0 changes, 0 data alteration.
+  - Measured RPO = 0 seconds (based on quiescent freeze boundary).
+  - Measured RTO: 32.51s to API `/ready`; 35.61s to full end-to-end business verification.
+  - AcceptanceStack teardown: 0 containers, 0 volumes, 0 networks residue.
+  - Gate A10: `release_gate_passed: true`. Report: `docs/benchmarks/close-02-recovery-report-2026-11-10.json`.
 
 2026-11-10 G07 / A04 Recommendation Semantics and Feed Warm-Cache Re-verification on Compose MySQL 8.4:
 - Executed `TestMySQLRecommendationIntegration` against the live Compose MySQL 8.4 stack: verified 3 continuous recommendation cursor pages under corrected ranking semantics (followed author +12, liked author +6, base popularity) with measured latencies of 12.14ms, 9.49ms, 11.68ms (0.06s total, PASS).

@@ -1,0 +1,100 @@
+{
+  "status": "PASS",
+  "scope": "real_owned_compose_recovery_failure_windows",
+  "cases": [
+    {
+      "stage": "snapshot",
+      "status": "PASS",
+      "actual_stage_reached": true,
+      "observed_exception": "RuntimeError",
+      "host_api_starts": 0,
+      "stale_report_removed": true,
+      "remaining": {
+        "containers": 0,
+        "volumes": 0,
+        "networks": 0,
+        "host_api_processes": 0
+      },
+      "elapsed_seconds": 49.92
+    },
+    {
+      "stage": "sql_import",
+      "status": "PASS",
+      "actual_stage_reached": true,
+      "observed_exception": "RuntimeError",
+      "host_api_starts": 0,
+      "stale_report_removed": true,
+      "remaining": {
+        "containers": 0,
+        "volumes": 0,
+        "networks": 0,
+        "host_api_processes": 0
+      },
+      "elapsed_seconds": 48.492
+    },
+    {
+      "stage": "object_restore",
+      "status": "PASS",
+      "actual_stage_reached": true,
+      "observed_exception": "RuntimeError",
+      "host_api_starts": 0,
+      "stale_report_removed": true,
+      "remaining": {
+        "containers": 0,
+        "volumes": 0,
+        "networks": 0,
+        "host_api_processes": 0
+      },
+      "elapsed_seconds": 50.573
+    },
+    {
+      "stage": "api_start",
+      "status": "PASS",
+      "actual_stage_reached": true,
+      "observed_exception": "RuntimeError",
+      "host_api_starts": 1,
+      "stale_report_removed": true,
+      "remaining": {
+        "containers": 0,
+        "volumes": 0,
+        "networks": 0,
+        "host_api_processes": 0
+      },
+      "elapsed_seconds": 57.799
+    },
+    {
+      "stage": "migration_replay",
+      "status": "PASS",
+      "actual_stage_reached": true,
+      "observed_exception": "RuntimeError",
+      "host_api_starts": 1,
+      "stale_report_removed": true,
+      "remaining": {
+        "containers": 0,
+        "volumes": 0,
+        "networks": 0,
+        "host_api_processes": 0
+      },
+      "elapsed_seconds": 62.921
+    },
+    {
+      "stage": "sigterm",
+      "status": "PASS",
+      "actual_stage_reached": true,
+      "observed_exception": "LauncherInterrupted",
+      "host_api_starts": 0,
+      "stale_report_removed": true,
+      "remaining": {
+        "containers": 0,
+        "volumes": 0,
+        "networks": 0,
+        "host_api_processes": 0
+      },
+      "elapsed_seconds": 48.299
+    }
+  ],
+  "git": "ccaab094acde2f717908829bff7adb561871d6ae",
+  "dirty": true,
+  "command_total_seconds": 318.285,
+  "runner_sha256": "9881d9d3b037bdc48c5fc44036a4979535a0f0db178ae3b4ed35de23ee631caa"
+}
