@@ -1,0 +1,411 @@
+{
+  "status": "PASS",
+  "mode": "compose",
+  "validation_scope": "compose_formal_gate_a10",
+  "release_gate_passed": true,
+  "formal_scale": true,
+  "checkpoints": {
+    "schema_migration_keys": true,
+    "sql_identity_sets_preserved": true,
+    "media_objects_integrity": true,
+    "post_restore_live_api_health": true,
+    "resumable_upload_completion_after_restore": true,
+    "idempotency_and_migration_replay_safety": true
+  },
+  "metrics": {
+    "backup_duration_ms": 5012.97,
+    "restore_duration_ms": 58474.85,
+    "restore_ready_duration_ms": 58474.85,
+    "recovery_end_to_end_duration_ms": 63160.06,
+    "sql_backup_bytes": 94368396,
+    "sql_backup_sha256": "c549964f50d8b9d44681c0c5363e9bbefc84aebeaef71c071eab5eaba14ee278",
+    "media_objects_bytes": 5959014,
+    "media_objects_count": 131,
+    "media_assets_count": 130,
+    "users_count": 5,
+    "videos_count": 10,
+    "sampled_max_temp_space_bytes": 161336144,
+    "temp_space_samples_bytes": {
+      "before_backup": 55005244,
+      "backup_complete": 155354892,
+      "restore_verified_before_api": 161336144,
+      "live_business_and_resume_verified": 161336144,
+      "after_replay": 161336144
+    },
+    "temp_space_scope": "phase-boundary samples of local temporary files; not continuous peak, not Docker volume space",
+    "sql_tables_verified": 23,
+    "sql_rows_verified": 2003037,
+    "distinct_sql_media_references_verified": 131,
+    "all_bucket_objects_verified": 131,
+    "seed_shared_media": {
+      "objects": 100,
+      "copied": 100,
+      "existing": 0,
+      "bytes": 1486300,
+      "published_videos": 20000,
+      "distinct_shared_objects": 100
+    }
+  },
+  "scale_metrics": {
+    "total_users": 2005,
+    "total_published_videos": 20010,
+    "total_follows": 11001,
+    "total_actions": 50002,
+    "total_comments": 2,
+    "total_direct_messages": 2,
+    "total_groups": 1,
+    "total_group_messages": 1,
+    "total_notifications": 10
+  },
+  "source_scale_metrics": {
+    "total_users": 2005,
+    "total_published_videos": 20010,
+    "total_follows": 11001,
+    "total_actions": 50002
+  },
+  "sql_snapshot": {
+    "chat_groups": {
+      "columns": [
+        "id",
+        "owner_id",
+        "name",
+        "created_at"
+      ],
+      "rows": 1,
+      "sha256": "f18f11ae373686a9fdd21f372c4ed3ccf831a72b88db3fe359725e3209f7fd4e"
+    },
+    "chat_messages": {
+      "columns": [
+        "id",
+        "client_id",
+        "sender_id",
+        "recipient_id",
+        "body",
+        "created_at",
+        "acked_at"
+      ],
+      "rows": 2,
+      "sha256": "412494d1fd17cbe3d87fea70e8c81dbe9be842037845230308dae33b5005ef70"
+    },
+    "comments": {
+      "columns": [
+        "id",
+        "video_id",
+        "user_id",
+        "parent_id",
+        "body",
+        "created_at"
+      ],
+      "rows": 2,
+      "sha256": "11f6cecbf6abfd120d412a1245efde16b9f495d52a8ed4ac40bdeb874e99aa18"
+    },
+    "feed_fanout_jobs": {
+      "columns": [
+        "id",
+        "video_id",
+        "author_id",
+        "last_follower_id",
+        "attempts",
+        "available_at",
+        "lease_until",
+        "done_at",
+        "last_error",
+        "created_at"
+      ],
+      "rows": 19810,
+      "sha256": "c0ba2def3103934cc2f8a9679679e5375fabcfa30e5b05ab48354e84eda5a899"
+    },
+    "feed_inboxes": {
+      "columns": [
+        "id",
+        "user_id",
+        "video_id",
+        "created_at"
+      ],
+      "rows": 1900005,
+      "sha256": "135981dc3505a4bacd35d9702fb458180334358fc6b69c384521170ab93b192f"
+    },
+    "follows": {
+      "columns": [
+        "id",
+        "follower_id",
+        "followee_id",
+        "created_at"
+      ],
+      "rows": 11001,
+      "sha256": "4b9e91b3c4d70626b7c511752f868b1c6048b3d32dfd0e0c82d648c2c6141578"
+    },
+    "group_device_reads": {
+      "columns": [
+        "id",
+        "group_id",
+        "user_id",
+        "device_id",
+        "last_ack_id"
+      ],
+      "rows": 1,
+      "sha256": "0e1102dcc5eab12bcf33cced1684457d56494cae120a395a0d86df84b8bc3ade"
+    },
+    "group_members": {
+      "columns": [
+        "id",
+        "group_id",
+        "user_id",
+        "joined_at"
+      ],
+      "rows": 3,
+      "sha256": "cecd83bc33981dd78d570dae3cd06a81419bb7b5f09d43cd26e62f12bc814bc8"
+    },
+    "group_messages": {
+      "columns": [
+        "id",
+        "group_id",
+        "sender_id",
+        "client_id",
+        "body",
+        "created_at"
+      ],
+      "rows": 1,
+      "sha256": "87e257b8186f94d9bb735563804f082339ea5abbfcd31ed8e54f24882e05b2ed"
+    },
+    "group_reads": {
+      "columns": [
+        "id",
+        "group_id",
+        "user_id",
+        "last_ack_id"
+      ],
+      "rows": 3,
+      "sha256": "657d7851ca8c3c108ce92e81ce8425567252c4f83d6cf459b7a1525f0e10612d"
+    },
+    "media_assets": {
+      "columns": [
+        "id",
+        "owner_id",
+        "url",
+        "kind",
+        "size",
+        "created_at"
+      ],
+      "rows": 130,
+      "sha256": "379435dba82acb29a2e212fa94a16e4e6372e8e67a5c8ddab2095dee34717b0e"
+    },
+    "message_device_ack_ranges": {
+      "columns": [
+        "id",
+        "user_id",
+        "device_id",
+        "first_message_id",
+        "last_message_id"
+      ],
+      "rows": 1,
+      "sha256": "a18e9f5f4baf935b5efb89663866273c26ab9039309204176a15c6f59d24c10a"
+    },
+    "message_device_acks": {
+      "columns": [
+        "id",
+        "user_id",
+        "device_id",
+        "message_id",
+        "created_at"
+      ],
+      "rows": 0,
+      "sha256": "5eea61c8b51b46097752f8341bd250ebb1f19cd0033c5fa2afdec2989a648d39"
+    },
+    "message_devices": {
+      "columns": [
+        "id",
+        "user_id",
+        "device_id",
+        "created_at",
+        "last_seen_at"
+      ],
+      "rows": 2,
+      "sha256": "ff5316815ae8468ca0ea43bdcabf2edc1594b2e14df6e7f7902caf4a848c924b"
+    },
+    "notifications": {
+      "columns": [
+        "id",
+        "user_id",
+        "event_key",
+        "kind",
+        "actor_id",
+        "video_id",
+        "text",
+        "read_at",
+        "created_at"
+      ],
+      "rows": 10,
+      "sha256": "8879f0e7007bb14c2750258ec1f61dae0d556aecde3ad13d7353caf97990d66a"
+    },
+    "outbox_events": {
+      "columns": [
+        "id",
+        "event_key",
+        "topic",
+        "payload",
+        "attempts",
+        "available_at",
+        "published_at",
+        "dead_at",
+        "last_error",
+        "created_at"
+      ],
+      "rows": 20,
+      "sha256": "163b0fc5b0e773a265e4fb0553331cdca08f934e41a801f1a70f3d9bfeaf2533"
+    },
+    "schema_migrations": {
+      "columns": [
+        "key",
+        "applied_at"
+      ],
+      "rows": 6,
+      "sha256": "b7a08b0e3afdeebffd343438fb1de1e3540470a7e9c991939da9f17cf5ee954f"
+    },
+    "upload_chunks": {
+      "columns": [
+        "id",
+        "session_id",
+        "index",
+        "size",
+        "sha256"
+      ],
+      "rows": 1,
+      "sha256": "fb5f8d04d162dd98f823a188b6dc9f246a600f6d13aa84a8a1dcf137f33796bb"
+    },
+    "upload_sessions": {
+      "columns": [
+        "id",
+        "owner_id",
+        "ext",
+        "size",
+        "sha256",
+        "chunk_size",
+        "status",
+        "lease_until",
+        "cleaned_at",
+        "expires_at",
+        "created_at"
+      ],
+      "rows": 11,
+      "sha256": "b3956c07e8c3195c48594ea00f24b0fa00a669b5bec5ca810433d43885c590f1"
+    },
+    "users": {
+      "columns": [
+        "id",
+        "username",
+        "password_hash",
+        "nickname",
+        "bio",
+        "avatar_url",
+        "last_seen_at",
+        "created_at"
+      ],
+      "rows": 2005,
+      "sha256": "8e2cb44a4a806f60eb3e0a23afa49752d6459843034dc4806700769b12f37c3d"
+    },
+    "video_actions": {
+      "columns": [
+        "id",
+        "user_id",
+        "video_id",
+        "kind",
+        "created_at"
+      ],
+      "rows": 50002,
+      "sha256": "3e22e0da1c4bf07d35016cd05b0d56367495f783881d7102fd14627a1df1bc3c"
+    },
+    "video_process_jobs": {
+      "columns": [
+        "id",
+        "video_id",
+        "source_url",
+        "attempts",
+        "available_at",
+        "lease_until",
+        "done_at",
+        "dead_at",
+        "last_error",
+        "failure_code",
+        "created_at"
+      ],
+      "rows": 10,
+      "sha256": "9dd9b2d94249987faf2297bc5a599101498d2c12dec37ce09f560e7c9b779734"
+    },
+    "videos": {
+      "columns": [
+        "id",
+        "author_id",
+        "title",
+        "description",
+        "media_url",
+        "cover_url",
+        "status",
+        "like_count",
+        "comment_count",
+        "favorite_count",
+        "play_count",
+        "duration_ms",
+        "width",
+        "height",
+        "created_at",
+        "feed_pull"
+      ],
+      "rows": 20010,
+      "sha256": "c16e2bab01b495bb6405a4c14650c81f0fb1d848f1a0a1af82a90f89db20e404"
+    }
+  },
+  "provenance": {
+    "git": {
+      "commit": "ccaab094acde2f717908829bff7adb561871d6ae",
+      "branch": "review/pr64-20261111",
+      "dirty": true
+    },
+    "runner_sha256": "6ab0c63715ef789938c4e94dcafc4991fa14749e9003fd088efee414a6050cec",
+    "snapshot_helper_sha256": "b250792c902b621471afbadab2c9af3440c523fc72b79f1478bf97aaf52ec55f",
+    "host": {
+      "kernel": "6.18.33.2-microsoft-standard-WSL2",
+      "machine": "x86_64",
+      "cpu_model": "AMD Ryzen 7 5800H with Radeon Graphics",
+      "memory_bytes": 14576939008
+    },
+    "python": "3.12.3",
+    "command": [
+      "python3",
+      "tests/integration/migration_backup_recovery_smoke.py",
+      "--mode",
+      "compose",
+      "--compose-e2e",
+      "--formal-scale",
+      "--go-bin",
+      "/usr/local/go/bin/go",
+      "--report",
+      "data/diagnostics/pr64-formal-fixed-result.json"
+    ]
+  },
+  "rpo_rto_spec": {
+    "measured_rpo": 0,
+    "measured_rto_ms": 63160.06,
+    "restore_ready_stage_ms": 58474.85,
+    "recovery_end_to_end_ms": 63160.06,
+    "backup_stage_ms": 5012.97,
+    "scope": "Formal Gate A10 verified disaster recovery on Compose MySQL 8.4 and MinIO under quiescent maintenance window",
+    "quiescent_maintenance_window": {
+      "verified": true,
+      "source_api_stopped": true,
+      "pending_transcodes": 0,
+      "pending_fanouts": 0,
+      "open_sessions": 1,
+      "outbox_events_published": 20,
+      "outbox_events_pending": 0
+    },
+    "online_backup_limitation": "Online backup without stop-write/coordinated snapshot is unsupported; quiescent boundary is mandatory for cross-system consistency."
+  },
+  "owned_stack_cleanup_verified": true,
+  "review_verification": {
+    "report": "docs/PR64_REVIEW_2026-11-11.md",
+    "formal_command_total_seconds": 367.413,
+    "media_cli_source_sha256": "3fb2b21f26c98961bfa997d9289d5fac3fab9ef202d0ef0446a7b67b3bf23cd4",
+    "scope": "SQL scale 20010 published videos, deliberately sharing 100 seeded objects; 131 distinct objects including business fixture/chunk. Temp-space measurements are sampled local files only."
+  }
+}

@@ -23,7 +23,7 @@ GoStream 采用**模块化单体与多组件共享架构**。核心业务事实�
      - **对象存储备份**：`gostream-media backup --dir /backup/media`（或全量归档对象存储卷）。
   5. 备份完成并校验后，启动服务并恢复对外写流量。
 
-- **恢复目标与测量边界**：在 `CLOSE-02`（`docs/benchmarks/close-02-recovery-report-2026-11-10.json`）的正式 Compose 规模（2,005 用户 / 20,010 发布视频 / 11,001 关注 / 50,002 互动）且严格停写排空维护窗口下，已实测单事务+对象备份耗时 **3.41s**、目标恢复至 `/ready` **32.51s**、至全业务核对与断点续传闭环 **35.61s**、**RPO=0s**（均针对停写快照边界，未证在线热备一致性，多主机扩容另计）。历史记录中的 4.57ms 仅为 5 用户/10 视频 SQLite 文件复制耗时，不可作为全量 RTO 口径；`CLOSE-03` 亦已修复 `migration_backup_recovery_smoke.py` 中 `verify_quiescence` 异常吞没问题，确保源端仍在响应 HTTP 时强制阻断快照。
+- **恢复目标与测量边界**：在 `CLOSE-02`（`docs/benchmarks/pr64-recovery-verified-2026-11-11.json`）的正式 Compose 规模（2,005 用户 / 20,010 发布视频 / 11,001 关注 / 50,002 互动）且严格停写排空维护窗口下，已实测单事务+对象备份耗时 **5.01s**、目标恢复至 `/ready` **58.47s**、至全业务核对与断点续传闭环 **63.16s**、**RPO=0s**（均针对停写快照边界，未证在线热备一致性，多主机扩容另计）。历史记录中的 4.57ms 仅为 5 用户/10 视频 SQLite 文件复制耗时，不可作为全量 RTO 口径；`CLOSE-03` 亦已修复 `migration_backup_recovery_smoke.py` 中 `verify_quiescence` 异常吞没问题，确保源端仍在响应 HTTP 时强制阻断快照。
 
 ---
 

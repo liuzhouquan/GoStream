@@ -2,6 +2,15 @@
 
 Last updated: 2026-11-11
 
+2026-11-11 PR64 independent final-delivery review:
+- Fixed production gostream-media import-local error shadowing: three real SQLite error-propagation regressions failed before and pass with race after; old zero-object import no longer reports success.
+- Formal recovery now uses 100 real shared seeded objects, full frozen SQL fingerprints, all referenced objects/bucket digests, exact unread and migration replay checks. Real MySQL8.4/MinIO PASS: 23tables / 2,003,037rows / 131objects, RPO0 at verified stop-write boundary; ready58.475s / business+resume63.160s, total command367.413s; owned stack cleanup verified.
+- Ran six real component failure windows (snapshot/import/objects/API/replay/SIGTERM), PASS318.285s, no owned containers/volumes/networks/host APIs. No whole-runner mock substituted for stage execution.
+- Go full PASS56.711s; diagnostics122 OK(3 missing-report skips), wrapper42.433s; vet/build/JS/diff PASS. A04 existing 24-round and six mixed results remain applicable to unchanged Feed production code.
+- Current delivery rules and optional pending risks are in SDD; final PR64 head must pass all8 remote CI jobs and merged tree match before completion signoff. Preserve prior failed/insufficient reports as historical.
+- Review: docs/PR64_REVIEW_2026-11-11.md; evidence: docs/benchmarks/pr64-recovery-verified-2026-11-11.json and pr64-recovery-faults-2026-11-11.json.
+
+
 2026-11-11 CLOSE-03 / G12 Final Delivery Closure (Local Gates & 8 CI Equivalents Verified; Remote PR/CI Pending Merge to main):
 - Audited `git diff main..43b5b30`, docs, and recovery tooling on branch `feat/close-03-final-delivery`:
   - **P1 bug found, reproduced, and fixed**: In `tests/integration/migration_backup_recovery_smoke.py`, `verify_quiescence()` raised `RuntimeError` inside `try: ... except Exception: pass`, silently swallowing a live responding source API, and did not check `owned_stack.api_b` in compose mode (while SQLite `media_objects_count` also counted directories). Added `test_verify_quiescence_rejects_responding_source_api` in `tests/diagnostics/test_recovery_isolation.py` first to prove failure (`AssertionError: RuntimeError not raised`), narrowed exception catching to `(OSError, URLError)` outside the liveness check across `[base_url, api_a, api_b]` and restricted object counting to files, and verified live via `--mode sqlite` (`11` real media files, quiescence enforced) and all `117` diagnostic unit tests.

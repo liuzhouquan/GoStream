@@ -42,6 +42,7 @@ from launcher_lifecycle import LauncherInterrupted, cleanup_on_interrupt, finish
 from acceptance_config import has_external_acceptance_target, open_api_request
 from acceptance_stack import AcceptanceStack
 from group_im_smoke import SimpleWebSocket
+from recovery_snapshot import capture_sql_snapshot, assert_sql_snapshot, read_media_manifest, assert_media_coverage, TempSpaceSamples
 
 SAMPLE_MP4 = bytes([0, 0, 0, 24]) + b"ftypisom" + bytes(4) + b"isommp42"
 
@@ -164,7 +165,7 @@ def wait_ready(url: str, timeout: float = 60.0):
 def mysql_exec(container: str, sql: str, database: str = "") -> str:
     cmd = [
         "docker", "exec", "-i", container, "sh", "-c",
-        'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --batch --skip-column-names' + (' "$1"' if database else ""),
+        'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot --batch --raw --skip-column-names' + (' "$1"' if database else ""),
     ]
     if database:
         cmd += ["sh", database]
@@ -275,6 +276,45 @@ class MigrationBackupRecoveryRunner:
                 rows.append(tuple(x.strip() for x in line.split("\t")))
             return rows
 
+    def sql_snapshot(self, database=""):
+        target = database or (self.db_path if self.mode == "sqlite" else self.source_database)
+        return capture_sql_snapshot(
+            self.mode, target,
+            lambda sql: mysql_exec(self.mysql_container, sql, database=target),
+        )
+
+    def media_reference_keys(self, database=""):
+        target = database or (self.db_path if self.mode == "sqlite" else self.source_database)
+        refs = set()
+        for table, column, suffix in (
+            ("videos", "media_url", ""), ("videos", "cover_url", ""),
+            ("media_assets", "url", ""), ("users", "avatar_url", ""),
+            ("video_process_jobs", "source_url", " WHERE done_at IS NULL AND dead_at IS NULL"),
+        ):
+            for row in self.query_sql(f"SELECT DISTINCT `{column}` FROM `{table}`{suffix};", database=target):
+                if row[0]:
+                    if not row[0].startswith("/media/"):
+                        raise AssertionError("unexpected SQL media reference")
+                    refs.add(row[0].lstrip("/"))
+        for session, index, digest in self.query_sql(
+            "SELECT c.session_id, c.`index`, c.sha256 FROM upload_chunks c JOIN upload_sessions s ON s.id=c.session_id WHERE s.status IN ('open','completing');",
+            database=target,
+        ):
+            refs.add(f"chunks/{session}/{int(index):03d}/{digest}")
+        return refs
+
+    def local_manifest(self, media_dir, references):
+        manifest = {}
+        for key in references:
+            if key.startswith("media/"):
+                file = Path(media_dir) / key.removeprefix("media/")
+            else:
+                _, session, index, _ = key.split("/")
+                file = Path(media_dir + ".chunks") / session / f"{index}.part"
+            payload = file.read_bytes()
+            manifest[key] = {"size": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
+        return manifest
+
     def verify_quiescence(self) -> dict:
         # 1. Verify HTTP endpoints refuse connections (source API stopped)
         endpoints = [self.base_url]
@@ -316,6 +356,8 @@ class MigrationBackupRecoveryRunner:
             pending_outbox = cur.fetchone()[0]
             conn.close()
 
+        if pending_outbox != 0:
+            raise RuntimeError(f"quiescent boundary failed: {pending_outbox} outbox events still pending")
         if pending_transcodes != 0:
             raise RuntimeError(f"quiescent boundary failed: {pending_transcodes} video process jobs still in-flight")
         if pending_fanouts != 0:
@@ -353,14 +395,22 @@ class MigrationBackupRecoveryRunner:
         res = subprocess.run(seed_cmd, cwd=ROOT, capture_output=True, text=True, check=True)
         print(f"  [Formal Scale] Seed tool finished: {res.stdout.strip()}")
 
-        # Populate synthetic media files into MinIO bucket
-        print("  [Formal Scale] Populating synthetic media assets into MinIO bucket...")
+        # Normalize only this owned fixture's synthetic references to valid managed
+        # names. The 20,000 videos deliberately share 100 author-owned objects;
+        # this is SQL scale, not 20,000 independent media objects.
+        print("  [Formal Scale] Materializing 100 shared managed media objects...")
         sample_video_bytes = generate_sample_video(title="load_fixture_asset")
         seed_media_dir = os.path.join(tmpdir, "seed_media")
         os.makedirs(seed_media_dir, exist_ok=True)
-        Path(os.path.join(seed_media_dir, "load-fixture.mp4")).write_bytes(sample_video_bytes)
         for i in range(100):
-            Path(os.path.join(seed_media_dir, f"load-fixture-{i:06d}.mp4")).write_bytes(sample_video_bytes)
+            filename = hashlib.sha256(f"recovery-load-{i}".encode()).hexdigest()[:32] + ".mp4"
+            Path(seed_media_dir, filename).write_bytes(sample_video_bytes)
+            mysql_exec(self.mysql_container,
+                f"UPDATE media_assets SET url='/media/{filename}', size={len(sample_video_bytes)} WHERE url='/media/load-fixture-{i:06d}.mp4';",
+                database=self.source_database)
+        mysql_exec(self.mysql_container,
+            "UPDATE videos AS v JOIN media_assets AS a ON a.owner_id=v.author_id SET v.media_url=a.url WHERE v.media_url='/media/load-fixture.mp4';",
+            database=self.source_database)
 
         import_env = os.environ.copy()
         import_env.update({
@@ -374,6 +424,9 @@ class MigrationBackupRecoveryRunner:
         imp_res = subprocess.run([media_bin, "import-local", "--dir", seed_media_dir],
                                  env=import_env, capture_output=True, text=True, check=True)
         imp_report = json.loads(imp_res.stdout)
+        if imp_report.get("objects") != 100 or imp_report.get("copied", 0) + imp_report.get("existing", 0) != 100:
+            raise AssertionError("formal media import did not verify all 100 shared objects")
+        self.seed_media_report = {**imp_report, "published_videos": 20000, "distinct_shared_objects": 100}
         print(f"  [Formal Scale] Media import complete: {imp_report}")
 
     def run_all(self, server_bin: str, go_bin: str, env_template: dict, tmpdir: str, media_bin: str = "") -> dict:
@@ -402,6 +455,8 @@ class MigrationBackupRecoveryRunner:
         print("============================================================")
 
         pfx = secrets.token_hex(4)
+        temp_space = TempSpaceSamples(tmpdir)
+        self.seed_media_report = None
 
         # ------------------------------------------------------------------
         # Step 0: Formal Scale Seeding (if requested)
@@ -613,7 +668,8 @@ class MigrationBackupRecoveryRunner:
             pending_fanouts = int(pending_fanouts_rows[0][0]) if pending_fanouts_rows else 0
             pending_transcodes_rows = self.query_sql("SELECT count(*) FROM video_process_jobs WHERE done_at IS NULL AND dead_at IS NULL;", database=db_src)
             pending_transcodes = int(pending_transcodes_rows[0][0]) if pending_transcodes_rows else 0
-            if pending_fanouts == 0 and pending_transcodes == 0:
+            pending_outbox_rows = self.query_sql("SELECT count(*) FROM outbox_events WHERE published_at IS NULL AND dead_at IS NULL;", database=db_src)
+            if pending_fanouts == 0 and pending_transcodes == 0 and int(pending_outbox_rows[0][0]) == 0:
                 break
             time.sleep(0.5)
 
@@ -632,6 +688,20 @@ class MigrationBackupRecoveryRunner:
 
         quiescence_report = self.verify_quiescence()
         print(f"  Quiescent boundary verified: {quiescence_report}")
+        source_scale = {
+            "total_users": int(self.query_sql("SELECT count(*) FROM users;")[0][0]),
+            "total_published_videos": int(self.query_sql("SELECT count(*) FROM videos WHERE status='published';")[0][0]),
+            "total_follows": int(self.query_sql("SELECT count(*) FROM follows;")[0][0]),
+            "total_actions": int(self.query_sql("SELECT count(*) FROM video_actions;")[0][0]),
+        }
+        if self.formal_scale:
+            for key, minimum in (("total_users", 2000), ("total_published_videos", 20000), ("total_follows", 10000), ("total_actions", 50000)):
+                if source_scale[key] < minimum:
+                    raise AssertionError(f"formal source scale below minimum: {key}")
+        source_snapshot = self.sql_snapshot()
+        source_references = self.media_reference_keys()
+        source_local_manifest = self.local_manifest(self.media_dir, source_references) if self.mode == "sqlite" else None
+        temp_space.sample("before_backup")
 
         backup_start = time.monotonic()
         backup_dir = os.path.join(tmpdir, "backup_snapshot")
@@ -679,6 +749,10 @@ class MigrationBackupRecoveryRunner:
         sql_backup_bytes = os.path.getsize(sql_backup_path)
         sql_backup_sha256 = hashlib.sha256(Path(sql_backup_path).read_bytes()).hexdigest()
         backup_duration_ms = round((time.monotonic() - backup_start) * 1000, 2)
+        source_manifest = read_media_manifest(media_backup_dir) if self.mode == "compose" else source_local_manifest
+        assert_media_coverage(source_references, source_manifest)
+        media_assets = {"/" + key: item["sha256"] for key, item in source_manifest.items() if key.startswith("media/")}
+        temp_space.sample("backup_complete")
         print(f"  Backup complete in {backup_duration_ms}ms: SQL dump={sql_backup_bytes} B (SHA: {sql_backup_sha256[:12]}...), Media={total_media_bytes} B in {media_objects_count} objects.")
 
         # ------------------------------------------------------------------
@@ -731,6 +805,24 @@ class MigrationBackupRecoveryRunner:
             })
             subprocess.run([media_bin, "restore", "--dir", media_backup_dir],
                            env=media_tool_env, capture_output=True, text=True, check=True)
+
+        # Compare complete records before a restored API/worker can mutate them.
+        db_target = restored_database if self.mode == "compose" else restored_db_path
+        assert_sql_snapshot(source_snapshot, self.sql_snapshot(db_target))
+        restored_references = self.media_reference_keys(db_target)
+        if restored_references != source_references:
+            raise AssertionError("SQL media reference set changed during restore")
+        if self.mode == "compose":
+            verified_dir = os.path.join(restore_root, "verified_restored_objects")
+            subprocess.run([media_bin, "backup", "--dir", verified_dir],
+                           env=media_tool_env, capture_output=True, text=True, check=True)
+            restored_manifest = read_media_manifest(verified_dir)
+        else:
+            restored_manifest = self.local_manifest(restored_media_dir, restored_references)
+        assert_media_coverage(restored_references, restored_manifest)
+        if restored_manifest != source_manifest:
+            raise AssertionError("full object manifest changed during restore")
+        temp_space.sample("restore_verified_before_api")
 
         restored_port = find_free_port()
         restored_url = f"http://127.0.0.1:{restored_port}"
@@ -862,7 +954,7 @@ class MigrationBackupRecoveryRunner:
                 assert len(restored_actions) >= 50000, f"formal scale interactions count below threshold: {len(restored_actions)}"
                 self.scale_metrics = {
                     "total_users": len(restored_user_ids),
-                    "total_published_videos": len(restored_video_ids),
+                    "total_published_videos": int(self.query_sql("SELECT count(*) FROM videos WHERE status='published';", database=db_target)[0][0]),
                     "total_follows": len(restored_follows),
                     "total_actions": len(restored_actions),
                     "total_comments": len(restored_comment_ids),
@@ -951,8 +1043,8 @@ class MigrationBackupRecoveryRunner:
                                   headers={"X-GoStream-Device-ID": dev_u1}, expected=200)
             grp_unread = json_call(restored_url, f"/api/groups/{grp_id}/unread", "GET", token=live_token_u1,
                                    headers={"X-GoStream-Device-ID": dev_u1}, expected=200)
-            assert "items" in dm_unread or "unread_count" in dm_unread
-            assert "unread_count" in grp_unread
+            assert dm_unread.get("items") == [] and not dm_unread.get("has_more", False), "ACKed direct messages became unread after restore"
+            assert grp_unread.get("unread_count") == 0, "ACKed group message became unread after restore"
 
             # Post-restore Live Write: User 2 likes Video 0
             json_call(restored_url, f"/api/videos/{v0_id}/like", "PUT", token=live_token_u2, expected=200)
@@ -981,6 +1073,7 @@ class MigrationBackupRecoveryRunner:
             print("  resumable_upload_completion_after_restore: PASS (session completed post-restore with exact bytes)")
 
             recovery_end_to_end_duration_ms = round((time.monotonic() - restore_start) * 1000, 2)
+            temp_space.sample("live_business_and_resume_verified")
 
         finally:
             if p_restored is not None:
@@ -1009,6 +1102,7 @@ class MigrationBackupRecoveryRunner:
                     "sh", replay_db,
                 ], stdin=dump_f, check=True)
 
+            replay_snapshot_before = self.sql_snapshot(replay_db)
             keys_before = self.query_sql("SELECT `key` FROM schema_migrations ORDER BY applied_at ASC;", database=replay_db)
             users_before = len(self.query_sql("SELECT id FROM users;", database=replay_db))
             videos_before = len(self.query_sql("SELECT id FROM videos;", database=replay_db))
@@ -1030,6 +1124,7 @@ class MigrationBackupRecoveryRunner:
                 if p_replay is not None:
                     stop_process(p_replay)
 
+            assert_sql_snapshot(replay_snapshot_before, self.sql_snapshot(replay_db))
             keys_after = self.query_sql("SELECT `key` FROM schema_migrations ORDER BY applied_at ASC;", database=replay_db)
             users_after = len(self.query_sql("SELECT id FROM users;", database=replay_db))
             videos_after = len(self.query_sql("SELECT id FROM videos;", database=replay_db))
@@ -1044,7 +1139,12 @@ class MigrationBackupRecoveryRunner:
             assert videos_after == videos_before, f"video count altered after replay: {videos_after} != {videos_before}"
             assert comments_after == comments_before, f"comment count altered after replay: {comments_after} != {comments_before}"
         else:
-            conn_res = sqlite3.connect(restored_db_path)
+            # Replay the original quiescent snapshot, not the live-test database
+            # with intentionally added post-restore writes and pending outbox.
+            replay_db_path = os.path.join(restore_root, "replay.db")
+            shutil.copy2(sql_backup_path, replay_db_path)
+            replay_snapshot_before = self.sql_snapshot(replay_db_path)
+            conn_res = sqlite3.connect(replay_db_path)
             cur = conn_res.cursor()
             cur.execute("SELECT `key` FROM schema_migrations ORDER BY applied_at ASC")
             keys_before = [r[0] for r in cur.fetchall()]
@@ -1054,6 +1154,7 @@ class MigrationBackupRecoveryRunner:
             replay_url = f"http://127.0.0.1:{replay_port}"
             replay_env = restored_env.copy()
             replay_env["ADDR"] = f"127.0.0.1:{replay_port}"
+            replay_env["DB_DSN"] = f"{replay_db_path}?_journal_mode=WAL&_busy_timeout=5000&_foreign_keys=1"
 
             p_replay = None
             try:
@@ -1064,21 +1165,22 @@ class MigrationBackupRecoveryRunner:
                 if p_replay is not None:
                     stop_process(p_replay)
 
-            conn_res = sqlite3.connect(restored_db_path)
+            conn_res = sqlite3.connect(replay_db_path)
             cur = conn_res.cursor()
             cur.execute("SELECT `key` FROM schema_migrations ORDER BY applied_at ASC")
             keys_after = [r[0] for r in cur.fetchall()]
             conn_res.close()
 
+            assert_sql_snapshot(replay_snapshot_before, self.sql_snapshot(replay_db_path))
             assert keys_after == keys_before, f"migration keys altered after replay: {keys_after} != {keys_before}"
 
         self.checkpoints["idempotency_and_migration_replay_safety"] = True
         print("  idempotency_and_migration_replay_safety: PASS (Apply on restored DB performed 0 changes, all keys & data intact)")
 
         all_passed = all(self.checkpoints.values())
-        peak_temp_space = sum(f.stat().st_size for f in Path(tmpdir).glob("**/*") if f.is_file())
+        temp_space.sample("after_replay")
 
-        release_gate_passed = bool(self.formal_scale and all_passed)
+        release_gate_passed = bool(self.mode == "compose" and self.formal_scale and all_passed)
         print(f"\n{self.mode.upper()} recovery verification: {'PASS' if all_passed else 'FAIL'}; release gate: {'ACCEPTED (Gate A10)' if release_gate_passed else 'NOT_ACCEPTED (component drill)'}")
 
         self.metrics = {
@@ -1093,7 +1195,14 @@ class MigrationBackupRecoveryRunner:
             "media_assets_count": len(media_assets),
             "users_count": len(users),
             "videos_count": len(videos),
-            "peak_temp_space_bytes": peak_temp_space,
+            "sampled_max_temp_space_bytes": max(temp_space.samples.values()),
+            "temp_space_samples_bytes": temp_space.samples,
+            "temp_space_scope": "phase-boundary samples of local temporary files; not continuous peak, not Docker volume space",
+            "sql_tables_verified": len(source_snapshot),
+            "sql_rows_verified": sum(item["rows"] for item in source_snapshot.values()),
+            "distinct_sql_media_references_verified": len(source_references),
+            "all_bucket_objects_verified": len(source_manifest),
+            "seed_shared_media": self.seed_media_report,
         }
 
         return {
@@ -1105,6 +1214,9 @@ class MigrationBackupRecoveryRunner:
             "checkpoints": self.checkpoints,
             "metrics": self.metrics,
             "scale_metrics": self.scale_metrics,
+            "source_scale_metrics": source_scale,
+            "sql_snapshot": source_snapshot,
+            "provenance": recovery_provenance(),
             "rpo_rto_spec": {
                 "measured_rpo": 0 if (quiescence_report["verified"] and all_passed) else None,
                 "measured_rto_ms": recovery_end_to_end_duration_ms if self.formal_scale else None,
@@ -1116,6 +1228,19 @@ class MigrationBackupRecoveryRunner:
                 "online_backup_limitation": "Online backup without stop-write/coordinated snapshot is unsupported; quiescent boundary is mandatory for cross-system consistency."
             }
         }
+
+
+def recovery_provenance():
+    import platform
+    from acceptance_stack import get_git_info, get_host_info
+    return {
+        "git": get_git_info(ROOT),
+        "runner_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+        "snapshot_helper_sha256": hashlib.sha256(Path(__file__).with_name("recovery_snapshot.py").read_bytes()).hexdigest(),
+        "media_cli_source_sha256": hashlib.sha256((ROOT / "cmd/gostream-media/main.go").read_bytes()).hexdigest(),
+        "host": get_host_info(), "python": platform.python_version(),
+        "command": ["python3", "tests/integration/migration_backup_recovery_smoke.py", *sys.argv[1:]],
+    }
 
 
 @cleanup_on_interrupt()
@@ -1139,6 +1264,8 @@ def main():
             "GOSTREAM_STACK_PROJECT", "GOSTREAM_MYSQL_ADDR", "GOSTREAM_MINIO_ENDPOINT")):
         raise ValueError("recovery drill refuses external acceptance targets; it creates its own disposable stack")
     mode = "compose" if args.mode == "compose" or args.compose_e2e else "sqlite"
+    if args.formal_scale and mode != "compose":
+        raise ValueError("formal recovery requires owned Compose MySQL/MinIO; SQLite is component-only")
     if mode == "compose" and not args.compose_e2e:
         raise ValueError("Compose component drill requires --compose-e2e")
 

@@ -1,8 +1,8 @@
 {
   "status": "PASS",
   "mode": "compose",
-  "validation_scope": "compose_formal_gate_a10",
-  "release_gate_passed": true,
+  "validation_scope": "historical_recovery_insufficient_coverage",
+  "release_gate_passed": false,
   "formal_scale": true,
   "checkpoints": {
     "schema_migration_keys": true,
@@ -38,8 +38,8 @@
     "total_notifications": 10
   },
   "rpo_rto_spec": {
-    "measured_rpo": 0,
-    "measured_rto_ms": 35614.64,
+    "measured_rpo": null,
+    "measured_rto_ms": null,
     "restore_ready_stage_ms": 32514.98,
     "recovery_end_to_end_ms": 35614.64,
     "backup_stage_ms": 3405.41,
@@ -55,5 +55,11 @@
     },
     "online_backup_limitation": "Online backup without stop-write/coordinated snapshot is unsupported; quiescent boundary is mandatory for cross-system consistency."
   },
-  "owned_stack_cleanup_verified": true
+  "owned_stack_cleanup_verified": true,
+  "review": {
+    "status": "SUPERSEDED_BY_FULL_VERIFICATION",
+    "reason": "Old CLI swallowed import errors, seeded media absent; subset/count assertions do not verify full frozen identities. Original measurements retained, formal acceptance withdrawn.",
+    "report": "docs/PR64_REVIEW_2026-11-11.md",
+    "replacement": "docs/benchmarks/pr64-recovery-verified-2026-11-11.json"
+  }
 }

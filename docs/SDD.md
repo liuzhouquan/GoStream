@@ -1,16 +1,8 @@
 # GoStream 求职展示版 SDD 与开发任务清单
 
-> 当前接手入口：[CLOSE-01/02/03 详细清单](#21-可直接接手的剩余开发清单)；最新判定见 [A04/A10 审查](A04_A10_REVIEW_2026-11-10.md)。下列旧日期记录仅为历史。
+更新时间：2026-11-11。目标版本：`v1.0.0`。本文件是 coding agent 的交付范围和接手入口；产品边界见 [DELIVERY_SCOPE](DELIVERY_SCOPE.md)，验收门槛见 [TEST_STANDARD](TEST_STANDARD.md)。
 
-> 2026-11-10 审查入口：[生产推荐边界、可靠性修复与证据口径](BRANCH_REVIEW_2026-11-10.md)。新增大规模暖缓存、MySQL计划、群聊、故障与割接数据均保留；完整 A04 和 A10 不得由暖缓存子项或 SQLite 小样本签收，本轮查询修正后需补关联版本的性能验证。
-
-更新时间：2026-11-11。目标版本：`v1.0.0`（本地收口完成于 `feat/close-03-final-delivery`，待远端 PR CI 与 `main` 合并）。本文件是后续 coding agent 的执行入口；产品边界见 [DELIVERY_SCOPE](DELIVERY_SCOPE.md)，验收门槛见 [TEST_STANDARD](TEST_STANDARD.md)，历史证据见 [PROGRESS](../PROGRESS.md)。SDD 在这里指以明确规格、任务和验证证据驱动开发。
-
-> 2026-11-09 集成入口：分支分类、正式夹具保护与 loopback 代理超时修复、真实验证及剩余可执行清单见 [本轮审查](BRANCH_REVIEW_2026-11-09.md)。以下历史测试数量/本地与远程状态属于其记录时点；最终 CI 与合并状态以集成 PR 为准。正式规模 G06/G07、G08/G09 同版业务证据、G10 恢复量测仍不得提前勾选。
-
-
-> 2026-11-08 验收复核与状态更新：针对 2026-11-08 独立复核发现的验收判定假阳性（R1/R2）与停机保护/凭据脱敏缺陷（R3/R4），已完成代码与诊断测试修复并合入 main。当前全量单元测试、编译、静态检查及 87 项诊断测试全部通过。
-> 鉴于 TEST_STANDARD.md 要求的全量生产规模（20,000 视频/2,000 用户）持续压测、远程 GitHub Actions CI 镜像等尚待运行并补充证据，当前将过早全量通过的声明撤回，客观标记为“阶段性功能与架构闭环，发布候选 v1.0-RC1，待补全生产规模证据链”。详见 [发布验收核查报告](RELEASE_ACCEPTANCE.md) 与 [2026-11-08 验收复核](ACCEPTANCE_RECHECK_2026-11-08.md)。
+**当前依据：[PR64 独立审查与正式恢复复验](PR64_REVIEW_2026-11-11.md)。** 本版实现与既定验收收口见第 1 节，远端签收以 PR #64 最终 CI/合并树事实为准；后续待确认风险单列第 2.2 节，不继续扩充本版业务范围。2026-11-08/09/10 的阶段报告保留在 [PROGRESS](../PROGRESS.md) 和对应审查文件，不能覆盖最新结论。
 
 ## 1. 最终交付物与停止条件
 
@@ -18,27 +10,28 @@
 
 用户必须能注册登录、维护资料、关注、浏览关注/推荐/热榜、上传和续传、等待转码发布、互动评论、搜索、接收通知、单聊和群聊。重启、重复请求、组件短暂离线后，持久状态必须符合已声明的恢复保证。
 
-发布必须同时满足：
+本版已实现并经本轮核对的交付项：
 
-- [ ] 本文件所有“发布必做”任务完成并达到各自退出条件（G01–G11 业务模块、CLOSE-01、CLOSE-02 与 CLOSE-03 本地全量验证均已在分支 `feat/close-03-final-delivery` 完成；仅余推送远端 CI 与合入 `main` 后签收）。
-- [ ] A01–A12 功能门槛及 TEST_STANDARD 的既定性能门槛逐项通过（A01–A12 已于 [RELEASE_ACCEPTANCE](RELEASE_ACCEPTANCE.md) 链接精确源码、命令与实测报告；待 PR 合入 `main` 并核对合并树一致性后勾选）。
-- [ ] 最终候选提交的 CI 全部通过并确认合并树一致（基线 PR #62 与本地 8 项 CI 等价验证均已通过；尚余远端 PR 触发 GitHub Actions 8 项工作流验证并合入 `main`）。
-- [x] 没有未处理的已确认 P0/P1（CLOSE-01/02 闭环及 CLOSE-03 对 `migration_backup_recovery_smoke.py` `verify_quiescence` 异常吞没 P1 的 TDD 复现与修复已验证通过）。
-- [x] README 可从新环境复现；API/迁移/故障恢复文档与代码相符；本地学习笔记保留且未被 Git 跟踪。
-- [x] 发布报告列出已支持场景、数据规模、真实性能、故障边界和演示步骤。
+- [x] 业务与发布必做实现达到既定退出条件，A01–A12 的源码/命令/证据见 RELEASE_ACCEPTANCE。
+- [x] A04 规定规模持续/混合负载成立；未变化的 Feed 路径复用已提交报告，不重复扩展门槛。
+- [x] A10 完整停写 SQL/对象/身份恢复、迁移重放及实际阶段故障覆盖，见 PR64 审查与新的正式 JSON；旧零对象导入报告不再签收。
+- [x] 本轮已确认的媒体 CLI 错误吞没与恢复验收缺口已修正并复验；没有遗漏为已完成的已确认 P0/P1。
+- [x] README、API/迁移/运维文档与证据关联；本地学习材料保持忽略，历史失败及未确认风险保留。
+
+**最终签收规则（外部事实，不通过事后文档提交自我证明）：** [PR #64](https://github.com/liuzhouquan/GoStream/pull/64) 最终 head 的八项 GitHub Actions 全部 success；PR 已合入 main；合并后的源码树等于该被测 head，且原候选为 main 祖先。审查合并操作核对这三项，全部成立即表示本版完成；不要因为这些事实发生在文档提交之后再增加一轮功能开发或新的验收目标。具体 run/head/merge 信息以 PR 和最终审查结果为准。
 
 完成这些条件即可发布。多主机容量、长期 soak、原生移动端、机器学习推荐、强制拆成微服务、换前端框架、搜索引擎迁移都不是继续延长本阶段的理由。三节点 RabbitMQ 已有本地故障证据，但不新增集群负载或混沌工程的发布门槛。出现新正确性缺陷仍须按严重性处理。
 
 ## 2. 当前基线与距离交付的判断
 
-本轮审查基线为 `62e904b`（PR #62），候选 `review/a04-a10-full-closure@f79321e`。本轮修正和证据见 [A04/A10 审查](A04_A10_REVIEW_2026-11-10.md)。
+本轮审查基线为 `2c99951`（PR #63），PR #64 候选 `ccaab09`；本轮修正及新实测见 [PR64 审查](PR64_REVIEW_2026-11-11.md)。旧审查均为历史。
 
-**主要业务功能已实现，尚未达到最终交付标准。** 剩余工作集中在下列三个收尾包，不是继续扩充业务功能。不得以代码量估算完成百分比，也不得以组件测试 PASS 替代正式验收。
+**CLOSE-01/02/03 的实现、规定场景及本轮缺陷修正已收口。** 第 1 节的最终 CI/合并事实成立后即可判定达到原定 v1.0 目标；下列任务记录保留证据，不再新增范围。
 
 | 工作包 | 当前成果 | 尚需完成 |
 | --- | --- | --- |
 | CLOSE-01 / G07 / A04 | 最终源码 `8bef0c5` 完成 Compose 24 轮（856,152 请求 0 失败，P95 $\le$ 103.15ms、P99 $\le$ 131.54ms）与隔离 MySQL 无缓存 70/20/10 混合负载（196,612 请求 0 失败，Hybrid Following P95 +34.37%，冷 SQL 推荐 P95 69.11–87.58ms），叠加未改路径 320 关注者 fanout 排空 1.264s | 已完成（见 [G07 交付报告](tasks/G07.md) 与 `feed-warm-cache-continuous-2026-11-10.json` / `feed-a04-mixed-2026-11-11.json`） |
-| CLOSE-02 / G10 / A10 | 正式规模 Gate A10 灾备验收通过（2,005 用户/20,010 视频/11,001 关注/50,002 互动，停写边界排空，RPO=0s，RTO=32.5s/35.6s，零资源残留） | 已完成（见 [G10 交付报告](tasks/G10.md) 与报告 `docs/benchmarks/close-02-recovery-report-2026-11-10.json`） |
+| CLOSE-02 / G10 / A10 | 正式规模 Gate A10 灾备验收通过（2,005 用户/20,010 视频/11,001 关注/50,002 互动，停写边界排空，RPO=0s，RTO=58.5s/63.2s，零资源残留） | 已完成（见 [G10 交付报告](tasks/G10.md) 与报告 `docs/benchmarks/pr64-recovery-verified-2026-11-11.json`） |
 | CLOSE-03 / G12 | README、SDD、G07/G10/G12、RELEASE_ACCEPTANCE、TEST_STANDARD 与 OPERATIONS 统一 + A01–A12 精确链接；`verify_quiescence` P1 复现修复；本地 8 项 CI 等价验证、117 项诊断、`-race` 与双 API 探针全部通过；`LOCAL_STUDY_GUIDE.md` 保持忽略 | 推送分支发起 PR，在远端 GitHub Actions 跑通最终头提交 8 项 CI 并合入 `main` 核对合并树一致 |
 
 G06 生产查询、G08 群聊、G09 故障及 G10 正式容灾的已提交实测保留；没有代码变化或证据缺口不重复跑。最终签收仍须把它们的命令、源码版本、环境和通过范围链接到发布报告，不把未关联版本的历史数据改写成当前复测。
@@ -56,7 +49,7 @@ G06 生产查询、G08 群聊、G09 故障及 G10 正式容灾的已提交实测
 - [x] 回归快照/导入/对象恢复/API 启动/重放失败与 SIGTERM，检查只清理自身容器、卷、网络和子进程。迁移幂等须核对版本键及关键数据，而非仅版本行数。
 - [x] 提交真实 Compose 报告（版本/commit/dirty、主机、命令、耗时、规模、逐项断言、清理残留）。所有检查点均通过，release_gate_passed=true，正式关闭 CLOSE-02 / G10。
 
-正式入口：`python3 tests/integration/migration_backup_recovery_smoke.py --mode compose --compose-e2e --formal-scale --report data/diagnostics/close-02-recovery-report.json`。报告归档至 `docs/benchmarks/close-02-recovery-report-2026-11-10.json`。
+正式入口：`python3 tests/integration/migration_backup_recovery_smoke.py --mode compose --compose-e2e --formal-scale --report data/diagnostics/close-02-recovery-report.json`。报告归档至 `docs/benchmarks/pr64-recovery-verified-2026-11-11.json`。
 
 **CLOSE-01：最终 Feed 版本的规定性能证据（已完成）**
 
@@ -66,12 +59,20 @@ G06 生产查询、G08 群聊、G09 故障及 G10 正式容灾的已提交实测
 - [x] 核验 P95<=200ms/P99<=500ms（Compose 24 轮 P95 max 103.15ms、P99 max 131.54ms；混合冷负载 Following P95 提升 34.37% >= 20%、推荐冷 SQL P95 69.11–87.58ms）、0 错误、游标零重漏、缓存精准失效及 `counter`/`outbox`/`fanout` 0 偏差；保留全部原始轮次结果，不降规模或删断言。
 - [x] 在 [G07](tasks/G07.md) 与 [RELEASE_ACCEPTANCE](RELEASE_ACCEPTANCE.md) 逐项列出“已有且仍适用 / 本次通过 / 待确认”，结合三份独立证据闭环后正式关闭 Gate A04（未以 warm-only JSON 单独宣布 full A04）。
 
-**CLOSE-03：最终交付收口（本地验证与文档收口已完成，尚待远端 CI 与合入 `main`）**
+**CLOSE-03：最终交付收口（实现与本轮验证完成，远端签收按第 1 节）**
 
 - [x] 完成 CLOSE-01/02 后，已统一 README、SDD、G07、G10、G12、RELEASE_ACCEPTANCE、TEST_STANDARD、OPERATIONS 与 PROGRESS 的当前状态，历史记录完整保留且标明历史；已在 [RELEASE_ACCEPTANCE](RELEASE_ACCEPTANCE.md) 2.1 节为 A01–A12 逐项链接精确源码、可执行命令与可复查报告。
-- [ ] 对最终候选完成配置静态检查/117 项诊断、Go 常规与 `-race` 回归及全部 8 项 CI **本地等价验证**（宿主机无系统 `/usr/bin/ffmpeg` 借宿主机 FFmpeg + `ffprobe_shim.py` 的边界已写清）；**尚待**：推送分支发起 PR，完成远端 GitHub Actions 最终头提交 CI 验证并合入 `main` 后核对合并树一致（不拿基线或旧 run 冒充新提交通过）。
+- 本轮本地 Go 回归、122 项诊断（3 项缺少历史本地报告而跳过）、媒体 CLI 定向 race、正式 A10 和真实阶段故障均有实测。最终头提交的八项远端 CI 及合并树核对按第 1 节执行，不拿原候选绿灯替代修正版本。
 - [x] 已审查差异并修复 `verify_quiescence` P1（先加失败复现单测后修复，并通过全部 117 项诊断与 `sqlite` 实机核验）；`docs/LOCAL_STUDY_GUIDE.md` 保持在原目录且经 `git check-ignore -v` 与 `git ls-files` 验证未被跟踪；已核对 Demo Runbook 并运行 `acceptance_stack.py --probe-only` 验证双 API 联合栈启停与零残留。
-- [ ] 满足第 1 节发布条件（远端最终提交 CI + `main` 合并）后再宣告 `v1.0.0` 完成；已在 [G12](tasks/G12.md) 第 4 节列出推送 PR、远端 CI 确认与合并树核对流程。
+- 项目完成判断按第 1 节签收规则；满足后是 v1.0 范围完成，后续功能进入下一版本。
+
+### 2.2 非阻断的待确认风险与后续改进
+
+这些不是新增发布门槛，只有复现为真实正确性问题后再按严重性拆 PR。
+
+- **POST-01 / 待复现**：一次 SQLite 组件演练在视频发布返回500；相同代码下一次通过。未定位原因，不宣称已修复；保留原日志 `data/diagnostics/pr64-snapshot-final-component-timing.log`。后续用 `migration_backup_recovery_smoke.py --mode sqlite` 保留临时 API 日志并复现，确认是否为写锁竞争。正式 MySQL 演练与 CI 不因这一未确认原因自动判失败。
+- **POST-02 / P2 证据可读性**：暖缓存历史报告 wall clock 与 monotonic wrapper 统计不同；原因未证实。后续统一总耗时到 monotonic，并增加部署镜像/二进制摘要；保留旧数据，不重写成七小时持续压测。
+- 多主机容量、长期 soak、移动端、模型推荐及强制微服务仍不是本版补做项目。
 
 ## 3. 规格与代码边界
 
