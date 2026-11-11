@@ -1,6 +1,21 @@
 # GoStream development progress
 
-Last updated: 2026-11-11
+Last updated: 2026-11-12
+
+2026-11-12 PR65 CI mirror reachability:
+- Second run43058017410 confirmed source rewrite, but archive HTTPS still timed out. Add bounded complete InRelease probes over IPv4 to three official origins (8s each), select a reachable origin, align apt network path, preserve signing and90s/240s apt bounds; no reachable origin => explicit failure. Actual shell fixture tests cover fallback/all-unreachable without touching host apt. Final135 diagnostics PASS; do not infer a specific historical IPv6 cause.
+
+2026-11-12 PR65 CI apt mirror indirection correction:
+- Initial run43056633542 browser/video jobs timed out124 during apt metadata before business tests; apt-mirrors.txt retained Azure HTTP URLs because the existing rewrite covered direct source files only. A real file fixture reproduces the omission. Extend origin-only rewriting to apt-mirrors*.txt, preserve signing/suites and90s/240s bounds; guard refuses developer invocation. Two focused tests and final133 diagnostics PASS37.217s; final new-head CI required.
+
+2026-11-12 POST-01/02/03 risk remediation:
+- PR64 merged at ce0416f after final f9c9bf4 eight-job CI success; local main tree was verified identical. v1.0 scope remains complete.
+- Captured real SQLite 500 in component round15 (groups.go:142 database is locked). Deterministic stale-snapshot upgrade regression failed before the single-connection local API pool fix; focused race and 15 full recovery rounds pass. Historical video500 exact attribution remains unprovable without its lost logs.
+- Recovery child logs now survive failure cleanup in bounded sanitized 0600 failure JSON. Real child SIGTERM-start ownership and unavailable-log-disk regression preserve cleanup/original errors.
+- Feed total duration is monotonic; wall-clock delta is separate. Clock-jump regression passes; actual dual-API image/executable digest collection passes25.541s with zero owned Docker residue. Existing historical A04 evidence is untouched.
+- IM transport trace and sanitized failed-child logs added. Real HTTP POST-response-loss test preserves EOF, makes exactly one request, and keeps credentials out; 429/idle-expiry counterexample passes. Real MySQL/Redis normal/race load passes92.278s/125.645s, each3125 messages and60 idempotency checks; all owned resources removed. Historical CI EOF root cause remains unknown, no POST retries or security relaxation.
+- Local all-Go PASS39.527s; focused race PASS; diagnostics131 OK0skips38.076s after archiving an obsolete local report and regenerating current SQLite evidence; vet/build/JS/diff exit0. Final remote checks are per this maintenance PR, not inherited from PR64. See docs/tasks/POST-RISKS.md.
+
 
 2026-11-11 CI multi-device replay-barrier correction:
 - CI99e6ded exposed a steady-delivery test reading an initial replay duplicate as the second live message. Controlled SQL scheduling reproduced oldID1/expected2 with only2 persistedrows. Strict pong barriers on all initial and newly replayed devices fix setup ordering; all delivery assertions remain. Ordinary50/race20 PASS; temporary SQL injection removed.

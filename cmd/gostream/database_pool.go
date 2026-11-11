@@ -11,6 +11,23 @@ type databasePoolConfig struct {
 	MaxIdle int
 }
 
+func configureDatabasePool(db *sql.DB, driver string, getenv func(string) string) error {
+	if driver == "sqlite" {
+		// WAL busy_timeout cannot upgrade a stale read snapshot after another
+		// connection commits. Serialize the local API's transactions and workers.
+		// Multi-process deployments use MySQL rather than sharing SQLite files.
+		return (databasePoolConfig{MaxOpen: 1, MaxIdle: 1}).apply(db)
+	}
+	if driver == "mysql" {
+		config, err := databasePoolConfigFromEnv(getenv)
+		if err != nil {
+			return err
+		}
+		return config.apply(db)
+	}
+	return nil
+}
+
 func databasePoolConfigFromEnv(getenv func(string) string) (databasePoolConfig, error) {
 	config := databasePoolConfig{MaxOpen: 50, MaxIdle: 25}
 	for _, option := range []struct {

@@ -132,6 +132,9 @@ func newProcessWithFanout(t *testing.T, binary, dsn, redisAddr, secret string, m
 		if p.cmd != nil {
 			p.stop(t, false)
 		}
+		if t.Failed() {
+			p.reportFailedLog(t)
+		}
 	})
 	return p
 }

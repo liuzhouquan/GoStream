@@ -1,0 +1,244 @@
+{
+  "scope": "post-release risk remediation and diagnostics, not a new Feed capacity benchmark",
+  "base_commit": "ce0416ff0d964a5d0264ce79e0b6c0a6404d9fd6",
+  "branch": "fix/post-release-diagnostics",
+  "dirty_during_checks": true,
+  "runtime": {
+    "go": "go1.27.2",
+    "python": "3.12.3",
+    "kernel": "6.18.33.2-microsoft-standard-WSL2"
+  },
+  "post01": {
+    "baseline": {
+      "rounds_attempted": 15,
+      "passed_before_failure": 14,
+      "failure": "POST /api/groups/{id}/members returned 500; groups.go:142 database is locked"
+    },
+    "deterministic_regression_before": "competing writer committed; read snapshot upgrade failed: database is locked",
+    "fix": "single SQLite connection per API process; MySQL pool behavior preserved",
+    "fixed_component_rounds": [
+      {
+        "round": 1,
+        "exit_code": 0,
+        "seconds": 5.926
+      },
+      {
+        "round": 2,
+        "exit_code": 0,
+        "seconds": 5.349
+      },
+      {
+        "round": 3,
+        "exit_code": 0,
+        "seconds": 5.224
+      },
+      {
+        "round": 4,
+        "exit_code": 0,
+        "seconds": 5.587
+      },
+      {
+        "round": 5,
+        "exit_code": 0,
+        "seconds": 5.205
+      },
+      {
+        "round": 6,
+        "exit_code": 0,
+        "seconds": 5.097
+      },
+      {
+        "round": 7,
+        "exit_code": 0,
+        "seconds": 5.265
+      },
+      {
+        "round": 8,
+        "exit_code": 0,
+        "seconds": 5.369
+      },
+      {
+        "round": 9,
+        "exit_code": 0,
+        "seconds": 5.477
+      },
+      {
+        "round": 10,
+        "exit_code": 0,
+        "seconds": 5.276
+      },
+      {
+        "round": 11,
+        "exit_code": 0,
+        "seconds": 5.326
+      },
+      {
+        "round": 12,
+        "exit_code": 0,
+        "seconds": 5.36
+      },
+      {
+        "round": 13,
+        "exit_code": 0,
+        "seconds": 5.074
+      },
+      {
+        "round": 14,
+        "exit_code": 0,
+        "seconds": 5.06
+      },
+      {
+        "round": 15,
+        "exit_code": 0,
+        "seconds": 5.18
+      }
+    ],
+    "fixed_component_timing": {
+      "elapsed_seconds": 79.814,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    "final_component_timing": {
+      "elapsed_seconds": 5.668,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    "historical_video_500_exact_cause": "not provable without original logs"
+  },
+  "post02": {
+    "clock_control": {
+      "wall_elapsed_seconds": 25900,
+      "monotonic_elapsed_seconds": 2,
+      "old_elapsed_seconds": 25900,
+      "new_elapsed_seconds": 2
+    },
+    "deployment_probe": {
+      "verified": true,
+      "scope": "deployed identities at measurement start; not proof of checkout equivalence",
+      "instances": [
+        {
+          "api": "http://127.0.0.1:18080",
+          "container_id": "9685b2f074fdd3202f27676f1b8dc951a719a96d02e55dfb8a70dab9918288d1",
+          "image_id": "sha256:ce2c7da59ee85d8039a4d1456dfd3f7c167859af7fa1198ec8ed85e94a5a3875",
+          "binary_sha256": "2e5721a3d237956c25a215bc61589a03422cd3999c3e1653c9dbc6deb9577651"
+        },
+        {
+          "api": "http://127.0.0.1:18081",
+          "container_id": "05da03bbdb200c813fc947dfd6296d14d333d2956f7cd6732ed1016756e7a58c",
+          "image_id": "sha256:ce2c7da59ee85d8039a4d1456dfd3f7c167859af7fa1198ec8ed85e94a5a3875",
+          "binary_sha256": "2e5721a3d237956c25a215bc61589a03422cd3999c3e1653c9dbc6deb9577651"
+        }
+      ]
+    },
+    "deployment_probe_timing": {
+      "elapsed_seconds": 25.541,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    "build": false,
+    "cleanup": {
+      "containers": 0,
+      "volumes": 0,
+      "networks": 0
+    },
+    "historical_wall_vs_monotonic_cause": "unknown; old evidence unchanged"
+  },
+  "post03": {
+    "historical_eof_root_cause": "unknown; not reproduced in real normal/race runs",
+    "fault_test": "real HTTP peer reads POST then closes without response: EOF preserved, one request, safe transport trace",
+    "counterexample": "429 with Retry-After=1 and HTTP idle timeout=10ms then registration succeeds; idle expiry alone does not prove EOF cause",
+    "real_runs": [
+      {
+        "mode": "normal",
+        "exit_code": 0,
+        "seconds": 92.278
+      },
+      {
+        "mode": "race",
+        "exit_code": 0,
+        "seconds": 125.645
+      }
+    ],
+    "real_timing": {
+      "elapsed_seconds": 218.8,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    "cleanup": {
+      "schema": 0,
+      "user": 0,
+      "redis": 0,
+      "api_children": 0,
+      "owned_mysql_removed": true
+    },
+    "normal": {
+      "go_version": "go1.27.2",
+      "mysql_version": "8.4.11",
+      "redis_version": "8.2.9",
+      "persisted_messages": 3125,
+      "retry_checks": 60,
+      "registration_rate_limit_wait_ms": 38032.179,
+      "race_instrumented": false
+    },
+    "race": {
+      "go_version": "go1.27.2",
+      "mysql_version": "8.4.11",
+      "redis_version": "8.2.9",
+      "persisted_messages": 3125,
+      "retry_checks": 60,
+      "registration_rate_limit_wait_ms": 52048.086,
+      "race_instrumented": true
+    }
+  },
+  "verification": {
+    "go_all": {
+      "elapsed_seconds": 39.527,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    "diagnostics": {
+      "tests": 135,
+      "skipped": 0,
+      "elapsed_seconds": 39.607,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    "focused_race": "cmd/gostream PASS1.136s; tests/integration/im PASS2.192s",
+    "static_checks": "go vet ./...; go build ./cmd/...; node --check web/app.js; git diff --check: exit0",
+    "diagnostics_before_ci_mirror_fix": {
+      "tests": 131,
+      "skipped": 0,
+      "elapsed_seconds": 38.076,
+      "exit_code": 0,
+      "timed_out": false
+    }
+  },
+  "source_sha256": {
+    "cmd/gostream/database_pool.go": "03296024be54775662623c0d49e8aca50ffdacad7e90fef1d7c3ba964c482ed7",
+    "cmd/gostream/main.go": "f18f2c5c0b4a0e22820ef3b3799071b9780fc63b34ee4c78ec1cf9744f742929",
+    "tests/integration/migration_backup_recovery_smoke.py": "e1349a76e64c603991f4791068f130aa6f903380f9c1793264b3ef9f08cf9bfb",
+    "tests/integration/feed_warm_cache_continuous.py": "e4eac679d23ba44e970b9c3ca4e481d6e9e2be0d4fdca6249792bb9b8fb13f0b",
+    "tests/integration/deployment_provenance.py": "09ab6c980b22e0bfb91ac4418220186043b974fd37b16e98a6d4b33c9b2935de",
+    "tests/integration/im/load_setup_test.go": "2cf6626a24898f47595b65fded7870504138a7aa77360579f07f6f2b0e1664de",
+    "tests/integration/im/helpers_test.go": "9cd4d7e31af294e4923c644f1b7dd6e03ceb9fa61d216a92f7a4cd321e393845",
+    "tests/integration/im/failure_logs_test.go": "212c1c5a71e9582d9f78c544b012aa71e675b2acc52c55452ca8cac79afcdc5b",
+    "tests/integration/im/registration_trace_test.go": "2d9354d4b00a1194d0dc625aaba92771f9ec867c4954bc4a3c52c7b3cd8c01c4",
+    "tools/install_ci_ffmpeg.sh": "60e807151177560b766d84958524f6ef019e4ef9283ab5cdbdeeef53fb0c9a59",
+    "tools/rewrite_ci_apt_mirrors.py": "e31873ba849fc31f76ceae00476c08941e8146cea437723dda2cb6fa4b2d5735",
+    "tests/diagnostics/test_ci_apt_mirrors.py": "42886d5457b1293b51b13d17af46d0ca45443c4e59f23fe160ddc21a46820d56"
+  },
+  "ci_environment_fix": {
+    "first_run": 43056633542,
+    "failed_before_business_tests": [
+      "browser-workflow",
+      "video-recovery-integration"
+    ],
+    "failure": "apt metadata exceeded unchanged 90s budget; mirror+file:/etc/apt/apt-mirrors.txt still referenced Azure HTTP origins",
+    "fix": "rewrite Azure origins in apt-mirrors*.txt as well as direct .list/.sources; preserve suites, signed-by, timeouts and all assertions",
+    "regression": "direct-only behavior failed indirect-mirrorlist fixture; fixed behavior passes both fixture tests; developer invocation guard verified",
+    "second_run": 43058017410,
+    "second_failure": "mirror rewrite confirmed in both job logs, but archive.ubuntu.com HTTPS metadata still timed out before business tests",
+    "bounded_probe": "download actual InRelease from up to three official Ubuntu HTTPS origins via IPv4, at most8s each; select first reachable and apply same IPv4 path to apt; fail explicitly if none reachable",
+    "probe_regression": "real shell with fixture executables: first mirror fails and second succeeds; all three fail => no sudo/source mutation; unexpected origins rejected"
+  }
+}

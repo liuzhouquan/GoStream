@@ -53,6 +53,7 @@ sys.path.insert(0, str(ROOT / "tests/integration"))
 
 from launcher_lifecycle import cleanup_on_interrupt
 from acceptance_config import open_api_request, resolve_acceptance_target
+from deployment_provenance import inspect_api_deployment
 
 
 def free_port() -> int:
@@ -707,7 +708,8 @@ def main():
     print(f"Mode: {mode}, Warmup: {args.warmup_seconds}s, Duration: {args.duration_seconds}s, Rounds: {args.rounds}")
     print("=" * 60)
 
-    start_time = time.time()
+    start_time = time.monotonic()
+    start_wall = time.time()
     git_info = {"commit": "unknown", "branch": "unknown", "dirty": False}
     try:
         sha = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=str(ROOT), text=True).strip()
@@ -734,8 +736,9 @@ def main():
         report["validation_scope"] = scope
         report["release_gate_passed"] = False
         report["unverified_requirements"] = unverified
-        elapsed = time.time() - start_time
-        report["elapsed_seconds"] = round(elapsed, 2)
+        elapsed = time.monotonic() - start_time
+        report.update(elapsed_seconds=round(elapsed, 2), elapsed_clock="monotonic",
+                      wall_elapsed_seconds=round(time.time() - start_wall, 2))
         out_path = Path(args.report)
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
@@ -756,6 +759,8 @@ def main():
         with ExitStack() as stack:
             if mode == "compose":
                 api_a, api_b = external_api_a, external_api_b
+                report["deployment"] = inspect_api_deployment(
+                    os.environ.get("GOSTREAM_STACK_PROJECT", ""), [api_a, api_b])
                 mysql_addr = os.environ.get("GOSTREAM_MYSQL_ADDR", "")
                 if getattr(args, "formal_dataset", False):
                     scale_info = check_dataset_scale(mode, mysql_addr=mysql_addr)
@@ -916,8 +921,9 @@ def main():
                     unverified.append(f"rounds ({args.rounds}) < required 3 rounds")
                 report["unverified_requirements"] = unverified
     except Exception as err:
-        elapsed = time.time() - start_time
-        report["elapsed_seconds"] = round(elapsed, 2)
+        elapsed = time.monotonic() - start_time
+        report.update(elapsed_seconds=round(elapsed, 2), elapsed_clock="monotonic",
+                      wall_elapsed_seconds=round(time.time() - start_wall, 2))
         report["status"] = "FAIL"
         report["release_gate_passed"] = False
         report["validation_scope"] = "execution_failure"
@@ -935,8 +941,9 @@ def main():
         print(f"Feed continuous execution failed: [{err.__class__.__name__}] {err}", file=sys.stderr)
         return 1
 
-    elapsed = time.time() - start_time
-    report["elapsed_seconds"] = round(elapsed, 2)
+    elapsed = time.monotonic() - start_time
+    report.update(elapsed_seconds=round(elapsed, 2), elapsed_clock="monotonic",
+                      wall_elapsed_seconds=round(time.time() - start_wall, 2))
 
     out_path = Path(args.report)
     out_path.parent.mkdir(parents=True, exist_ok=True)
