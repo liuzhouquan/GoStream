@@ -2,6 +2,9 @@
 
 Last updated: 2026-11-11
 
+2026-11-11 Formal recovery report contract alignment:
+- Reproduced the legacy ten-asset assertion rejecting the real130-asset formal report. Keep original checkpoint/error assertions, compare against exact frozen SQL/object/row totals, and add corrupted-aggregate rejection cases. Focused4 testsPASS; final diagnostics123 OK(2 missing-report skips),42.389s. Final CI must match latesthead.
+
 2026-11-11 PR64 independent final-delivery review:
 - Fixed production gostream-media import-local error shadowing: three real SQLite error-propagation regressions failed before and pass with race after; old zero-object import no longer reports success.
 - Formal recovery now uses 100 real shared seeded objects, full frozen SQL fingerprints, all referenced objects/bucket digests, exact unread and migration replay checks. Real MySQL8.4/MinIO PASS: 23tables / 2,003,037rows / 131objects, RPO0 at verified stop-write boundary; ready58.475s / business+resume63.160s, total command367.413s; owned stack cleanup verified.

@@ -62,7 +62,7 @@ G06 生产查询、G08 群聊、G09 故障及 G10 正式容灾的已提交实测
 **CLOSE-03：最终交付收口（实现与本轮验证完成，远端签收按第 1 节）**
 
 - [x] 完成 CLOSE-01/02 后，已统一 README、SDD、G07、G10、G12、RELEASE_ACCEPTANCE、TEST_STANDARD、OPERATIONS 与 PROGRESS 的当前状态，历史记录完整保留且标明历史；已在 [RELEASE_ACCEPTANCE](RELEASE_ACCEPTANCE.md) 2.1 节为 A01–A12 逐项链接精确源码、可执行命令与可复查报告。
-- 本轮本地 Go 回归、122 项诊断（3 项缺少历史本地报告而跳过）、媒体 CLI 定向 race、正式 A10 和真实阶段故障均有实测。最终头提交的八项远端 CI 及合并树核对按第 1 节执行，不拿原候选绿灯替代修正版本。
+- 本轮本地 Go 回归、最终123项诊断（本地已有本次恢复报告，2项缺少其它历史报告而跳过）、媒体 CLI 定向 race、正式 A10 和真实阶段故障均有实测。最终头提交的八项远端 CI 及合并树核对按第 1 节执行，不拿原候选绿灯替代修正版本。
 - [x] 已审查差异并修复 `verify_quiescence` P1（先加失败复现单测后修复，并通过全部 117 项诊断与 `sqlite` 实机核验）；`docs/LOCAL_STUDY_GUIDE.md` 保持在原目录且经 `git check-ignore -v` 与 `git ls-files` 验证未被跟踪；已核对 Demo Runbook 并运行 `acceptance_stack.py --probe-only` 验证双 API 联合栈启停与零残留。
 - 项目完成判断按第 1 节签收规则；满足后是 v1.0 范围完成，后续功能进入下一版本。
 
