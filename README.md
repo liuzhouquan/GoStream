@@ -4,7 +4,7 @@ GoStream is a runnable Go short-video social platform with a static web client, 
 
 ## Status
 
-**Release Candidate v1.0-RC1.** Following systematic reviews and closure of gates G01 through G11 across the Docker Compose stack (dual API instances, MySQL 8.4, Redis 8.2, RabbitMQ 4.3, and MinIO), core functional and structural milestones have been achieved. All identified acceptance test predicates and edge cases (including zero-load test rejection, strict SQL verification for Group IM, component outage restart guarantees, and DSN credential sanitization) have been resolved with regression unit tests. Full production-scale continuous load validation (20,000 videos / 2,000 users) and final remote CI mirroring remain as post-RC1 verification items. Performance boundaries, disaster recovery runbooks, and strict operational boundaries (including quiescent maintenance window requirements and zero-resource leak teardown) are documented in the [Release Acceptance Report](docs/RELEASE_ACCEPTANCE.md) and [2026-11-08 Acceptance Recheck](docs/ACCEPTANCE_RECHECK_2026-11-08.md).
+**Delivery closure complete locally (`feat/close-03-final-delivery`); awaiting remote GitHub Actions CI & merge to `main` before tagging `v1.0.0`.** Following G01 through G11 and the three closing packages (`CLOSE-01` Gate A04, `CLOSE-02` Gate A10, `CLOSE-03` final audit & local CI parity), all functional gates **A01–A12**, formal 20,000-video Feed continuous/mixed load benchmarks, and formal-scale quiescent MySQL+MinIO disaster recovery (RPO=0s, RTO=32.51s ready / 35.61s end-to-end) are verified locally on isolated Docker Compose / MySQL 8.4 / Redis 8.2.9 / RabbitMQ 4.3.7 / MinIO stacks. All 8 jobs in `.github/workflows/ci.yml` have passed equivalent local runs (using repo `tools/ffprobe_shim.py` + host FFmpeg for host media steps where system `/usr/bin/ffmpeg` is absent; API containers run `/usr/bin/ffmpeg`). Final `v1.0.0` signoff requires pushing the PR, passing remote GitHub Actions CI on the final PR head, and verifying the merged `main` tree. See the [Release Acceptance Report & A01–A12 Index](docs/RELEASE_ACCEPTANCE.md) and [2026-11-08 Acceptance Recheck](docs/ACCEPTANCE_RECHECK_2026-11-08.md).
 
 Historical development handoffs and scope criteria are preserved in [SDD and task checklist](docs/SDD.md), [delivery scope](docs/DELIVERY_SCOPE.md), [test standards](docs/TEST_STANDARD.md), and [PROGRESS.md](PROGRESS.md). The machine-readable contract is documented and dynamically validated in [OpenAPI 3.0.3](docs/openapi.yaml). For operations, migration runbooks, and disaster recovery procedures, consult [OPERATIONS.md](docs/OPERATIONS.md).
 
@@ -25,7 +25,7 @@ Open <http://localhost:8080>. Configure `ADDR`, `DB_DRIVER`, `DB_DSN`, `JWT_SECR
 Before starting Compose on a new checkout, generate one persistent secret in the ignored `.env` file:
 
 ```sh
-printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)" > .env
+[ -f .env ] || printf 'JWT_SECRET=%s\n' "$(openssl rand -hex 32)" > .env
 docker compose up --build
 ```
 
@@ -75,7 +75,7 @@ Existing installations upgrading to schema v005 must stop all API replicas and b
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/API.md](docs/API.md), [docs/DATABASE.md](docs/DATABASE.md), [docs/TECHNICAL_DESIGN.md](docs/TECHNICAL_DESIGN.md), [docs/LEARNING_GUIDE.md](docs/LEARNING_GUIDE.md), and [docs/INTERVIEW_PREP.md](docs/INTERVIEW_PREP.md).
 
-Performance and verification status is recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md). The full-size A04 mixed read/write acceptance passed its 20% Following P95 gate after an inbox-first MySQL join-order optimization: three-run median P95 improved 43% with zero request failures and all consistency checks passing. k6 and multi-host load testing remain pending.
+Performance and verification status is recorded in [docs/PERFORMANCE.md](docs/PERFORMANCE.md) and [docs/RELEASE_ACCEPTANCE.md](docs/RELEASE_ACCEPTANCE.md). On final source `8bef0c5` (`CLOSE-01` / Gate A04), the 24-round formal Compose matrix (`2,002` users / `20,001` published videos) completed 856,152 requests with 0 failures and P95 $\le$ 103.15 ms / P99 $\le$ 131.54 ms ([`feed-warm-cache-continuous-2026-11-10.json`](docs/benchmarks/feed-warm-cache-continuous-2026-11-10.json)), while the isolated MySQL 8.4 cold-SQL 70/20/10 mixed read/write benchmark (`196,612` requests, `120` publishes, 0 failures) passed the 20% Following P95 gate with **34.37% improvement** (`34.016 ms` SQL-only vs `22.325 ms` Hybrid) and cold SQL `feed_recommend` P95 `69.105–87.579 ms` ([`feed-a04-mixed-2026-11-11.json`](docs/benchmarks/feed-a04-mixed-2026-11-11.json)), alongside unchanged-path fanout drain ([`feed-fanout-sustained-drain-30s-2026-11-05.json`](docs/benchmarks/feed-fanout-sustained-drain-30s-2026-11-05.json); historical 2026-11-04 run `#41803621425` recorded 43% at `46.051 ms` vs `26.250 ms`). `CLOSE-02` / Gate A10 formal disaster recovery metrics are archived in [`close-02-recovery-report-2026-11-10.json`](docs/benchmarks/close-02-recovery-report-2026-11-10.json). k6 and multi-host load testing remain outside current scope.
 
 Long validation commands can use the [development timing monitor](docs/DEVELOPMENT_TIMING.md) to report active tests, command deadlines, and GitHub Actions step durations.
 

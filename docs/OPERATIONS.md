@@ -23,7 +23,7 @@ GoStream 采用**模块化单体与多组件共享架构**。核心业务事实�
      - **对象存储备份**：`gostream-media backup --dir /backup/media`（或全量归档对象存储卷）。
   5. 备份完成并校验后，启动服务并恢复对外写流量。
 
-- **恢复目标与测量边界**：当前未建立生产配置的 RPO/RTO 承诺。G10 历史记录中的4.57ms仅为5用户/10视频、约4MiB本地媒体的 SQLite 文件恢复阶段，不含完整 MySQL/MinIO 恢复、API启动和业务验证，不能作为端到端RTO。实际维护窗口、备份与恢复阶段必须分别计时，并核对恢复后完整身份集合及对象摘要。
+- **恢复目标与测量边界**：在 `CLOSE-02`（`docs/benchmarks/close-02-recovery-report-2026-11-10.json`）的正式 Compose 规模（2,005 用户 / 20,010 发布视频 / 11,001 关注 / 50,002 互动）且严格停写排空维护窗口下，已实测单事务+对象备份耗时 **3.41s**、目标恢复至 `/ready` **32.51s**、至全业务核对与断点续传闭环 **35.61s**、**RPO=0s**（均针对停写快照边界，未证在线热备一致性，多主机扩容另计）。历史记录中的 4.57ms 仅为 5 用户/10 视频 SQLite 文件复制耗时，不可作为全量 RTO 口径；`CLOSE-03` 亦已修复 `migration_backup_recovery_smoke.py` 中 `verify_quiescence` 异常吞没问题，确保源端仍在响应 HTTP 时强制阻断快照。
 
 ---
 
@@ -81,8 +81,9 @@ GoStream 采用**模块化单体与多组件共享架构**。核心业务事实�
 # 1. 运行 Go 原生迁移与 v005 回归套件
 go test -v ./internal/migrations -run '^TestContinuousV005_'
 
-# 2. 运行端到端灾备备份恢复压测与数据对齐核验
+# 2. 运行端到端灾备备份恢复钻井与 Gate A10 正式验收
 python3 tests/integration/migration_backup_recovery_smoke.py --mode sqlite
+python3 tests/integration/migration_backup_recovery_smoke.py --mode compose --compose-e2e --formal-scale
 
 # 3. 运行运维与灾备诊断单元测试
 python3 -m unittest tests/diagnostics/test_migration_backup.py -v

@@ -277,12 +277,21 @@ class MigrationBackupRecoveryRunner:
 
     def verify_quiescence(self) -> dict:
         # 1. Verify HTTP endpoints refuse connections (source API stopped)
-        try:
-            stat, _, _ = call_api(self.base_url, "/health")
-            if stat == 200:
-                raise RuntimeError("quiescent boundary check failed: source API is still responding on HTTP port")
-        except Exception:
-            pass
+        endpoints = [self.base_url]
+        if self.mode == "compose" and self.owned_stack is not None:
+            for candidate in (self.owned_stack.api_a, self.owned_stack.api_b):
+                norm = candidate.rstrip("/")
+                if norm and norm not in endpoints:
+                    endpoints.append(norm)
+        for endpoint in endpoints:
+            try:
+                stat, _, headers = call_api(endpoint, "/health")
+            except (OSError, URLError):
+                continue
+            if stat != 503 or bool(headers):
+                raise RuntimeError(
+                    f"quiescent boundary check failed: source API {endpoint} is still responding on HTTP port (status={stat})"
+                )
 
         # 2. Verify in-flight processing in SQL
         if self.mode == "compose":
@@ -642,7 +651,7 @@ class MigrationBackupRecoveryRunner:
             if os.path.exists(chunks_source):
                 shutil.copytree(chunks_source, os.path.join(media_backup_dir, "media.chunks"), dirs_exist_ok=True)
             total_media_bytes = sum(f.stat().st_size for f in Path(media_backup_dir).glob("**/*") if f.is_file())
-            media_objects_count = len(list(Path(media_backup_dir).glob("**/*")))
+            media_objects_count = sum(1 for f in Path(media_backup_dir).glob("**/*") if f.is_file())
         else:
             # mysqldump single transaction from MySQL container
             cmd = [

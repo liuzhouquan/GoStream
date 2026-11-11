@@ -90,6 +90,60 @@ class RecoveryIsolationTest(unittest.TestCase):
         child.kill.assert_called_once_with()
         self.assertEqual(child.wait.call_count, 2)
 
+    def test_verify_quiescence_rejects_responding_source_api(self):
+        stack = recovery.AcceptanceStack(
+            project_name='owned-quiescence',
+            api_ports='127.0.0.1:18080-18081',
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / 'source.db'
+            import sqlite3
+            conn = sqlite3.connect(db_path)
+            conn.executescript(
+                '''
+                CREATE TABLE video_process_jobs (done_at TEXT, dead_at TEXT);
+                CREATE TABLE feed_fanout_jobs (done_at TEXT);
+                CREATE TABLE upload_sessions (status TEXT);
+                CREATE TABLE outbox_events (published_at TEXT, dead_at TEXT);
+                INSERT INTO upload_sessions(status) VALUES ('open');
+                INSERT INTO outbox_events(published_at, dead_at) VALUES ('2026-11-11T00:00:00Z', NULL);
+                '''
+            )
+            conn.close()
+
+            sqlite_runner = recovery.MigrationBackupRecoveryRunner(
+                'sqlite',
+                'http://127.0.0.1:18080',
+                db_path=str(db_path),
+            )
+            with patch.object(recovery, 'call_api', return_value=(200, {'status': 'ok'}, {'Content-Type': 'application/json'})):
+                with self.assertRaisesRegex(RuntimeError, 'quiescent boundary check failed'):
+                    sqlite_runner.verify_quiescence()
+
+            with patch.object(recovery, 'call_api', return_value=(503, {'error': 'draining'}, {'Content-Type': 'application/json'})):
+                with self.assertRaisesRegex(RuntimeError, 'quiescent boundary check failed'):
+                    sqlite_runner.verify_quiescence()
+
+            with patch.object(recovery, 'call_api', return_value=(503, {'error': '[Errno 111] Connection refused'}, {})):
+                report = sqlite_runner.verify_quiescence()
+                self.assertTrue(report['verified'])
+                self.assertTrue(report['source_api_stopped'])
+
+        compose_runner = recovery.MigrationBackupRecoveryRunner(
+            'compose',
+            stack.api_a,
+            mysql_container='owned-mysql',
+            source_database='gostream',
+            owned_stack=stack,
+        )
+        responses = {
+            stack.api_a: (503, {'error': '[Errno 111] Connection refused'}, {}),
+            stack.api_b: (200, {'status': 'ok'}, {'Content-Type': 'application/json'}),
+        }
+        with patch.object(recovery, 'call_api', side_effect=lambda base, _path: responses[base]):
+            with self.assertRaisesRegex(RuntimeError, '18081'):
+                compose_runner.verify_quiescence()
+
 
 if __name__ == '__main__':
     unittest.main()
