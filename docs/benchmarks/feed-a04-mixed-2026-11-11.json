@@ -1,0 +1,984 @@
+{
+  "date": "2026-11-11",
+  "gate": "A04",
+  "scenario": "Isolated MySQL 8.4 cold-SQL (no Redis) mixed 70/20/10 workload + concurrent real publishes",
+  "command": "python3 tests/integration/feed_a04_mixed.py --api-binary /tmp/gostream-a04-api --mixed-driver /tmp/gostream-a04-mixed --report-dir data/diagnostics/feed-a04-mixed-2026-11-11 --mysql-container gostream-a04-mixed-mysql --schema-prefix gostream_feed_a04_mixed_20261111_1 --schedule-seed 20261111 --go-bin $(command -v go) --interpolate-params",
+  "git": {
+    "commit": "8bef0c56d5714eff480daa4c1bb597b43c3efde5",
+    "branch": "feat/close-01-feed-performance",
+    "dirty_during_run": false
+  },
+  "environment": {
+    "os": "Linux 6.18.33.2-microsoft-standard-WSL2",
+    "architecture": "x86_64",
+    "cpu": "AMD Ryzen 7 5800H with Radeon Graphics",
+    "logical_cpus": 16,
+    "go": "go1.27.2",
+    "mysql": "8.4.11",
+    "redis_enabled": false,
+    "mysql_interpolate_params": true,
+    "runner_elapsed_seconds": 1275.205
+  },
+  "acceptance": {
+    "runs_per_variant": 3,
+    "concurrency": 20,
+    "warmup_seconds": 30,
+    "duration_seconds": 60,
+    "workload_profile": "70% feed (40% following, 15% recommend, 15% hot), 20% like/unlike/favorite/unfavorite, 10% follow/comment",
+    "schedule_seed": 20261111,
+    "schedule": [
+      {
+        "mode": "hybrid",
+        "round": 1
+      },
+      {
+        "mode": "sql-only",
+        "round": 1
+      },
+      {
+        "mode": "sql-only",
+        "round": 2
+      },
+      {
+        "mode": "hybrid",
+        "round": 2
+      },
+      {
+        "mode": "hybrid",
+        "round": 3
+      },
+      {
+        "mode": "sql-only",
+        "round": 3
+      }
+    ],
+    "sql_only_median_following_p95_ms": 34.016,
+    "hybrid_median_following_p95_ms": 22.325,
+    "following_p95_improvement_percent": 34.37,
+    "required_improvement_percent": 20.0,
+    "publishes_per_run": 20,
+    "max_hybrid_fanout_drain_seconds": 0.117325,
+    "all_runs_consistent": true,
+    "target_met": true,
+    "total_mixed_requests_succeeded": 196612,
+    "total_mixed_request_failures": 0,
+    "total_publish_successes": 120,
+    "total_publish_failures": 0
+  },
+  "rounds": [
+    {
+      "mode": "hybrid",
+      "round": 1,
+      "database": "gostream_feed_a04_mixed_20261111_1_hybrid_r1",
+      "fixture_rows": {
+        "users": 2000,
+        "authors": 100,
+        "videos": 20000,
+        "follows": 10999,
+        "likes": 50000,
+        "feed_inboxes": 1900000
+      },
+      "elapsed_seconds": 60.05,
+      "mixed_requests_succeeded": 36957,
+      "mixed_request_failures": 0,
+      "operations": {
+        "comment": {
+          "successes": 1847,
+          "failures": 0,
+          "status_counts": {
+            "201": 1847
+          },
+          "p50_ms": 35.09,
+          "p95_ms": 54.173,
+          "p99_ms": 72.066
+        },
+        "favorite": {
+          "successes": 1848,
+          "failures": 0,
+          "status_counts": {
+            "200": 1848
+          },
+          "p50_ms": 19.102,
+          "p95_ms": 40.376,
+          "p99_ms": 52.604
+        },
+        "feed_following": {
+          "successes": 14784,
+          "failures": 0,
+          "status_counts": {
+            "200": 14784
+          },
+          "p50_ms": 12.428,
+          "p95_ms": 21.122,
+          "p99_ms": 27.166
+        },
+        "feed_hot": {
+          "successes": 5544,
+          "failures": 0,
+          "status_counts": {
+            "200": 5544
+          },
+          "p50_ms": 86.009,
+          "p95_ms": 117.125,
+          "p99_ms": 134.357
+        },
+        "feed_recommend": {
+          "successes": 5544,
+          "failures": 0,
+          "status_counts": {
+            "200": 5544
+          },
+          "p50_ms": 47.128,
+          "p95_ms": 69.105,
+          "p99_ms": 82.086
+        },
+        "follow": {
+          "successes": 1847,
+          "failures": 0,
+          "status_counts": {
+            "200": 1847
+          },
+          "p50_ms": 17.006,
+          "p95_ms": 35.907,
+          "p99_ms": 49.53
+        },
+        "like": {
+          "successes": 1848,
+          "failures": 0,
+          "status_counts": {
+            "200": 1848
+          },
+          "p50_ms": 18.611,
+          "p95_ms": 38.408,
+          "p99_ms": 50.066
+        },
+        "unfavorite": {
+          "successes": 1847,
+          "failures": 0,
+          "status_counts": {
+            "200": 1847
+          },
+          "p50_ms": 15.386,
+          "p95_ms": 30.492,
+          "p99_ms": 40.941
+        },
+        "unlike": {
+          "successes": 1848,
+          "failures": 0,
+          "status_counts": {
+            "200": 1848
+          },
+          "p50_ms": 14.938,
+          "p95_ms": 30.808,
+          "p99_ms": 41.201
+        }
+      },
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "publish_p50_ms": 19.648,
+      "publish_p95_ms": 24.013,
+      "publish_p99_ms": 24.705,
+      "fanout_expected_jobs": 20,
+      "fanout_jobs_completed": 20,
+      "fanout_drain_seconds": 0.115389,
+      "fanout_within_deadline": true,
+      "outbox_drain_seconds": 0.117806,
+      "counter_mismatches": 0,
+      "counter_details": {
+        "action_mismatches": 0,
+        "comment_mismatches": 0
+      },
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "fanout_pending": 0,
+      "api_cpu_percent_avg": 156.2,
+      "api_peak_rss_kib": 41380
+    },
+    {
+      "mode": "sql-only",
+      "round": 1,
+      "database": "gostream_feed_a04_mixed_20261111_1_sqlonly_r1",
+      "fixture_rows": {
+        "users": 2000,
+        "authors": 100,
+        "videos": 20000,
+        "follows": 10999,
+        "likes": 50000,
+        "feed_inboxes": 1900000
+      },
+      "elapsed_seconds": 60.056,
+      "mixed_requests_succeeded": 30665,
+      "mixed_request_failures": 0,
+      "operations": {
+        "comment": {
+          "successes": 1533,
+          "failures": 0,
+          "status_counts": {
+            "201": 1533
+          },
+          "p50_ms": 40.918,
+          "p95_ms": 82.958,
+          "p99_ms": 115.247
+        },
+        "favorite": {
+          "successes": 1533,
+          "failures": 0,
+          "status_counts": {
+            "200": 1533
+          },
+          "p50_ms": 22.929,
+          "p95_ms": 54.786,
+          "p99_ms": 88.468
+        },
+        "feed_following": {
+          "successes": 12269,
+          "failures": 0,
+          "status_counts": {
+            "200": 12269
+          },
+          "p50_ms": 19.59,
+          "p95_ms": 34.038,
+          "p99_ms": 43.914
+        },
+        "feed_hot": {
+          "successes": 4599,
+          "failures": 0,
+          "status_counts": {
+            "200": 4599
+          },
+          "p50_ms": 94.276,
+          "p95_ms": 129.356,
+          "p99_ms": 147.491
+        },
+        "feed_recommend": {
+          "successes": 4599,
+          "failures": 0,
+          "status_counts": {
+            "200": 4599
+          },
+          "p50_ms": 51.816,
+          "p95_ms": 78.486,
+          "p99_ms": 94.623
+        },
+        "follow": {
+          "successes": 1533,
+          "failures": 0,
+          "status_counts": {
+            "200": 1533
+          },
+          "p50_ms": 19.672,
+          "p95_ms": 47.363,
+          "p99_ms": 74.505
+        },
+        "like": {
+          "successes": 1533,
+          "failures": 0,
+          "status_counts": {
+            "200": 1533
+          },
+          "p50_ms": 22.75,
+          "p95_ms": 51.401,
+          "p99_ms": 82.177
+        },
+        "unfavorite": {
+          "successes": 1533,
+          "failures": 0,
+          "status_counts": {
+            "200": 1533
+          },
+          "p50_ms": 17.174,
+          "p95_ms": 40.577,
+          "p99_ms": 63.089
+        },
+        "unlike": {
+          "successes": 1533,
+          "failures": 0,
+          "status_counts": {
+            "200": 1533
+          },
+          "p50_ms": 17.684,
+          "p95_ms": 45.005,
+          "p99_ms": 61.27
+        }
+      },
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "publish_p50_ms": 21.131,
+      "publish_p95_ms": 25.056,
+      "publish_p99_ms": 25.473,
+      "fanout_expected_jobs": 0,
+      "fanout_jobs_completed": 0,
+      "fanout_drain_seconds": 0.127893,
+      "fanout_within_deadline": true,
+      "outbox_drain_seconds": 0.125333,
+      "counter_mismatches": 0,
+      "counter_details": {
+        "action_mismatches": 0,
+        "comment_mismatches": 0
+      },
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "fanout_pending": 0,
+      "api_cpu_percent_avg": 148.59,
+      "api_peak_rss_kib": 40808
+    },
+    {
+      "mode": "sql-only",
+      "round": 2,
+      "database": "gostream_feed_a04_mixed_20261111_1_sqlonly_r2",
+      "fixture_rows": {
+        "users": 2000,
+        "authors": 100,
+        "videos": 20000,
+        "follows": 10999,
+        "likes": 50000,
+        "feed_inboxes": 1900000
+      },
+      "elapsed_seconds": 60.112,
+      "mixed_requests_succeeded": 31297,
+      "mixed_request_failures": 0,
+      "operations": {
+        "comment": {
+          "successes": 1564,
+          "failures": 0,
+          "status_counts": {
+            "201": 1564
+          },
+          "p50_ms": 39.874,
+          "p95_ms": 77.123,
+          "p99_ms": 130.992
+        },
+        "favorite": {
+          "successes": 1565,
+          "failures": 0,
+          "status_counts": {
+            "200": 1565
+          },
+          "p50_ms": 22.338,
+          "p95_ms": 51.544,
+          "p99_ms": 83.729
+        },
+        "feed_following": {
+          "successes": 12520,
+          "failures": 0,
+          "status_counts": {
+            "200": 12520
+          },
+          "p50_ms": 18.997,
+          "p95_ms": 33.141,
+          "p99_ms": 43.063
+        },
+        "feed_hot": {
+          "successes": 4695,
+          "failures": 0,
+          "status_counts": {
+            "200": 4695
+          },
+          "p50_ms": 92.352,
+          "p95_ms": 127.302,
+          "p99_ms": 147.906
+        },
+        "feed_recommend": {
+          "successes": 4695,
+          "failures": 0,
+          "status_counts": {
+            "200": 4695
+          },
+          "p50_ms": 51.474,
+          "p95_ms": 77.28,
+          "p99_ms": 93.509
+        },
+        "follow": {
+          "successes": 1564,
+          "failures": 0,
+          "status_counts": {
+            "200": 1564
+          },
+          "p50_ms": 19.69,
+          "p95_ms": 45.403,
+          "p99_ms": 84.467
+        },
+        "like": {
+          "successes": 1565,
+          "failures": 0,
+          "status_counts": {
+            "200": 1565
+          },
+          "p50_ms": 20.926,
+          "p95_ms": 50.951,
+          "p99_ms": 83.139
+        },
+        "unfavorite": {
+          "successes": 1564,
+          "failures": 0,
+          "status_counts": {
+            "200": 1564
+          },
+          "p50_ms": 17.154,
+          "p95_ms": 38.432,
+          "p99_ms": 64.902
+        },
+        "unlike": {
+          "successes": 1565,
+          "failures": 0,
+          "status_counts": {
+            "200": 1565
+          },
+          "p50_ms": 17.089,
+          "p95_ms": 37.862,
+          "p99_ms": 60.627
+        }
+      },
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "publish_p50_ms": 18.159,
+      "publish_p95_ms": 20.959,
+      "publish_p99_ms": 21.801,
+      "fanout_expected_jobs": 0,
+      "fanout_jobs_completed": 0,
+      "fanout_drain_seconds": 0.115411,
+      "fanout_within_deadline": true,
+      "outbox_drain_seconds": 1.231174,
+      "counter_mismatches": 0,
+      "counter_details": {
+        "action_mismatches": 0,
+        "comment_mismatches": 0
+      },
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "fanout_pending": 0,
+      "api_cpu_percent_avg": 150.41,
+      "api_peak_rss_kib": 41108
+    },
+    {
+      "mode": "hybrid",
+      "round": 2,
+      "database": "gostream_feed_a04_mixed_20261111_1_hybrid_r2",
+      "fixture_rows": {
+        "users": 2000,
+        "authors": 100,
+        "videos": 20000,
+        "follows": 10999,
+        "likes": 50000,
+        "feed_inboxes": 1900000
+      },
+      "elapsed_seconds": 60.052,
+      "mixed_requests_succeeded": 35446,
+      "mixed_request_failures": 0,
+      "operations": {
+        "comment": {
+          "successes": 1772,
+          "failures": 0,
+          "status_counts": {
+            "201": 1772
+          },
+          "p50_ms": 35.222,
+          "p95_ms": 53.182,
+          "p99_ms": 76.482
+        },
+        "favorite": {
+          "successes": 1772,
+          "failures": 0,
+          "status_counts": {
+            "200": 1772
+          },
+          "p50_ms": 19.407,
+          "p95_ms": 38.963,
+          "p99_ms": 54.043
+        },
+        "feed_following": {
+          "successes": 14182,
+          "failures": 0,
+          "status_counts": {
+            "200": 14182
+          },
+          "p50_ms": 13.286,
+          "p95_ms": 22.326,
+          "p99_ms": 28.741
+        },
+        "feed_hot": {
+          "successes": 5316,
+          "failures": 0,
+          "status_counts": {
+            "200": 5316
+          },
+          "p50_ms": 89.01,
+          "p95_ms": 125.192,
+          "p99_ms": 145.901
+        },
+        "feed_recommend": {
+          "successes": 5316,
+          "failures": 0,
+          "status_counts": {
+            "200": 5316
+          },
+          "p50_ms": 49.597,
+          "p95_ms": 74.077,
+          "p99_ms": 87.295
+        },
+        "follow": {
+          "successes": 1772,
+          "failures": 0,
+          "status_counts": {
+            "200": 1772
+          },
+          "p50_ms": 16.789,
+          "p95_ms": 33.312,
+          "p99_ms": 44.165
+        },
+        "like": {
+          "successes": 1772,
+          "failures": 0,
+          "status_counts": {
+            "200": 1772
+          },
+          "p50_ms": 18.844,
+          "p95_ms": 38.782,
+          "p99_ms": 52.342
+        },
+        "unfavorite": {
+          "successes": 1772,
+          "failures": 0,
+          "status_counts": {
+            "200": 1772
+          },
+          "p50_ms": 15.402,
+          "p95_ms": 30.486,
+          "p99_ms": 40.562
+        },
+        "unlike": {
+          "successes": 1772,
+          "failures": 0,
+          "status_counts": {
+            "200": 1772
+          },
+          "p50_ms": 15.381,
+          "p95_ms": 30.489,
+          "p99_ms": 41.087
+        }
+      },
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "publish_p50_ms": 19.268,
+      "publish_p95_ms": 22.877,
+      "publish_p99_ms": 22.926,
+      "fanout_expected_jobs": 20,
+      "fanout_jobs_completed": 20,
+      "fanout_drain_seconds": 0.117325,
+      "fanout_within_deadline": true,
+      "outbox_drain_seconds": 1.242064,
+      "counter_mismatches": 0,
+      "counter_details": {
+        "action_mismatches": 0,
+        "comment_mismatches": 0
+      },
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "fanout_pending": 0,
+      "api_cpu_percent_avg": 163.0,
+      "api_peak_rss_kib": 40456
+    },
+    {
+      "mode": "hybrid",
+      "round": 3,
+      "database": "gostream_feed_a04_mixed_20261111_1_hybrid_r3",
+      "fixture_rows": {
+        "users": 2000,
+        "authors": 100,
+        "videos": 20000,
+        "follows": 10999,
+        "likes": 50000,
+        "feed_inboxes": 1900000
+      },
+      "elapsed_seconds": 60.057,
+      "mixed_requests_succeeded": 34253,
+      "mixed_request_failures": 0,
+      "operations": {
+        "comment": {
+          "successes": 1712,
+          "failures": 0,
+          "status_counts": {
+            "201": 1712
+          },
+          "p50_ms": 35.808,
+          "p95_ms": 58.332,
+          "p99_ms": 76.633
+        },
+        "favorite": {
+          "successes": 1712,
+          "failures": 0,
+          "status_counts": {
+            "200": 1712
+          },
+          "p50_ms": 19.667,
+          "p95_ms": 41.265,
+          "p99_ms": 55.723
+        },
+        "feed_following": {
+          "successes": 13704,
+          "failures": 0,
+          "status_counts": {
+            "200": 13704
+          },
+          "p50_ms": 13.602,
+          "p95_ms": 23.264,
+          "p99_ms": 29.771
+        },
+        "feed_hot": {
+          "successes": 5138,
+          "failures": 0,
+          "status_counts": {
+            "200": 5138
+          },
+          "p50_ms": 93.397,
+          "p95_ms": 129.759,
+          "p99_ms": 148.565
+        },
+        "feed_recommend": {
+          "successes": 5139,
+          "failures": 0,
+          "status_counts": {
+            "200": 5139
+          },
+          "p50_ms": 50.965,
+          "p95_ms": 77.316,
+          "p99_ms": 90.786
+        },
+        "follow": {
+          "successes": 1712,
+          "failures": 0,
+          "status_counts": {
+            "200": 1712
+          },
+          "p50_ms": 17.014,
+          "p95_ms": 36.21,
+          "p99_ms": 48.495
+        },
+        "like": {
+          "successes": 1712,
+          "failures": 0,
+          "status_counts": {
+            "200": 1712
+          },
+          "p50_ms": 19.403,
+          "p95_ms": 39.405,
+          "p99_ms": 53.057
+        },
+        "unfavorite": {
+          "successes": 1712,
+          "failures": 0,
+          "status_counts": {
+            "200": 1712
+          },
+          "p50_ms": 15.495,
+          "p95_ms": 31.753,
+          "p99_ms": 44.839
+        },
+        "unlike": {
+          "successes": 1712,
+          "failures": 0,
+          "status_counts": {
+            "200": 1712
+          },
+          "p50_ms": 16.017,
+          "p95_ms": 31.703,
+          "p99_ms": 41.116
+        }
+      },
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "publish_p50_ms": 26.604,
+      "publish_p95_ms": 34.767,
+      "publish_p99_ms": 37.167,
+      "fanout_expected_jobs": 20,
+      "fanout_jobs_completed": 20,
+      "fanout_drain_seconds": 0.11149,
+      "fanout_within_deadline": true,
+      "outbox_drain_seconds": 0.116798,
+      "counter_mismatches": 0,
+      "counter_details": {
+        "action_mismatches": 0,
+        "comment_mismatches": 0
+      },
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "fanout_pending": 0,
+      "api_cpu_percent_avg": 160.88,
+      "api_peak_rss_kib": 40872
+    },
+    {
+      "mode": "sql-only",
+      "round": 3,
+      "database": "gostream_feed_a04_mixed_20261111_1_sqlonly_r3",
+      "fixture_rows": {
+        "users": 2000,
+        "authors": 100,
+        "videos": 20000,
+        "follows": 10999,
+        "likes": 50000,
+        "feed_inboxes": 1900000
+      },
+      "elapsed_seconds": 60.049,
+      "mixed_requests_succeeded": 27994,
+      "mixed_request_failures": 0,
+      "operations": {
+        "comment": {
+          "successes": 1399,
+          "failures": 0,
+          "status_counts": {
+            "201": 1399
+          },
+          "p50_ms": 45.233,
+          "p95_ms": 99.611,
+          "p99_ms": 145.783
+        },
+        "favorite": {
+          "successes": 1399,
+          "failures": 0,
+          "status_counts": {
+            "200": 1399
+          },
+          "p50_ms": 25.998,
+          "p95_ms": 67.89,
+          "p99_ms": 111.331
+        },
+        "feed_following": {
+          "successes": 11200,
+          "failures": 0,
+          "status_counts": {
+            "200": 11200
+          },
+          "p50_ms": 21.871,
+          "p95_ms": 38.744,
+          "p99_ms": 52.2
+        },
+        "feed_hot": {
+          "successes": 4200,
+          "failures": 0,
+          "status_counts": {
+            "200": 4200
+          },
+          "p50_ms": 99.799,
+          "p95_ms": 137.541,
+          "p99_ms": 161.945
+        },
+        "feed_recommend": {
+          "successes": 4200,
+          "failures": 0,
+          "status_counts": {
+            "200": 4200
+          },
+          "p50_ms": 57.114,
+          "p95_ms": 87.579,
+          "p99_ms": 105.395
+        },
+        "follow": {
+          "successes": 1399,
+          "failures": 0,
+          "status_counts": {
+            "200": 1399
+          },
+          "p50_ms": 21.719,
+          "p95_ms": 54.754,
+          "p99_ms": 88.587
+        },
+        "like": {
+          "successes": 1399,
+          "failures": 0,
+          "status_counts": {
+            "200": 1399
+          },
+          "p50_ms": 23.874,
+          "p95_ms": 61.543,
+          "p99_ms": 97.548
+        },
+        "unfavorite": {
+          "successes": 1399,
+          "failures": 0,
+          "status_counts": {
+            "200": 1399
+          },
+          "p50_ms": 19.458,
+          "p95_ms": 50.252,
+          "p99_ms": 72.162
+        },
+        "unlike": {
+          "successes": 1399,
+          "failures": 0,
+          "status_counts": {
+            "200": 1399
+          },
+          "p50_ms": 19.294,
+          "p95_ms": 48.697,
+          "p99_ms": 80.115
+        }
+      },
+      "publish_successes": 20,
+      "publish_failures": 0,
+      "publish_p50_ms": 19.856,
+      "publish_p95_ms": 22.736,
+      "publish_p99_ms": 23.676,
+      "fanout_expected_jobs": 0,
+      "fanout_jobs_completed": 0,
+      "fanout_drain_seconds": 0.11856,
+      "fanout_within_deadline": true,
+      "outbox_drain_seconds": 1.318421,
+      "counter_mismatches": 0,
+      "counter_details": {
+        "action_mismatches": 0,
+        "comment_mismatches": 0
+      },
+      "feed_visibility_failures": 0,
+      "outbox_pending": 0,
+      "outbox_dead": 0,
+      "fanout_pending": 0,
+      "api_cpu_percent_avg": 153.46,
+      "api_peak_rss_kib": 41076
+    }
+  ],
+  "diagnostics": {
+    "database_pool_wait": {
+      "sql_only": [
+        {
+          "wait_count": 0,
+          "wait_duration_seconds": 0,
+          "max_idle_closed": 0
+        },
+        {
+          "wait_count": 0,
+          "wait_duration_seconds": 0,
+          "max_idle_closed": 0
+        },
+        {
+          "wait_count": 0,
+          "wait_duration_seconds": 0,
+          "max_idle_closed": 0
+        }
+      ],
+      "hybrid": [
+        {
+          "wait_count": 0,
+          "wait_duration_seconds": 0,
+          "max_idle_closed": 0
+        },
+        {
+          "wait_count": 0,
+          "wait_duration_seconds": 0,
+          "max_idle_closed": 0
+        },
+        {
+          "wait_count": 0,
+          "wait_duration_seconds": 0,
+          "max_idle_closed": 0
+        }
+      ]
+    },
+    "diagnostic_profiles": [
+      {
+        "variant": "sql-only",
+        "round": 4,
+        "following_query_plan_diagnostic": {
+          "available": false,
+          "reason": "diagnostic_output_missing"
+        },
+        "capture_window": "Separate diagnostic-only fixture: CPU profile starts 250ms into the measured mixed workload for 60s; goroutine dump is scheduled halfway through that window.",
+        "cpu": {
+          "captured": true,
+          "path": "mixed-sql-only-round-4-cpu.pb.gz",
+          "bytes": 152045
+        },
+        "goroutine": {
+          "captured": true,
+          "path": "mixed-sql-only-round-4-goroutines.txt",
+          "bytes": 156194
+        }
+      },
+      {
+        "variant": "hybrid",
+        "round": 4,
+        "following_query_plan_diagnostic": {
+          "available": false,
+          "reason": "diagnostic_output_missing"
+        },
+        "capture_window": "Separate diagnostic-only fixture: CPU profile starts 250ms into the measured mixed workload for 60s; goroutine dump is scheduled halfway through that window.",
+        "cpu": {
+          "captured": true,
+          "path": "mixed-hybrid-round-4-cpu.pb.gz",
+          "bytes": 165157
+        },
+        "goroutine": {
+          "captured": true,
+          "path": "mixed-hybrid-round-4-goroutines.txt",
+          "bytes": 158916
+        }
+      }
+    ],
+    "following_query_plan_diagnostics": {
+      "sql_only": [
+        {
+          "available": false,
+          "reason": "diagnostic_output_missing"
+        },
+        {
+          "available": false,
+          "reason": "not_scheduled"
+        },
+        {
+          "available": false,
+          "reason": "not_scheduled"
+        }
+      ],
+      "hybrid": [
+        {
+          "available": false,
+          "reason": "diagnostic_output_missing"
+        },
+        {
+          "available": false,
+          "reason": "not_scheduled"
+        },
+        {
+          "available": false,
+          "reason": "not_scheduled"
+        }
+      ]
+    },
+    "following_query_analyze_diagnostics": {
+      "sql-only": [
+        {
+          "round": 4,
+          "diagnostic": {
+            "available": false,
+            "reason": "diagnostic_output_missing"
+          }
+        }
+      ],
+      "hybrid": [
+        {
+          "round": 4,
+          "diagnostic": {
+            "available": false,
+            "reason": "diagnostic_output_missing"
+          }
+        }
+      ]
+    },
+    "note": "During feed_a04_mixed.py execution, summary.json recorded diagnostic_output_missing because relative --report-dir resolved under internal/platform/ when go test executed in package cwd. The four generated EXPLAIN / EXPLAIN ANALYZE files (sql-only 2.61ms scanning 1,205 rows vs hybrid 0.692ms scanning 25 inbox rows) were recovered into data/diagnostics/feed-a04-mixed-2026-11-11/.",
+    "actual_plans_recovered_from_package_cwd": {
+      "sql_only_actual_ms": 2.61,
+      "sql_only_analyze_tree": "-> Limit: 21 row(s)  (actual time=2.61..2.61 rows=21 loops=1)\n    -> Sort: videos.created_at DESC, videos.id DESC, limit input to 21 row(s) per chunk  (actual time=2.6..2.61 rows=21 loops=1)\n        -> Stream results  (cost=424 rows=603) (actual time=0.0966..2.36 rows=1205 loops=1)\n            -> Nested loop inner join  (cost=424 rows=603) (actual time=0.0906..1.83 rows=1205 loops=1)\n                -> Covering index lookup on follows using ux_follow_pair (follower_id=501)  (cost=1.51 rows=6) (actual time=0.0131..0.0163 rows=6 loops=1)\n                -> Filter: (videos.`status` = 'published')  (cost=52 rows=101) (actual time=0.0259..0.291 rows=201 loops=6)\n                    -> Index lookup on videos using idx_video_author (author_id=`follows`.followee_id)  (cost=52 rows=201) (actual time=0.0254..0.269 rows=201 loops=6)\n",
+      "hybrid_actual_ms": 0.692,
+      "hybrid_analyze_tree": "-> Limit: 21 row(s)  (cost=679 rows=21) (actual time=0.665..0.692 rows=21 loops=1)\n    -> Nested loop inner join  (cost=679 rows=21) (actual time=0.664..0.691 rows=21 loops=1)\n        -> Sort: feed_page.created_at DESC, feed_page.id DESC  (cost=660..660 rows=42) (actual time=0.659..0.66 rows=21 loops=1)\n            -> Table scan on feed_page  (cost=631..634 rows=42) (actual time=0.644..0.647 rows=42 loops=1)\n                -> Union all materialize  (cost=631..631 rows=42) (actual time=0.644..0.644 rows=42 loops=1)\n                    -> Table scan on pull_page  (cost=142..145 rows=21) (actual time=0.0789..0.0805 rows=21 loops=1)\n                        -> Materialize  (cost=142..142 rows=21) (actual time=0.0783..0.0783 rows=21 loops=1)\n                            -> Limit: 21 row(s)  (cost=140 rows=21) (actual time=0.0416..0.0718 rows=21 loops=1)\n                                -> Nested loop inner join  (cost=140 rows=200) (actual time=0.0412..0.0704 rows=21 loops=1)\n                                    -> Index lookup on videos using idx_video_feed_pull (status='published', feed_pull=1)  (cost=70 rows=200) (actual time=0.0373..0.062 rows=21 loops=1)\n                                    -> Single-row covering index lookup on follows using ux_follow_pair (follower_id=501, followee_id=videos.author_id)  (cost=0.251 rows=1) (actual time=230e-6..253e-6 rows=1 loops=21)\n                    -> Table scan on late_follow_page  (cost=2.5..2.5 rows=0) (actual time=0.394..0.394 rows=0 loops=1)\n                        -> Materialize  (cost=0..0 rows=0) (actual time=0.394..0.394 rows=0 loops=1)\n                            -> Limit: 21 row(s)  (actual time=0.392..0.392 rows=0 loops=1)\n                                -> Sort: videos.created_at DESC, videos.id DESC, limit input to 21 row(s) per chunk  (actual time=0.392..0.392 rows=0 loops=1)\n                                    -> Stream results  (cost=394 rows=17.8) (actual time=0.389..0.389 rows=0 loops=1)\n                                        -> Nested loop antijoin  (cost=394 rows=17.8) (actual time=0.388..0.388 rows=0 loops=1)\n                                            -> Nested loop inner join  (cost=376 rows=17.8) (actual time=0.388..0.388 rows=0 loops=1)\n                                                -> Index lookup on follows using ux_follow_pair (follower_id=501)  (cost=1.75 rows=5) (actual time=0.26..0.262 rows=5 loops=1)\n                                                -> Filter: ((videos.feed_pull = 0) and (videos.`status` = 'published'))  (cost=53.5 rows=3.56) (actual time=0.025..0.025 rows=0 loops=5)\n                                                    -> Index lookup on videos using idx_video_author (author_id=`follows`.followee_id), with index condition: (`follows`.created_at >= videos.created_at)  (cost=53.5 rows=214) (actual time=0.0249..0.0249 rows=0 loops=5)\n                                            -> Single-row covering index lookup on feed_inboxes using ux_feed_inbox (user_id=501, video_id=videos.id)  (cost=0.91 rows=1) (never executed)\n                    -> Table scan on push_page  (cost=476..479 rows=21) (actual time=0.12..0.121 rows=21 loops=1)\n                        -> Materialize  (cost=476..476 rows=21) (actual time=0.119..0.119 rows=21 loops=1)\n                            -> Limit: 21 row(s)  (cost=474 rows=21) (actual time=0.0452..0.104 rows=21 loops=1)\n                                -> Nested loop inner join  (cost=474 rows=50.2) (actual time=0.045..0.103 rows=21 loops=1)\n                                    -> Nested loop inner join  (cost=457 rows=50.2) (actual time=0.0386..0.0753 rows=25 loops=1)\n                                        -> Covering index lookup on feed_inboxes using idx_feed_inbox_user (user_id=501)  (cost=105 rows=1004) (actual time=0.0281..0.0301 rows=25 loops=1)\n                                        -> Filter: ((videos.feed_pull = 0) and (videos.`status` = 'published'))  (cost=0.25 rows=0.05) (actual time=0.00159..0.00166 rows=1 loops=25)\n                                            -> Single-row index lookup on videos using PRIMARY (id=feed_inboxes.video_id)  (cost=0.25 rows=1) (actual time=0.00132..0.00134 rows=1 loops=25)\n                                    -> Single-row covering index lookup on follows using ux_follow_pair (follower_id=501, followee_id=videos.author_id)  (cost=0.252 rows=1) (actual time=952e-6..971e-6 rows=0.84 loops=25)\n        -> Filter: (videos.`status` = 'published')  (cost=0.251 rows=0.5) (actual time=0.00126..0.00133 rows=1 loops=21)\n            -> Single-row index lookup on videos using PRIMARY (id=feed_page.id)  (cost=0.251 rows=1) (actual time=0.00109..0.00112 rows=1 loops=21)\n"
+    }
+  },
+  "limitations": [
+    "All processes (API binary, mixed workload driver, and isolated MySQL 8.4.11 container) ran on one WSL2 host.",
+    "This matrix isolates DB-backed Hybrid inbox fanout vs SQL-only without Redis (`REDIS_ADDR` empty); Redis warm-cache behavior and 24-round continuous load at 10/20 concurrency are covered separately in feed-warm-cache-continuous-2026-11-10.json.",
+    "During the automated run, summary.json recorded diagnostic_output_missing for TestA04FollowingQueryPlanDiagnostic because relative --report-dir resolved under internal/platform/; the generated EXPLAIN / EXPLAIN ANALYZE files were subsequently verified (SQL-only 2.61ms vs Hybrid 0.692ms) and moved to data/diagnostics/feed-a04-mixed-2026-11-11/."
+  ]
+}

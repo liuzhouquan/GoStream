@@ -20,10 +20,10 @@
 
 发布必须同时满足：
 
-- [ ] 本文件所有“发布必做”任务完成并达到各自退出条件（业务模块已有实现；G07/G10/G12 尚有 CLOSE-01/02/03，不能以本地 closure 分支存在签收）。
-- [ ] A01–A12 功能门槛及 TEST_STANDARD 的既定性能门槛逐项通过（A01/A02/A03/A05/A06/A07/A08/A09/A11/A12 已有阶段证据；A04 最终推荐版本持续负载与 A10 正式恢复待验，见 CLOSE-01/02）。
+- [ ] 本文件所有“发布必做”任务完成并达到各自退出条件（业务模块已有实现，G07/G10 已在分支完成 CLOSE-01/02；尚余 CLOSE-03 文档统一与合入 `main` 后签收）。
+- [ ] A01–A12 功能门槛及 TEST_STANDARD 的既定性能门槛逐项通过（A01–A03、A05–A09、A11–A12 已有阶段证据，A04/A10 已由 CLOSE-01/02 补齐正式实测；待 CLOSE-03 合入 `main` 并核对一致性后统一勾选）。
 - [ ] 最终候选提交的 CI 全部通过并确认合并树一致（基线 PR #62 的 CI run 42753238655 已通过；本分支须独立通过，见 CLOSE-03）。
-- [ ] 没有未处理的已确认 P0/P1（本轮隔离/清理及误判已修正；正式 A10 一致恢复与身份覆盖缺口按 CLOSE-02 关闭后再勾选）。
+- [ ] 没有未处理的已确认 P0/P1（CLOSE-02 正式 A10 一致恢复与 CLOSE-01 最终推荐性能已在分支验证关闭；合入 `main` 前由 CLOSE-03 最终复核后勾选）。
 - [x] README 可从新环境复现；API/迁移/故障恢复文档与代码相符；本地学习笔记保留且未被 Git 跟踪。
 - [x] 发布报告列出已支持场景、数据规模、真实性能、故障边界和演示步骤。
 
@@ -37,7 +37,7 @@
 
 | 工作包 | 当前成果 | 尚需完成 |
 | --- | --- | --- |
-| CLOSE-01 / G07 / A04 | 历史正式暖缓存 741,925 请求；既有无缓存 Following 收益及 fanout 数据；修正后的推荐正确性回归 | 关联最终查询源码的规定规模/持续负载，逐项对齐既定 A04，见第 2.1 节 |
+| CLOSE-01 / G07 / A04 | 最终源码 `8bef0c5` 完成 Compose 24 轮（856,152 请求 0 失败，P95 $\le$ 103.15ms、P99 $\le$ 131.54ms）与隔离 MySQL 无缓存 70/20/10 混合负载（196,612 请求 0 失败，Hybrid Following P95 +34.37%，冷 SQL 推荐 P95 69.11–87.58ms），叠加未改路径 320 关注者 fanout 排空 1.264s | 已完成（见 [G07 交付报告](tasks/G07.md) 与 `feed-warm-cache-continuous-2026-11-10.json` / `feed-a04-mixed-2026-11-11.json`） |
 | CLOSE-02 / G10 / A10 | 正式规模 Gate A10 灾备验收通过（2,005 用户/20,010 视频/11,001 关注/50,002 互动，停写边界排空，RPO=0s，RTO=32.5s/35.6s，零资源残留） | 已完成（见 [G10 交付报告](tasks/G10.md) 与报告 `docs/benchmarks/close-02-recovery-report-2026-11-10.json`） |
 | CLOSE-03 / G12 | README、功能/契约/故障测试及历史远程 CI | 汇总精确源码证据，文档统一，最后候选 CI 与合并树一致，发布判定 |
 
@@ -45,7 +45,7 @@ G06 生产查询、G08 群聊、G09 故障及 G10 正式容灾的已提交实测
 
 ### 2.1 可直接接手的剩余开发清单
 
-按 CLOSE-02（正确性，已完成）→ CLOSE-01（性能）→ CLOSE-03（交付）推进，互不冲突的代码和测试可分支开发。每个包单独 PR，登记基线、负责文件、验证命令、原始日志和脱敏报告；合并前重新核对 main。无需新增微服务或新业务。
+按 CLOSE-02（已完成）→ CLOSE-01（已完成）→ CLOSE-03（交付）推进，互不冲突的代码和测试可分支开发。每个包单独 PR，登记基线、负责文件、验证命令、原始日志和脱敏报告；合并前重新核对 main。无需新增微服务或新业务。
 
 **CLOSE-02：正式恢复验收（优先级 P1，已完成）**
 
@@ -58,13 +58,13 @@ G06 生产查询、G08 群聊、G09 故障及 G10 正式容灾的已提交实测
 
 正式入口：`python3 tests/integration/migration_backup_recovery_smoke.py --mode compose --compose-e2e --formal-scale --report data/diagnostics/close-02-recovery-report.json`。报告归档至 `docs/benchmarks/close-02-recovery-report-2026-11-10.json`。
 
-**CLOSE-01：最终 Feed 版本的规定性能证据（未完成）**
+**CLOSE-01：最终 Feed 版本的规定性能证据（已完成）**
 
-- [ ] 先列 TEST_STANDARD A04 已有证据与受修改影响的项。未改变的 Following SQL-only/Hybrid 同规模三轮收益与 fanout 排空结果沿用已有报告；不为文档改动新增冷路径、长稳、多主机或集群压力门槛。
-- [ ] 在最终推荐源码上，以既定夹具校验 users>=2000、published>=20000、follows>=10000、interactions>=50000，覆盖阈值两侧作者、匿名/已关注/多兴趣用户。使用当前 formal 入口 `tests/integration/run_formal_feed.sh` 前检查报告路径，避免覆盖历史实测；记录源码 SHA 与 dirty 状态。
-- [ ] 按 TEST_STANDARD 的场景矩阵运行 10/20 并发、30s 预热、60s 实测、各三轮，冷/暖分列；正式暖缓存矩阵当前约 36 分钟，必须用 task_timing 保持心跳。个性化登录推荐不可标成共享缓存命中；缺少的推荐及混合负载证据按原标准补齐，不把 1.29 秒 miniredis 回归当成替代。
-- [ ] 检查规定 P95<=200ms/P99<=500ms、无意外 5xx、游标无重复/遗漏、缓存失效与最终 SQL/outbox 一致性。保留每轮数据和失败结果，未达标先定位瓶颈，不能降规模/删断言。
-- [ ] 在 G07/RELEASE_ACCEPTANCE 逐项列“已有且仍适用/本次通过/待确认”，仅全部既定 A04 项满足后关闭，不能由 warm-only JSON 自动宣布 full A04。
+- [x] 先列 TEST_STANDARD A04 已有证据与受修改影响的项。确认 `following_feed.go` 与 `feed_fanout.go` 自 `a6708f0` 起 `0` 行改动，既有 120 视频/320 关注者 sustained fanout drain（`docs/benchmarks/feed-fanout-sustained-drain-30s-2026-11-05.json`，最大排空 1.264s）`已有且仍适用`；受 2026-11-10 推荐修复影响的 `feed.go`/`recommend.go` 重新验证，未新增冷路径、长稳、多主机或集群压力门槛。
+- [x] 在最终推荐源码（`8bef0c56d5714eff480daa4c1bb597b43c3efde5`，`dirty=false`）上校验 formal 夹具（`users=2002`, `published_videos=20001`, `follows=11011`, `interactions=50050`, 跨阈值作者、多兴趣登录读者）；`run_formal_feed.sh` 保留 `2026-11-09` 历史 JSON，并将新实测归档至 `docs/benchmarks/feed-warm-cache-continuous-2026-11-10.json`（含 `git` SHA 与 `dirty` 状态）。
+- [x] 按 TEST_STANDARD 运行 10/20 并发、30s 预热、60s 实测、各三轮全 24 轮矩阵（`task_timing.py` 主动运行 `2,240.249s`），并补齐纯无缓存（`REDIS_ADDR=""`）70/20/10 混合读写（含 `recommend`/`following`/`hot` 与发布对照）共 6 正式轮 + 2 诊断轮（`1,275.205s`，归档 `docs/benchmarks/feed-a04-mixed-2026-11-11.json`）；明确区分共享缓存（`following` p1 / `hot` 99.69%）与未缓存 SQL（`recommend_logged_in` / `following_deep`）。
+- [x] 核验 P95<=200ms/P99<=500ms（Compose 24 轮 P95 max 103.15ms、P99 max 131.54ms；混合冷负载 Following P95 提升 34.37% >= 20%、推荐冷 SQL P95 69.11–87.58ms）、0 错误、游标零重漏、缓存精准失效及 `counter`/`outbox`/`fanout` 0 偏差；保留全部原始轮次结果，不降规模或删断言。
+- [x] 在 [G07](tasks/G07.md) 与 [RELEASE_ACCEPTANCE](RELEASE_ACCEPTANCE.md) 逐项列出“已有且仍适用 / 本次通过 / 待确认”，结合三份独立证据闭环后正式关闭 Gate A04（未以 warm-only JSON 单独宣布 full A04）。
 
 **CLOSE-03：最终交付收口（未完成）**
 
@@ -161,14 +161,14 @@ G06 生产查询、G08 群聊、G09 故障及 G10 正式容灾的已提交实测
 
 复用：`docs/QUERY_PLANS.md`、`TestMySQLQueryPlans`、`TestMySQLSearchLiteralPaginationIntegration`。退出条件：A08 真实规模结果和可复现计划，明确搜索方案适用范围，无需默认引入 Elasticsearch。
 
-### G07 Feed 持续暖缓存门槛（阶段性完成，交付报告：[docs/tasks/G07.md](tasks/G07.md)）
+### G07 Feed 持续暖缓存与混合推拉门槛（已完成，交付报告：[docs/tasks/G07.md](tasks/G07.md)）
 
-- [ ] 复用完整基准数据，匿名/登录身份及缓存资格必须与生产实现一致；普通登录个性化推荐若不缓存应明确走 SQL，不能伪造命中（当前夹具为 10 作者 / 120 视频小规模基准；正式 20,000 视频 / 2,000 用户全量生产规模持续压测待补证）。
-- [ ] 按 TEST_STANDARD 执行 10/20 并发、30秒预热、60秒实测、3轮；关注首页/深页、登录推荐、热榜覆盖冷/暖路径（各场景逐个重复三轮待补全完整压测覆盖）。
-- [ ] 20 并发预热场景三轮 P95≤200ms、P99≤500ms，无意外5xx与页面重复遗漏；记录完整正文时延、命中、SQL、CPU/RSS（当前实测小夹具持续 P95 约 42–43ms、P99 约 52ms 达标；正式全量规模待补证）。
-- [x] 重用既有120视频/320关注者 fanout 和已通过无缓存A04收益证据；只在相关查询发生改变时重跑完整收益对照。
+- [x] 复用完整基准数据（`users=2002`, `published_videos=20001`, `follows=11011`, `interactions=50050`），匿名/登录身份及缓存资格与生产实现一致；普通登录个性化推荐 `recommend_logged_in` 与 `following_deep` 明确走实时未缓存 SQL，不伪造共享缓存命中。
+- [x] 按 TEST_STANDARD 执行 10/20 并发、30秒预热、60秒实测、3轮；`following`/`following_deep`/`recommend_logged_in`/`hot` 全 24 轮覆盖冷/暖路径，并独立完成无缓存 70/20/10 混合读写（6 正式轮 + 每轮 20 发布）对照。
+- [x] 20 并发场景三轮 P95≤200ms、P99≤500ms（Compose 24 轮 856,152 请求 0 失败，P95 max `103.15ms`、P99 max `131.54ms`；冷混合读写 196,612 请求 0 失败，Hybrid Following P95 改善 `34.37%`），游标无重复遗漏、缓存失效与计数器/Outbox/Fanout 一致性全通过。
+- [x] 重用既有120视频/320关注者 fanout 排空证据（`docs/benchmarks/feed-fanout-sustained-drain-30s-2026-11-05.json`，`following_feed.go`/`feed_fanout.go` 自 `a6708f0` 起 0 行修改）；在最终源码 `8bef0c5` 上补齐全套 `feed-warm-cache-continuous-2026-11-10.json` 与 `feed-a04-mixed-2026-11-11.json`。
 
-复用：`tests/integration/im/feed_cache_load_test.go`、`feed_a04_mixed.py`、`tests/load`。新增驱动/入口在任务报告写出后再引用，当前12并发240请求短突发不能直接勾选本项。退出条件：A04 规定持续缓存负载证据完整，未达门槛先诊断，不降规模/阈值。
+复用：`tests/integration/run_formal_feed.sh`、`tests/integration/feed_warm_cache_continuous.py`、`tests/integration/feed_a04_mixed.py`、`tests/load`。退出条件：A04 规定持续缓存与无缓存混合负载证据均在最终源码 `8bef0c5` 闭环，Gate A04 / CLOSE-01 通过。
 
 ### G08 群聊扇出与设备恢复（已完成，交付报告：[docs/tasks/G08.md](tasks/G08.md)）
 
