@@ -46,3 +46,8 @@ Owner：集成 agent。基线 `ce0416ff0d964a5d0264ce79e0b6c0a6404d9fd6`（PR #6
 首轮 run [43056633542](https://github.com/liuzhouquan/GoStream/actions/runs/43056633542) 的浏览器/视频两任务在业务测试前的FFmpeg安装步骤退出124。日志显示 `Get file:/etc/apt/apt-mirrors.txt` 后仍四次访问Azure HTTP源，各约20秒，90秒metadata预算耗尽。原脚本只替换 `.list/.sources` 中的直接URL，未替换间接镜像列表。
 
 新增纯文件改写helper覆盖 `apt-mirrors*.txt`，仍仅替换Azure Ubuntu origin，保留套件、签名和其他厂商源，不放宽90s/240s预算。镜像列表夹具在原直接改写逻辑下失败，修正后两项文件回归及幂等验证通过。开发机保护实测仍在apt操作前退出。最终全量诊断133项OK、0跳过（37.217s），替代前述131项计数。该CI失败不归因于业务Go测试；最终完整CI须针对新增修正后的head重新验证。
+
+
+第二轮 run43058017410 的日志证实镜像列表已改成archive HTTPS，但该域名仍持续超时。因此不能把“已重写文件”当作“网络已恢复”。安装器增加有界下载探测：只允许三个Ubuntu官方HTTPS源，实际下载当前suite的InRelease，每个最多8秒；选择首个可达源，apt使用相同IPv4路径且继续原签名校验。全部不可达则在修改源或安装前明确失败，不跳过真实FFmpeg测试。原90s/240s apt预算不变，探测额外最多24秒。默认路径/IPv6是否是历史超时根因尚未证实，不作归因结论。
+
+真实shell配合临时curl/sudo/ffmpeg夹具验证首源失败后选择次源、全部失败时不修改系统；未修改本机apt。最终全量135项OK、0跳过，取代前述133计数；最终CI仍须验证实际远端网络和业务步骤。

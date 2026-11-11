@@ -1,5 +1,7 @@
 # 开发任务耗时诊断与监控
 
+2026-11-12 CI可达性探测：第二轮run43058017410已确认改写，但archive HTTPS仍超时。新增最多24秒的三个官方源InRelease完整下载探测，选择可达源并让apt走相同IPv4路径；全部不可达明确失败，签名和90s/240s apt预算不变。不据此声称IPv6或挂起为历史根因。
+
 2026-11-12 CI镜像列表补漏：PR65首轮 run43056633542 的两个FFmpeg安装步骤在90秒apt metadata预算退出124，尚未进入业务测试；runner的 `mirror+file:/etc/apt/apt-mirrors.txt` 间接地址未被原脚本改写。现将Azure origin替换覆盖镜像列表，保留签名、suite和90s/240s预算，文件级先失败后通过；不把这一故障计作Go测试耗时。
 
 2026-11-12 POST-02：`feed_warm_cache_continuous.py` 统一总耗时为 `time.monotonic()`，记录 `elapsed_clock=monotonic`，同时保留独立的 `wall_elapsed_seconds`。墙钟跳变回归证明2秒不会记成25,900秒；这不证明旧报告差异由挂起引起。Compose报告另记录测量端口对应容器的镜像ID及运行中二进制SHA256；不可采集时显式未验证，checkout与镜像不等价。真实双API采集通过、资源清零，见 [POST-RISKS](tasks/POST-RISKS.md)。本轮不重复长A04矩阵。

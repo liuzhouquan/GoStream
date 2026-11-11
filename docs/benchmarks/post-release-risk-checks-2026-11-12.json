@@ -197,9 +197,9 @@
       "timed_out": false
     },
     "diagnostics": {
-      "tests": 133,
+      "tests": 135,
       "skipped": 0,
-      "elapsed_seconds": 37.217,
+      "elapsed_seconds": 39.607,
       "exit_code": 0,
       "timed_out": false
     },
@@ -223,9 +223,9 @@
     "tests/integration/im/helpers_test.go": "9cd4d7e31af294e4923c644f1b7dd6e03ceb9fa61d216a92f7a4cd321e393845",
     "tests/integration/im/failure_logs_test.go": "212c1c5a71e9582d9f78c544b012aa71e675b2acc52c55452ca8cac79afcdc5b",
     "tests/integration/im/registration_trace_test.go": "2d9354d4b00a1194d0dc625aaba92771f9ec867c4954bc4a3c52c7b3cd8c01c4",
-    "tools/install_ci_ffmpeg.sh": "e861ec09bfa664e85e88da5c587d0e439e2524304b6fd00f983735253fb2a1c3",
-    "tools/rewrite_ci_apt_mirrors.py": "c7dac5945d8157eafc4e56a1f352ce6b58da7014fb023ded8c7b0b4d0e9a4262",
-    "tests/diagnostics/test_ci_apt_mirrors.py": "8eeab38ec57e8e7b791988409cd6cc0565fd26c10179ac8583ef881e3c184783"
+    "tools/install_ci_ffmpeg.sh": "60e807151177560b766d84958524f6ef019e4ef9283ab5cdbdeeef53fb0c9a59",
+    "tools/rewrite_ci_apt_mirrors.py": "e31873ba849fc31f76ceae00476c08941e8146cea437723dda2cb6fa4b2d5735",
+    "tests/diagnostics/test_ci_apt_mirrors.py": "42886d5457b1293b51b13d17af46d0ca45443c4e59f23fe160ddc21a46820d56"
   },
   "ci_environment_fix": {
     "first_run": 43056633542,
@@ -235,6 +235,10 @@
     ],
     "failure": "apt metadata exceeded unchanged 90s budget; mirror+file:/etc/apt/apt-mirrors.txt still referenced Azure HTTP origins",
     "fix": "rewrite Azure origins in apt-mirrors*.txt as well as direct .list/.sources; preserve suites, signed-by, timeouts and all assertions",
-    "regression": "direct-only behavior failed indirect-mirrorlist fixture; fixed behavior passes both fixture tests; developer invocation guard verified"
+    "regression": "direct-only behavior failed indirect-mirrorlist fixture; fixed behavior passes both fixture tests; developer invocation guard verified",
+    "second_run": 43058017410,
+    "second_failure": "mirror rewrite confirmed in both job logs, but archive.ubuntu.com HTTPS metadata still timed out before business tests",
+    "bounded_probe": "download actual InRelease from up to three official Ubuntu HTTPS origins via IPv4, at most8s each; select first reachable and apply same IPv4 path to apt; fail explicitly if none reachable",
+    "probe_regression": "real shell with fixture executables: first mirror fails and second succeeds; all three fail => no sudo/source mutation; unexpected origins rejected"
   }
 }

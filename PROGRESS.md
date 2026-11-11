@@ -2,6 +2,9 @@
 
 Last updated: 2026-11-12
 
+2026-11-12 PR65 CI mirror reachability:
+- Second run43058017410 confirmed source rewrite, but archive HTTPS still timed out. Add bounded complete InRelease probes over IPv4 to three official origins (8s each), select a reachable origin, align apt network path, preserve signing and90s/240s apt bounds; no reachable origin => explicit failure. Actual shell fixture tests cover fallback/all-unreachable without touching host apt. Final135 diagnostics PASS; do not infer a specific historical IPv6 cause.
+
 2026-11-12 PR65 CI apt mirror indirection correction:
 - Initial run43056633542 browser/video jobs timed out124 during apt metadata before business tests; apt-mirrors.txt retained Azure HTTP URLs because the existing rewrite covered direct source files only. A real file fixture reproduces the omission. Extend origin-only rewriting to apt-mirrors*.txt, preserve signing/suites and90s/240s bounds; guard refuses developer invocation. Two focused tests and final133 diagnostics PASS37.217s; final new-head CI required.
 
