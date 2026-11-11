@@ -1,12 +1,31 @@
 """A 200 response cannot hide an incomplete or inconsistent Feed payload."""
 from pathlib import Path
 import sys
+import threading
+import time
+from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tests/integration"))
 import feed_warm_cache_smoke as smoke
 import feed_warm_cache_continuous as continuous
+
+
+def _deterministic_time():
+    """Return a module-local time shim whose monotonic clock advances only on explicit ticks."""
+    state = {"now": 100.0}
+    lock = threading.Lock()
+
+    def monotonic():
+        with lock:
+            return state["now"]
+
+    def advance(delta=0.005):
+        with lock:
+            state["now"] += delta
+
+    return SimpleNamespace(monotonic=monotonic, sleep=time.sleep, time=time.time), advance
 
 
 class FeedPayloadValidationTest(unittest.TestCase):
@@ -22,11 +41,15 @@ class FeedPayloadValidationTest(unittest.TestCase):
         for payload in invalid:
             with self.subTest(payload=payload):
                 calls = 0
+                clock, advance = _deterministic_time()
                 def response(*args, **kwargs):
                     nonlocal calls
                     calls += 1
+                    if calls > 1:
+                        advance(0.006)
                     return 200, complete if calls == 1 else payload, 1.0
-                with patch.object(smoke, "call_api", side_effect=response):
+                with patch.object(smoke, "call_api", side_effect=response), \
+                     patch.object(smoke, "time", clock):
                     result = smoke.run_load_burst(["http://fixture"], "/api/feed?limit=20", "", 1, .01)
                 self.assertGreater(result["total_requests"], 0)
                 self.assertEqual(result["successes"], 0)
@@ -53,6 +76,7 @@ class FeedPayloadValidationTest(unittest.TestCase):
     def test_continuous_feed_empty_samples_returns_none_latencies(self):
         valid_items = [{"id": i + 1} for i in range(20)]
         call_count = 0
+        clock, advance = _deterministic_time()
 
         def response(base_url, path, method="GET", token="", **kwargs):
             nonlocal call_count
@@ -61,9 +85,11 @@ class FeedPayloadValidationTest(unittest.TestCase):
                 # Baseline call succeeds
                 return 200, {"items": valid_items, "next_cursor": None}, 5.0
             # Subsequent measurement calls return 500 (no successful samples in window)
+            advance(0.02)
             return 500, {"error": "internal error"}, 10.0
 
-        with patch.object(continuous, "call_api", side_effect=response):
+        with patch.object(continuous, "call_api", side_effect=response), \
+             patch.object(continuous, "time", clock):
             res = continuous.run_load_burst(["http://fixture"], "/api/feed", "", 1, 0.05)
             self.assertEqual(res["successes"], 0)
             self.assertGreater(res["failures"], 0)
