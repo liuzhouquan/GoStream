@@ -40,3 +40,9 @@ Owner：集成 agent。基线 `ce0416ff0d964a5d0264ce79e0b6c0a6404d9fd6`（PR #6
 - `go vet ./...`、`go build ./cmd/...`、`node --check web/app.js`、`git diff --check` exit0。
 - 时钟跃变、日志脱敏、不可写诊断磁盘、SIGTERM启动所有权、容器身份不匹配均有回归。单元服务和Docker真实组件的证据明确区分。
 - 本PR最后提交仍须运行远端CI；合并后核对主线与被测树一致。历史EOF及历史视频500的精确归因保持以上边界，不新增无依据的功能或“修复”。
+
+## 本轮 CI 发现的 apt 镜像列表遗漏
+
+首轮 run [43056633542](https://github.com/liuzhouquan/GoStream/actions/runs/43056633542) 的浏览器/视频两任务在业务测试前的FFmpeg安装步骤退出124。日志显示 `Get file:/etc/apt/apt-mirrors.txt` 后仍四次访问Azure HTTP源，各约20秒，90秒metadata预算耗尽。原脚本只替换 `.list/.sources` 中的直接URL，未替换间接镜像列表。
+
+新增纯文件改写helper覆盖 `apt-mirrors*.txt`，仍仅替换Azure Ubuntu origin，保留套件、签名和其他厂商源，不放宽90s/240s预算。镜像列表夹具在原直接改写逻辑下失败，修正后两项文件回归及幂等验证通过。开发机保护实测仍在apt操作前退出。最终全量诊断133项OK、0跳过（37.217s），替代前述131项计数。该CI失败不归因于业务Go测试；最终完整CI须针对新增修正后的head重新验证。

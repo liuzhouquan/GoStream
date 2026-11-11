@@ -1,5 +1,7 @@
 # 开发任务耗时诊断与监控
 
+2026-11-12 CI镜像列表补漏：PR65首轮 run43056633542 的两个FFmpeg安装步骤在90秒apt metadata预算退出124，尚未进入业务测试；runner的 `mirror+file:/etc/apt/apt-mirrors.txt` 间接地址未被原脚本改写。现将Azure origin替换覆盖镜像列表，保留签名、suite和90s/240s预算，文件级先失败后通过；不把这一故障计作Go测试耗时。
+
 2026-11-12 POST-02：`feed_warm_cache_continuous.py` 统一总耗时为 `time.monotonic()`，记录 `elapsed_clock=monotonic`，同时保留独立的 `wall_elapsed_seconds`。墙钟跳变回归证明2秒不会记成25,900秒；这不证明旧报告差异由挂起引起。Compose报告另记录测量端口对应容器的镜像ID及运行中二进制SHA256；不可采集时显式未验证，checkout与镜像不等价。真实双API采集通过、资源清零，见 [POST-RISKS](tasks/POST-RISKS.md)。本轮不重复长A04矩阵。
 
 2026-11-10 补充：PR #63 首轮 CI `42813554279` 的 video-recovery 安装 FFmpeg 步骤从 12:11:14Z 持续至 12:21:08Z 被 10 分钟任务上限取消，业务测试尚未开始。日志为 Azure Ubuntu HTTP 源下载，多个小包耗时 15–30 秒，部分包重试；不能把这段时间归因于 Go 测试。两个 FFmpeg 安装步骤统一改用仅限 GitHub runner 的 `tools/install_ci_ffmpeg.sh`：保留 Ubuntu 签名及 suite，切换该镜像为 Ubuntu 官方 HTTPS 源，metadata/install 分别设置 90s/240s 上限并验证真实 ffmpeg/ffprobe；安装失败依然失败，不降测试门槛。最终有效性以本 PR 最新 CI 为准。

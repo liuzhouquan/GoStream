@@ -8,14 +8,9 @@ fi
 
 # The Azure HTTP mirror stalled downloading FFmpeg dependencies in run
 # 42813554279. Keep Ubuntu signing checks and suites; change only that origin.
-for source in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources /etc/apt/sources.list.d/*.list; do
-  if [[ -f "$source" ]]; then
-    sudo sed -i \
-      -e 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
-      -e 's|https://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
-      "$source"
-  fi
-done
+# Hosted images can refer to mirror+file:/etc/apt/apt-mirrors.txt. Rewriting
+# only sources.list(.d) leaves the real HTTP origin untouched in that case.
+sudo python3 "$(dirname "$0")/rewrite_ci_apt_mirrors.py" /etc/apt
 
 if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
   apt_options=(-o Acquire::Retries=1 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15)

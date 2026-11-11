@@ -197,14 +197,21 @@
       "timed_out": false
     },
     "diagnostics": {
+      "tests": 133,
+      "skipped": 0,
+      "elapsed_seconds": 37.217,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    "focused_race": "cmd/gostream PASS1.136s; tests/integration/im PASS2.192s",
+    "static_checks": "go vet ./...; go build ./cmd/...; node --check web/app.js; git diff --check: exit0",
+    "diagnostics_before_ci_mirror_fix": {
       "tests": 131,
       "skipped": 0,
       "elapsed_seconds": 38.076,
       "exit_code": 0,
       "timed_out": false
-    },
-    "focused_race": "cmd/gostream PASS1.136s; tests/integration/im PASS2.192s",
-    "static_checks": "go vet ./...; go build ./cmd/...; node --check web/app.js; git diff --check: exit0"
+    }
   },
   "source_sha256": {
     "cmd/gostream/database_pool.go": "03296024be54775662623c0d49e8aca50ffdacad7e90fef1d7c3ba964c482ed7",
@@ -215,6 +222,19 @@
     "tests/integration/im/load_setup_test.go": "2cf6626a24898f47595b65fded7870504138a7aa77360579f07f6f2b0e1664de",
     "tests/integration/im/helpers_test.go": "9cd4d7e31af294e4923c644f1b7dd6e03ceb9fa61d216a92f7a4cd321e393845",
     "tests/integration/im/failure_logs_test.go": "212c1c5a71e9582d9f78c544b012aa71e675b2acc52c55452ca8cac79afcdc5b",
-    "tests/integration/im/registration_trace_test.go": "2d9354d4b00a1194d0dc625aaba92771f9ec867c4954bc4a3c52c7b3cd8c01c4"
+    "tests/integration/im/registration_trace_test.go": "2d9354d4b00a1194d0dc625aaba92771f9ec867c4954bc4a3c52c7b3cd8c01c4",
+    "tools/install_ci_ffmpeg.sh": "e861ec09bfa664e85e88da5c587d0e439e2524304b6fd00f983735253fb2a1c3",
+    "tools/rewrite_ci_apt_mirrors.py": "c7dac5945d8157eafc4e56a1f352ce6b58da7014fb023ded8c7b0b4d0e9a4262",
+    "tests/diagnostics/test_ci_apt_mirrors.py": "8eeab38ec57e8e7b791988409cd6cc0565fd26c10179ac8583ef881e3c184783"
+  },
+  "ci_environment_fix": {
+    "first_run": 43056633542,
+    "failed_before_business_tests": [
+      "browser-workflow",
+      "video-recovery-integration"
+    ],
+    "failure": "apt metadata exceeded unchanged 90s budget; mirror+file:/etc/apt/apt-mirrors.txt still referenced Azure HTTP origins",
+    "fix": "rewrite Azure origins in apt-mirrors*.txt as well as direct .list/.sources; preserve suites, signed-by, timeouts and all assertions",
+    "regression": "direct-only behavior failed indirect-mirrorlist fixture; fixed behavior passes both fixture tests; developer invocation guard verified"
   }
 }

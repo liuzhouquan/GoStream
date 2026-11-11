@@ -2,6 +2,9 @@
 
 Last updated: 2026-11-12
 
+2026-11-12 PR65 CI apt mirror indirection correction:
+- Initial run43056633542 browser/video jobs timed out124 during apt metadata before business tests; apt-mirrors.txt retained Azure HTTP URLs because the existing rewrite covered direct source files only. A real file fixture reproduces the omission. Extend origin-only rewriting to apt-mirrors*.txt, preserve signing/suites and90s/240s bounds; guard refuses developer invocation. Two focused tests and final133 diagnostics PASS37.217s; final new-head CI required.
+
 2026-11-12 POST-01/02/03 risk remediation:
 - PR64 merged at ce0416f after final f9c9bf4 eight-job CI success; local main tree was verified identical. v1.0 scope remains complete.
 - Captured real SQLite 500 in component round15 (groups.go:142 database is locked). Deterministic stale-snapshot upgrade regression failed before the single-connection local API pool fix; focused race and 15 full recovery rounds pass. Historical video500 exact attribution remains unprovable without its lost logs.
