@@ -2,6 +2,10 @@
 
 Last updated: 2026-11-11
 
+2026-11-11 CI multi-device replay-barrier correction:
+- CI99e6ded exposed a steady-delivery test reading an initial replay duplicate as the second live message. Controlled SQL scheduling reproduced oldID1/expected2 with only2 persistedrows. Strict pong barriers on all initial and newly replayed devices fix setup ordering; all delivery assertions remain. Ordinary50/race20 PASS; temporary SQL injection removed.
+- Preserve a separate IM load-registration EOF before the measured workload as unconfirmed POST-03; no speculative transport fix, POST retry, rate-limit or bcrypt relaxation. New head requires the complete8-job CI again.
+
 2026-11-11 Formal recovery report contract alignment:
 - Reproduced the legacy ten-asset assertion rejecting the real130-asset formal report. Keep original checkpoint/error assertions, compare against exact frozen SQL/object/row totals, and add corrupted-aggregate rejection cases. Focused4 testsPASS; final diagnostics123 OK(2 missing-report skips),42.389s. Final CI must match latesthead.
 

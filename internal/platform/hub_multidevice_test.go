@@ -78,10 +78,15 @@ func TestWebSocketMultipleDevicesReceiveCommittedEvents(t *testing.T) {
 	if s.Hub.count() != 4 || !s.Hub.online(ownerID) || !s.Hub.online(memberID) {
 		t.Fatalf("initial connections=%d", s.Hub.count())
 	}
-	if err := ownerA.WriteJSON(socketEvent{Type: "ping"}); err != nil {
-		t.Fatal(err)
+	// ready precedes SQL replay. Establish the post-replay pong on every
+	// initial socket before testing steady-state committed-event fanout;
+	// otherwise the first event can arrive through both replay and live push.
+	for _, conn := range []*websocket.Conn{ownerA, ownerB, memberA, memberB} {
+		if err := conn.WriteJSON(socketEvent{Type: "ping"}); err != nil {
+			t.Fatal(err)
+		}
+		read(conn, "pong")
 	}
-	read(ownerA, "pong")
 	if err := ownerA.WriteJSON(socketEvent{Type: "message", ClientID: "multi-invalid", RecipientID: ownerID, Body: "self"}); err != nil {
 		t.Fatal(err)
 	}
@@ -100,6 +105,10 @@ func TestWebSocketMultipleDevicesReceiveCommittedEvents(t *testing.T) {
 	if replay := read(memberC, "message"); replay.Message.ID != ack.MessageID {
 		t.Fatalf("new device replayed message %d, want %d", replay.Message.ID, ack.MessageID)
 	}
+	if err := memberC.WriteJSON(socketEvent{Type: "ping"}); err != nil {
+		t.Fatal(err)
+	}
+	read(memberC, "pong")
 	_ = memberA.Close()
 	for until := time.Now().Add(2 * time.Second); s.Hub.count() != 4 && time.Now().Before(until); {
 		time.Sleep(10 * time.Millisecond)
@@ -115,8 +124,13 @@ func TestWebSocketMultipleDevicesReceiveCommittedEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	ack2 := read(ownerA, "ack")
-	if ack2.MessageID == ack.MessageID || read(ownerB, "message").Message.ID != ack2.MessageID || read(memberB, "message").Message.ID != ack2.MessageID || read(memberC, "message").Message.ID != ack2.MessageID {
-		t.Fatal("second message did not reach each remaining device exactly once")
+	secondOwnerB := read(ownerB, "message")
+	secondMemberB := read(memberB, "message")
+	secondMemberC := read(memberC, "message")
+	if ack2.MessageID == ack.MessageID || secondOwnerB.Message.ID != ack2.MessageID || secondMemberB.Message.ID != ack2.MessageID || secondMemberC.Message.ID != ack2.MessageID {
+		var persisted int64
+		countErr := db.Model(&ChatMessage{}).Where("client_id IN ?", []string{"multi-direct-1", "multi-direct-2"}).Count(&persisted).Error
+		t.Fatalf("second message did not reach each remaining device exactly once: first=%d second=%d ownerB=%d memberB=%d memberC=%d persisted=%d countErr=%v", ack.MessageID, ack2.MessageID, secondOwnerB.Message.ID, secondMemberB.Message.ID, secondMemberC.Message.ID, persisted, countErr)
 	}
 	if err := ownerA.WriteJSON(socketEvent{Type: "group_message", ClientID: "multi-group-1", GroupID: group.ID, Body: "group hello"}); err != nil {
 		t.Fatal(err)

@@ -25,6 +25,13 @@ sequenceDiagram
 
 Local recipients and the sender's other local devices are also reached by the process-local hub. ACK, error, pong and initial replay frames stay on their originating socket. Each API currently allows eight sockets per account.
 
+`ready` marks an established socket and precedes initial history replay. A client
+that needs a barrier between replay and a controlled live-traffic phase can send
+`ping` and wait for its `pong`: the handler reads that ping after direct/group
+replay finishes. Replayed/live IDs can overlap during reconnect; clients still
+deduplicate by server ID. The multi-device steady-traffic test completes this
+barrier on every participating connection before checking strict delivery IDs.
+
 ## Guarantees and limits
 
 | Mechanism | Implemented behavior | Limit |

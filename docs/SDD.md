@@ -72,6 +72,7 @@ G06 生产查询、G08 群聊、G09 故障及 G10 正式容灾的已提交实测
 
 - **POST-01 / 待复现**：一次 SQLite 组件演练在视频发布返回500；相同代码下一次通过。未定位原因，不宣称已修复；保留原日志 `data/diagnostics/pr64-snapshot-final-component-timing.log`。后续用 `migration_backup_recovery_smoke.py --mode sqlite` 保留临时 API 日志并复现，确认是否为写锁竞争。正式 MySQL 演练与 CI 不因这一未确认原因自动判失败。
 - **POST-02 / P2 证据可读性**：暖缓存历史报告 wall clock 与 monotonic wrapper 统计不同；原因未证实。后续统一总耗时到 monotonic，并增加部署镜像/二进制摘要；保留旧数据，不重写成七小时持续压测。
+- **POST-03 / 待复现（测试准备）**：CI run42992176675的IM负载注册在约60秒后POST EOF，未进入测量窗口；没有证据归因为生产业务错误或idle连接复用。不得通过POST自动重试、降低bcrypt或关闭注册限流消除失败。若复现，保留脱敏API日志与httptrace来定位；最终CI必须如实通过，失败run不可冒充通过。
 - 多主机容量、长期 soak、移动端、模型推荐及强制微服务仍不是本版补做项目。
 
 ## 3. 规格与代码边界
