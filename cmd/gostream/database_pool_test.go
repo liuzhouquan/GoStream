@@ -1,10 +1,57 @@
 package main
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 )
+
+func TestSQLitePoolSerializesReadThenWriteTransactions(t *testing.T) {
+	db, err := sql.Open("sqlite3", sqliteDSN(filepath.Join(t.TempDir(), "contention.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := configureDatabasePool(db, "sqlite", func(string) string { return "" }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("CREATE TABLE counters (id INTEGER PRIMARY KEY, n INTEGER); INSERT INTO counters VALUES (1,0)"); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var n int
+	if err := tx.QueryRow("SELECT n FROM counters WHERE id=1").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	// A worker on the same API pool cannot commit while a business transaction
+	// holds a read snapshot. Otherwise WAL cannot upgrade that stale snapshot.
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, contenderErr := db.ExecContext(ctx, "UPDATE counters SET n=n+1 WHERE id=1")
+	if !errors.Is(contenderErr, context.DeadlineExceeded) {
+		_, upgradeErr := tx.Exec("UPDATE counters SET n=n+1 WHERE id=1")
+		t.Fatalf("competing writer bypassed pool: contender=%v snapshot_upgrade=%v", contenderErr, upgradeErr)
+	}
+	if _, err := tx.Exec("UPDATE counters SET n=n+1 WHERE id=1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("UPDATE counters SET n=n+1 WHERE id=1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT n FROM counters WHERE id=1").Scan(&n); err != nil || n != 2 {
+		t.Fatalf("serialized writes lost: n=%d err=%v", n, err)
+	}
+}
 
 func TestDatabasePoolConfigFromEnvDefaultsAndOverrides(t *testing.T) {
 	defaults, err := databasePoolConfigFromEnv(func(string) string { return "" })

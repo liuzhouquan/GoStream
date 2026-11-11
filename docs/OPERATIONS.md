@@ -4,6 +4,12 @@
 
 ---
 
+## SQLite 本地配置与失败取证
+
+SQLite 开发模式由单个 API 进程使用单连接池，避免后台 worker 与业务读后写事务竞争造成 `database is locked`。WAL 与五秒 busy timeout 仍保留；多实例使用 MySQL。不要通过共享 SQLite 文件部署两个 API。
+
+恢复演练失败时，在 `--report /path/drill.json` 的同目录生成 `drill.failure.json`（0600）：包含有界、脱敏的 API 日志和错误；SQL行正文被省略。临时库、媒体和子进程仍按原规则清理。日志目录不可写时不替换原故障异常。文件仅用于本地排查，不上传原始日志；不同运行应选择不同报告路径。IM集成测试失败时同样输出脱敏API日志，注册网络错误带连接trace；EOF不自动重放POST。
+
 ## 1. 灾备策略与一致性边界
 
 GoStream 采用**模块化单体与多组件共享架构**。核心业务事实存储在 MySQL/SQLite 关系数据库中，媒体资产文件存储在 MinIO 对象存储或本地文件系统，异步事件由 RabbitMQ 削峰投递，实时连接与缓存由 Redis 托管。

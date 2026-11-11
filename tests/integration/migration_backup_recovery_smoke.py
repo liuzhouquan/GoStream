@@ -18,9 +18,11 @@ Under --formal-scale, verifies the formal Gate A10 requirements:
 """
 
 import argparse
+from contextvars import ContextVar
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import shutil
@@ -45,6 +47,76 @@ from group_im_smoke import SimpleWebSocket
 from recovery_snapshot import capture_sql_snapshot, assert_sql_snapshot, read_media_manifest, assert_media_coverage, TempSpaceSamples
 
 SAMPLE_MP4 = bytes([0, 0, 0, 24]) + b"ftypisom" + bytes(4) + b"isommp42"
+ACTIVE_DIAGNOSTICS = ContextVar("recovery_diagnostics", default=None)
+
+
+def start_logged_api(command, env, directory, role):
+    """Keep owned child output until the diagnostic context has handled failure."""
+    diagnostics = ACTIVE_DIAGNOSTICS.get()
+    if diagnostics is not None:
+        diagnostics.add_secrets(env)
+    path = Path(directory) / f"{role}.api.log"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, "ab") as log:
+        return subprocess.Popen(command, env=env, stdout=log, stderr=log)
+
+
+class RecoveryDiagnostics:
+    """Export bounded, sanitized failure evidence before TemporaryDirectory exits."""
+    def __init__(self, report, directory):
+        self.failure_path = Path(report).with_suffix(".failure.json")
+        self.directory = Path(directory)
+        self.secrets = []
+
+    def add_secrets(self, env):
+        self.secrets.extend(value for key, value in env.items()
+                            if value and any(word in key.upper() for word in
+                                             ("SECRET", "PASSWORD", "TOKEN", "DSN", "ACCESS_KEY")))
+
+    def __enter__(self):
+        self.failure_path.unlink(missing_ok=True)
+        self.add_secrets(os.environ)
+        self.token = ACTIVE_DIAGNOSTICS.set(self)
+        return self
+
+    def __exit__(self, kind, error, traceback):
+        ACTIVE_DIAGNOSTICS.reset(self.token)
+        if kind is None:
+            return False
+        try:
+            self.write_failure(kind, error)
+        except OSError as diagnostic_error:
+            # A full/unavailable diagnostic disk must not replace the original
+            # failure or prevent the surrounding resource contexts from exiting.
+            print(f"Recovery failure evidence unavailable ({type(diagnostic_error).__name__})", file=sys.stderr)
+        return False
+
+    def write_failure(self, kind, error):
+        secrets_to_hide = self.secrets.copy()
+        # Fixture credentials are fixed even when they were not inherited from env.
+        secrets_to_hide += ["backup-recovery-jwt-secret-at-least-32-bytes!!",
+                            "gostream-local-minio-secret", "UserPassword123!", "Password123!",
+                            "isolated-im-fixture-password"]
+        def sanitize(value):
+            for secret in sorted(secrets_to_hide, key=len, reverse=True):
+                value = value.replace(secret, "<REDACTED>")
+            value = re.sub(r"(?i)Bearer\s+[^\s\"']+", "Bearer <REDACTED>", value)
+            value = re.sub(r'(?i)("(?:access_token|password|secret)"\s*:\s*)"[^"]*"', r'\1"<REDACTED>"', value)
+            value = re.sub(r"\x1b\[[0-9;]*m", "", value)
+            # GORM SQL includes row values; retain the error line, omit SQL text.
+            return "\n".join(line for line in value.splitlines() if "[rows:" not in line)
+        logs = {}
+        for path in sorted(self.directory.glob("*.api.log")):
+            with path.open("rb") as stream:
+                stream.seek(max(0, path.stat().st_size - 65536))
+                logs[path.name] = sanitize(stream.read().decode("utf-8", errors="replace"))
+        data = {"status": "FAIL", "exception": kind.__name__, "message": sanitize(str(error)), "api_logs": logs}
+        self.failure_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(self.failure_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w") as output:
+            json.dump(data, output, indent=2)
+        print(f"Sanitized recovery failure evidence: {self.failure_path}", file=sys.stderr)
 
 
 def find_default_ffmpeg() -> str:
@@ -430,6 +502,12 @@ class MigrationBackupRecoveryRunner:
         print(f"  [Formal Scale] Media import complete: {imp_report}")
 
     def run_all(self, server_bin: str, go_bin: str, env_template: dict, tmpdir: str, media_bin: str = "") -> dict:
+        diagnostics = ACTIVE_DIAGNOSTICS.get()
+        if diagnostics is not None:
+            diagnostics.add_secrets(env_template)
+            diagnostics.add_secrets({"MINIO_ACCESS_KEY": self.minio_access_key,
+                                     "MINIO_SECRET_KEY": self.minio_secret_key,
+                                     "PASSWORD": "gostream-local"})
         if self.mode == "compose":
             stack = self.owned_stack
             if (not isinstance(stack, AcceptanceStack) or not stack.started
@@ -861,7 +939,7 @@ class MigrationBackupRecoveryRunner:
 
         try:
             with finish_process_start():
-                p_restored = subprocess.Popen([server_bin], env=restored_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                p_restored = start_logged_api([server_bin], restored_env, tmpdir, "restored")
             wait_ready(restored_url, timeout=60)
             restore_ready_duration_ms = round((time.monotonic() - restore_start) * 1000, 2)
             print(f"  Restored API is /ready in {restore_ready_duration_ms}ms.")
@@ -1118,7 +1196,7 @@ class MigrationBackupRecoveryRunner:
             p_replay = None
             try:
                 with finish_process_start():
-                    p_replay = subprocess.Popen([server_bin], env=replay_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    p_replay = start_logged_api([server_bin], replay_env, tmpdir, "replay")
                 wait_ready(replay_url, timeout=30)
             finally:
                 if p_replay is not None:
@@ -1159,7 +1237,7 @@ class MigrationBackupRecoveryRunner:
             p_replay = None
             try:
                 with finish_process_start():
-                    p_replay = subprocess.Popen([server_bin], env=replay_env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    p_replay = start_logged_api([server_bin], replay_env, tmpdir, "replay")
                 wait_ready(replay_url, timeout=15)
             finally:
                 if p_replay is not None:
@@ -1270,7 +1348,7 @@ def main():
         raise ValueError("Compose component drill requires --compose-e2e")
 
     if mode == "sqlite":
-        with tempfile.TemporaryDirectory(prefix="gostream_backup_drill_") as tmpdir:
+        with tempfile.TemporaryDirectory(prefix="gostream_backup_drill_") as tmpdir, RecoveryDiagnostics(report_path, tmpdir):
             db_path = os.path.join(tmpdir, "primary.db")
             media_dir = os.path.join(tmpdir, "primary_media")
             os.makedirs(media_dir, exist_ok=True)
@@ -1300,7 +1378,7 @@ def main():
             p = None
             try:
                 with finish_process_start():
-                    p = subprocess.Popen([server_bin], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    p = start_logged_api([server_bin], env, tmpdir, "source")
                 wait_ready(base_url, timeout=15)
                 runner = MigrationBackupRecoveryRunner(
                     mode="sqlite", base_url=base_url, db_path=db_path, media_dir=media_dir,
@@ -1320,7 +1398,7 @@ def main():
             minio_api_port=f"127.0.0.1:{find_free_port()}",
             minio_console_port=f"127.0.0.1:{find_free_port()}",
             go_bin=args.go_bin,
-        ) as stack, tempfile.TemporaryDirectory(prefix="gostream_backup_compose_") as tmpdir:
+        ) as stack, tempfile.TemporaryDirectory(prefix="gostream_backup_compose_") as tmpdir, RecoveryDiagnostics(report_path, tmpdir):
             mysql_container = find_compose_mysql_container(stack.project_name)
             server_bin = os.path.join(tmpdir, "gostream_server")
             media_bin = os.path.join(tmpdir, "gostream_media")

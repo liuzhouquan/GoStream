@@ -1,6 +1,6 @@
 # GoStream 求职展示版 SDD 与开发任务清单
 
-更新时间：2026-11-11。目标版本：`v1.0.0`。本文件是 coding agent 的交付范围和接手入口；产品边界见 [DELIVERY_SCOPE](DELIVERY_SCOPE.md)，验收门槛见 [TEST_STANDARD](TEST_STANDARD.md)。
+更新时间：2026-11-12。目标版本：`v1.0.0`。本文件是 coding agent 的交付范围和接手入口；产品边界见 [DELIVERY_SCOPE](DELIVERY_SCOPE.md)，验收门槛见 [TEST_STANDARD](TEST_STANDARD.md)。
 
 **当前依据：[PR64 独立审查与正式恢复复验](PR64_REVIEW_2026-11-11.md)。** 本版实现与既定验收收口见第 1 节，远端签收以 PR #64 最终 CI/合并树事实为准；后续待确认风险单列第 2.2 节，不继续扩充本版业务范围。2026-11-08/09/10 的阶段报告保留在 [PROGRESS](../PROGRESS.md) 和对应审查文件，不能覆盖最新结论。
 
@@ -66,13 +66,13 @@ G06 生产查询、G08 群聊、G09 故障及 G10 正式容灾的已提交实测
 - [x] 已审查差异并修复 `verify_quiescence` P1（先加失败复现单测后修复，并通过全部 117 项诊断与 `sqlite` 实机核验）；`docs/LOCAL_STUDY_GUIDE.md` 保持在原目录且经 `git check-ignore -v` 与 `git ls-files` 验证未被跟踪；已核对 Demo Runbook 并运行 `acceptance_stack.py --probe-only` 验证双 API 联合栈启停与零残留。
 - 项目完成判断按第 1 节签收规则；满足后是 v1.0 范围完成，后续功能进入下一版本。
 
-### 2.2 非阻断的待确认风险与后续改进
+### 2.2 发布后风险完善（POST-01/02/03）
 
-这些不是新增发布门槛，只有复现为真实正确性问题后再按严重性拆 PR。
+PR #64 已以 `ce0416f` 合并，最终候选 `f9c9bf4` 的八项 CI 全绿且合并树一致，本地 main 已核对。原定 v1.0 交付完成；本节属于维护，不新增业务或性能签收门槛。详见 [POST-RISKS 任务报告](tasks/POST-RISKS.md) 与 [实测摘要](benchmarks/post-release-risk-checks-2026-11-12.json)。本轮维护变更仍须通过其最终提交的 CI。
 
-- **POST-01 / 待复现**：一次 SQLite 组件演练在视频发布返回500；相同代码下一次通过。未定位原因，不宣称已修复；保留原日志 `data/diagnostics/pr64-snapshot-final-component-timing.log`。后续用 `migration_backup_recovery_smoke.py --mode sqlite` 保留临时 API 日志并复现，确认是否为写锁竞争。正式 MySQL 演练与 CI 不因这一未确认原因自动判失败。
-- **POST-02 / P2 证据可读性**：暖缓存历史报告 wall clock 与 monotonic wrapper 统计不同；原因未证实。后续统一总耗时到 monotonic，并增加部署镜像/二进制摘要；保留旧数据，不重写成七小时持续压测。
-- **POST-03 / 待复现（测试准备）**：CI run42992176675的IM负载注册在约60秒后POST EOF，未进入测量窗口；没有证据归因为生产业务错误或idle连接复用。不得通过POST自动重试、降低bcrypt或关闭注册限流消除失败。若复现，保留脱敏API日志与httptrace来定位；最终CI必须如实通过，失败run不可冒充通过。
+- **POST-01 / 已修复复现出的 SQLite 写竞争，保留历史归因边界**：原版循环在第15轮添加群成员返回500，API日志为 `groups.go:142 database is locked`。确定性 WAL 读快照/另一连接提交/升级写入回归先失败；本地 API 的 SQLite 连接池串行化后通过，15轮完整恢复演练全通过。MySQL池上限保持原行为；SQLite文件仅支持单 API 进程。历史视频发布500因原日志缺失，不能断言与本次完全同源。恢复 runner 失败时保留脱敏日志到 `--report` 同名 `.failure.json`，成功删除该路径的旧失败证据，不删除其他运行的日志。
+- **POST-02 / 后续报告时钟和部署指纹已完善**：未来 Feed 报告总耗时改用 monotonic，墙钟差值另存 `wall_elapsed_seconds`；模拟墙钟跃进25,900秒而单调时间2秒，报告准确记2秒。Compose报告按测量端口关联容器，采集 immutable image ID 与 `/proc/1/exe` SHA256；真实双 API 验证通过。无法采集时明确 `verified=false`，不把 checkout SHA 当部署证明。历史 wall/monotonic 差异具体原因仍未知，旧性能数据原样保留，不改成七小时持续负载。
+- **POST-03 / 诊断与复验完成，历史 EOF 根因仍待复现**：注册 transport 错误携带 got_conn/reused/idle/wrote_request/first_byte/connect_failed；失败后 Go测试输出脱敏API日志。真实HTTP断连回归保留EOF且只发一次POST；429等待和空闲连接超时反例正常成功。MySQL8.4.11/Redis8.2.9普通及race完整负载各通过（各3,125条持久消息、60次幂等检查）。不增加POST自动重试，不修改bcrypt或限流。若历史EOF再现，依据失败trace与API日志区分连接/进程/请求故障后再修；本次不能宣称该历史故障已消除。
 - 多主机容量、长期 soak、移动端、模型推荐及强制微服务仍不是本版补做项目。
 
 ## 3. 规格与代码边界

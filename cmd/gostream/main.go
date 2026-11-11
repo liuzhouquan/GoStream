@@ -64,14 +64,8 @@ func main() {
 		log.Fatal(err)
 	}
 	defer sqlDB.Close()
-	if driver == "mysql" {
-		poolConfig, err := databasePoolConfigFromEnv(os.Getenv)
-		if err != nil {
-			log.Fatalf("configure MySQL connection pool: %v", err)
-		}
-		if err := poolConfig.apply(sqlDB); err != nil {
-			log.Fatalf("configure MySQL connection pool: %v", err)
-		}
+	if err := configureDatabasePool(sqlDB, driver, os.Getenv); err != nil {
+		log.Fatalf("configure database connection pool: %v", err)
 	}
 	if err = migrations.Apply(context.Background(), db); err != nil {
 		log.Fatalf("migrate database: %v", err)

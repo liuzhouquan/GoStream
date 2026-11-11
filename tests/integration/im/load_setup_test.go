@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -19,6 +24,8 @@ func registerLoadAccount(ctx context.Context, base, name string) (account, time.
 	var waited time.Duration
 	for attempt := 0; attempt < 3; attempt++ {
 		requestCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		trace := &registrationTrace{}
+		requestCtx = httptrace.WithClientTrace(requestCtx, trace.callbacks())
 		request, err := http.NewRequestWithContext(requestCtx, "POST", base+"/api/users", bytes.NewReader(payload))
 		if err != nil {
 			cancel()
@@ -28,7 +35,7 @@ func registerLoadAccount(ctx context.Context, base, name string) (account, time.
 		response, err := http.DefaultClient.Do(request)
 		if err != nil {
 			cancel()
-			return account{}, waited, err
+			return account{}, waited, trace.wrap(err)
 		}
 		if response.StatusCode == http.StatusCreated {
 			var result account
@@ -61,6 +68,52 @@ func registerLoadAccount(ctx context.Context, base, name string) (account, time.
 		}
 	}
 	return account{}, waited, fmt.Errorf("registration retry budget exhausted")
+}
+
+func TestIMLoadRegistrationEOFIsNotRetriedAndHasTrace(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = conn.Close() // Server consumed POST but dropped the response: outcome is ambiguous.
+	}))
+	defer server.Close()
+	_, waited, err := registerLoadAccount(context.Background(), server.URL, "fixture")
+	if !errors.Is(err, io.EOF) || calls.Load() != 1 || waited != 0 {
+		t.Fatalf("EOF must remain a failure without replay: calls=%d wait=%v err=%v", calls.Load(), waited, err)
+	}
+	if !strings.Contains(err.Error(), "got_conn=true") || !strings.Contains(err.Error(), "first_byte=false") {
+		t.Fatalf("registration EOF lost transport evidence: %v", err)
+	}
+	if strings.Contains(err.Error(), "isolated-im-fixture-password") {
+		t.Fatal("registration diagnostic exposed credentials")
+	}
+}
+
+func TestIMLoadRegistrationAfterRateLimitAndIdleClose(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"error":"rate limited"}`))
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"user":{"id":7},"access_token":"test-only"}`))
+	}))
+	server.Config.IdleTimeout = 10 * time.Millisecond
+	server.Start()
+	defer server.Close()
+	who, wait, err := registerLoadAccount(context.Background(), server.URL, "fixture")
+	if err != nil || who.User.ID != 7 || calls.Load() != 2 || wait < time.Second {
+		t.Fatalf("rate-limit wait and idle close must not invent EOF: calls=%d wait=%v err=%v", calls.Load(), wait, err)
+	}
 }
 
 func TestIMLoadRegistrationRespectsRateLimit(t *testing.T) {
