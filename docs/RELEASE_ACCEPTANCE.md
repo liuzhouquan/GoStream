@@ -2,7 +2,7 @@
 
 **核查日期**：2026-11-11<br>
 **验收状态**：**A01–A12 核心门禁与 CLOSE-01/02/03 本地联合实测已闭环，待最终 PR 推送远端完成 GitHub Actions 8 项 CI 校验并合入 `main` 后正式签发 `v1.0.0`**<br>
-**候选分支**：`feat/close-03-final-delivery`（基于 `main@2c99951` 合入 `CLOSE-02@cdb90ab` 与 `CLOSE-01@43b5b30`；因本地 `gh` 令牌失效尚未推送远端触发最终 PR CI）<br>
+**候选分支**：`feat/close-03-final-delivery`（基于 `main@2c99951` 合入 `CLOSE-02@cdb90ab` 与 `CLOSE-01@43b5b30`；经 PR 提交触发远端 GitHub Actions 最终 CI 校验）<br>
 **执行环境**：Linux 6.18.33.2 WSL2 (Ubuntu 24.04 LTS), Go 1.27.2, Python 3.12, Docker Compose (双 API 实例 + MySQL 8.4 + Redis 8.2 + RabbitMQ 4.3 + MinIO)
 
 ---
@@ -69,7 +69,7 @@
    - 本系统**不支持无停写的在线热备**。在分布式数据库与对象存储并存的架构下，必须在停写维护窗口（Quiescent Window）排空在途作业并冻结写入口，以保证 SQL `media_assets` 与 MinIO 对象摘要一致性。
    - 在 `docs/benchmarks/close-02-recovery-report-2026-11-10.json` 正式规模（2,005 用户、20,010 发布视频、11,001 关注、50,002 互动）下实测：**RPO=0s**、单事务+对象备份耗时 **3.41s**、目标恢复至 `/ready` **32.51s**、至全业务恢复+断点续传+重放幂等完成 **35.61s**。
 4. **代码分支与 CI 对应关系**：
-   - 本阶段闭环成果（CLOSE-01/02/03）位于本地分支 `feat/close-03-final-delivery`，已完成本地全部静态检查、`go test` / `-race`、117 项诊断回归、双 API Compose 探针及 8 项 CI 作业的本地等价验证（宿主机无系统 `/usr/bin/ffmpeg` 时通过宿主机 FFmpeg + 仓库 `tools/ffprobe_shim.py` 完成恢复与双浏览器测试）；因本地 `gh auth status` 令牌失效，尚未推送远端 PR 触发 GitHub Actions 最终头提交 CI 并合入 `main`。
+   - 本阶段闭环成果（CLOSE-01/02/03）位于分支 `feat/close-03-final-delivery`，已完成本地全部静态检查、`go test` / `-race`、117 项诊断回归、双 API Compose 探针及 8 项 CI 作业的本地等价验证（宿主机无系统 `/usr/bin/ffmpeg` 时通过宿主机 FFmpeg + 仓库 `tools/ffprobe_shim.py` 完成恢复与双浏览器测试）；已推送分支发起 PR 以在 GitHub Actions 验证最终头提交 CI 并合入 `main`。
 
 ---
 
@@ -135,4 +135,4 @@ docker compose -f docker-compose.yml -f docker-compose.object.yml down -v
 1. **核心架构与功能闭环**：所有业务功能路径（双 API、MySQL、Redis、RabbitMQ、MinIO、FFmpeg）已在 Compose 联合环境实测通过，R1–R4 假阳性与凭据泄漏隐患及 CLOSE-03 核出的 `verify_quiescence` 异常吞没缺陷均已修复并补齐回归单测；
 2. **Gate A04 闭环（CLOSE-01 PASS）**：2026-11-09 暖缓存 JSON 保留作历史快照；在最终源码 `8bef0c5`（含推荐修复）上已补齐 Compose 24 轮持续矩阵（`docs/benchmarks/feed-warm-cache-continuous-2026-11-10.json`，856,152 请求 0 失败，P95 $\le$ 103.15ms）与隔离 MySQL 8.4 无缓存 70/20/10 混合读写对照（`docs/benchmarks/feed-a04-mixed-2026-11-11.json`，196,612 请求 0 失败，Hybrid Following P95 +34.37%，冷 SQL `feed_recommend` P95 `69.11–87.58ms`），结合未改路径 fanout 排空证据（`feed-fanout-sustained-drain-30s-2026-11-05.json`），**Gate A04 逐项闭环 PASS**（逐项处置见 [G07](tasks/G07.md) 3.3.1 节）。
 3. **Gate A10 闭环（CLOSE-02 PASS）**：在真实 Compose 联合栈上以正式规模（2,005 用户、20,010 视频、11,001 关注、50,002 互动）并严格验证停写维护窗口，完成 SQL 与 MinIO 全量恢复，实测 **RPO=0s、RTO=32.51s (/ready) / 35.61s (全业务+断点续传)**，6 大检查点全量通过且 0 资源残留（见 [G10](tasks/G10.md) 与 `docs/benchmarks/close-02-recovery-report-2026-11-10.json`）；早先 `2026-11-09`/`a04-a10-review-2026-11-10.json` 组件钻井保留作历史参考。
-4. **最终交付边界与发布前置**：A01–A12、本地 8 项 CI 等价测试与 Demo 联合探针均已在分支 `feat/close-03-final-delivery` 验证通过（详见 [G12](tasks/G12.md) 与 [PROGRESS](../PROGRESS.md)）；**最终签发 `v1.0.0` 仍待完成远端 GitHub Actions 8 项工作流验证并合入 `main` 且核对合并树一致性**（当前因本地 `gh` CLI 令牌失效待用户授权推送）。
+4. **最终交付边界与发布前置**：A01–A12、本地 8 项 CI 等价测试与 Demo 联合探针均已在分支 `feat/close-03-final-delivery` 验证通过（详见 [G12](tasks/G12.md) 与 [PROGRESS](../PROGRESS.md)）；**最终签发 `v1.0.0` 仍待完成远端 GitHub Actions 8 项工作流验证并合入 `main` 且核对合并树一致性**。

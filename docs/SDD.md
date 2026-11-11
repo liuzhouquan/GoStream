@@ -22,7 +22,7 @@
 
 - [ ] 本文件所有“发布必做”任务完成并达到各自退出条件（G01–G11 业务模块、CLOSE-01、CLOSE-02 与 CLOSE-03 本地全量验证均已在分支 `feat/close-03-final-delivery` 完成；仅余推送远端 CI 与合入 `main` 后签收）。
 - [ ] A01–A12 功能门槛及 TEST_STANDARD 的既定性能门槛逐项通过（A01–A12 已于 [RELEASE_ACCEPTANCE](RELEASE_ACCEPTANCE.md) 链接精确源码、命令与实测报告；待 PR 合入 `main` 并核对合并树一致性后勾选）。
-- [ ] 最终候选提交的 CI 全部通过并确认合并树一致（基线 PR #62 与本地 8 项 CI 等价验证均已通过；尚余远端推送后触发 GitHub Actions 8 项工作流验证并合入 `main`）。
+- [ ] 最终候选提交的 CI 全部通过并确认合并树一致（基线 PR #62 与本地 8 项 CI 等价验证均已通过；尚余远端 PR 触发 GitHub Actions 8 项工作流验证并合入 `main`）。
 - [x] 没有未处理的已确认 P0/P1（CLOSE-01/02 闭环及 CLOSE-03 对 `migration_backup_recovery_smoke.py` `verify_quiescence` 异常吞没 P1 的 TDD 复现与修复已验证通过）。
 - [x] README 可从新环境复现；API/迁移/故障恢复文档与代码相符；本地学习笔记保留且未被 Git 跟踪。
 - [x] 发布报告列出已支持场景、数据规模、真实性能、故障边界和演示步骤。
@@ -39,7 +39,7 @@
 | --- | --- | --- |
 | CLOSE-01 / G07 / A04 | 最终源码 `8bef0c5` 完成 Compose 24 轮（856,152 请求 0 失败，P95 $\le$ 103.15ms、P99 $\le$ 131.54ms）与隔离 MySQL 无缓存 70/20/10 混合负载（196,612 请求 0 失败，Hybrid Following P95 +34.37%，冷 SQL 推荐 P95 69.11–87.58ms），叠加未改路径 320 关注者 fanout 排空 1.264s | 已完成（见 [G07 交付报告](tasks/G07.md) 与 `feed-warm-cache-continuous-2026-11-10.json` / `feed-a04-mixed-2026-11-11.json`） |
 | CLOSE-02 / G10 / A10 | 正式规模 Gate A10 灾备验收通过（2,005 用户/20,010 视频/11,001 关注/50,002 互动，停写边界排空，RPO=0s，RTO=32.5s/35.6s，零资源残留） | 已完成（见 [G10 交付报告](tasks/G10.md) 与报告 `docs/benchmarks/close-02-recovery-report-2026-11-10.json`） |
-| CLOSE-03 / G12 | README、SDD、G07/G10/G12、RELEASE_ACCEPTANCE、TEST_STANDARD 与 OPERATIONS 统一 + A01–A12 精确链接；`verify_quiescence` P1 复现修复；本地 8 项 CI 等价验证、117 项诊断、`-race` 与双 API 探针全部通过；`LOCAL_STUDY_GUIDE.md` 保持忽略 | 本地 `gh` 令牌失效待用户授权后推送 PR，在远端 GitHub Actions 跑通最终头提交 8 项 CI 并合入 `main` 核对合并树一致 |
+| CLOSE-03 / G12 | README、SDD、G07/G10/G12、RELEASE_ACCEPTANCE、TEST_STANDARD 与 OPERATIONS 统一 + A01–A12 精确链接；`verify_quiescence` P1 复现修复；本地 8 项 CI 等价验证、117 项诊断、`-race` 与双 API 探针全部通过；`LOCAL_STUDY_GUIDE.md` 保持忽略 | 推送分支发起 PR，在远端 GitHub Actions 跑通最终头提交 8 项 CI 并合入 `main` 核对合并树一致 |
 
 G06 生产查询、G08 群聊、G09 故障及 G10 正式容灾的已提交实测保留；没有代码变化或证据缺口不重复跑。最终签收仍须把它们的命令、源码版本、环境和通过范围链接到发布报告，不把未关联版本的历史数据改写成当前复测。
 
@@ -69,9 +69,9 @@ G06 生产查询、G08 群聊、G09 故障及 G10 正式容灾的已提交实测
 **CLOSE-03：最终交付收口（本地验证与文档收口已完成，尚待远端 CI 与合入 `main`）**
 
 - [x] 完成 CLOSE-01/02 后，已统一 README、SDD、G07、G10、G12、RELEASE_ACCEPTANCE、TEST_STANDARD、OPERATIONS 与 PROGRESS 的当前状态，历史记录完整保留且标明历史；已在 [RELEASE_ACCEPTANCE](RELEASE_ACCEPTANCE.md) 2.1 节为 A01–A12 逐项链接精确源码、可执行命令与可复查报告。
-- [ ] 对最终候选完成配置静态检查/117 项诊断、Go 常规与 `-race` 回归及全部 8 项 CI **本地等价验证**（宿主机无系统 `/usr/bin/ffmpeg` 借宿主机 FFmpeg + `ffprobe_shim.py` 的边界已写清）；**尚待**：恢复 `gh` 凭据并推送分支，完成远端 GitHub Actions PR 最终头提交 CI 验证并合入 `main` 后核对合并树一致（不拿基线或旧 run 冒充新提交通过）。
+- [ ] 对最终候选完成配置静态检查/117 项诊断、Go 常规与 `-race` 回归及全部 8 项 CI **本地等价验证**（宿主机无系统 `/usr/bin/ffmpeg` 借宿主机 FFmpeg + `ffprobe_shim.py` 的边界已写清）；**尚待**：推送分支发起 PR，完成远端 GitHub Actions 最终头提交 CI 验证并合入 `main` 后核对合并树一致（不拿基线或旧 run 冒充新提交通过）。
 - [x] 已审查差异并修复 `verify_quiescence` P1（先加失败复现单测后修复，并通过全部 117 项诊断与 `sqlite` 实机核验）；`docs/LOCAL_STUDY_GUIDE.md` 保持在原目录且经 `git check-ignore -v` 与 `git ls-files` 验证未被跟踪；已核对 Demo Runbook 并运行 `acceptance_stack.py --probe-only` 验证双 API 联合栈启停与零残留。
-- [ ] 满足第 1 节发布条件（远端最终提交 CI + `main` 合并）后再宣告 `v1.0.0` 完成；当前阻断为 `gh auth status` 令牌失效，已在 [G12](tasks/G12.md) 第 4 节留下可直接执行的推送、CI 确认与合并核对命令。
+- [ ] 满足第 1 节发布条件（远端最终提交 CI + `main` 合并）后再宣告 `v1.0.0` 完成；已在 [G12](tasks/G12.md) 第 4 节列出推送 PR、远端 CI 确认与合并树核对流程。
 
 ## 3. 规格与代码边界
 
@@ -209,7 +209,7 @@ G06 生产查询、G08 群聊、G09 故障及 G10 正式容灾的已提交实测
 ### G12 发布候选与进展核查（本地闭环完成，待远端 PR CI 后合入 `main`，交付报告：[docs/tasks/G12.md](tasks/G12.md)）
 
 - [x] 整合所有任务报告，检查每个 A01–A12 和规定性能条目的证据、代码树与未验证限制；补齐 CLOSE-01/02/03 全部实测并统一索引。
-- [ ] 补齐远程 GitHub Actions CI 镜像验证与合并入 `main` 树一致性（本地 8 项 CI 等价套件、20,000 规模持续与冷混合压测及正式灾备均已在 `feat/close-03-final-delivery` 完成，待恢复 `gh` 凭据推送 PR 执行远端 CI）。
+- [ ] 补齐远程 GitHub Actions CI 镜像验证与合并入 `main` 树一致性（本地 8 项 CI 等价套件、20,000 规模持续与冷混合压测及正式灾备均已在 `feat/close-03-final-delivery` 完成，待 PR 触发远端 CI 通过并合入 `main`）。
 - [x] 形成 `docs/RELEASE_ACCEPTANCE.md`：版本、环境、任务/验收ID、A01–A12 精确源码/命令/报告索引、结果、已知限制、5–10分钟演示脚本（含保护 `.env` 守卫）。
 - [x] 更新 README 状态与 PROGRESS，准确记录 2026-11-08 复核及 2026-11-11 CLOSE-01/02/03 闭环结果。
 

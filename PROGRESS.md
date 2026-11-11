@@ -15,7 +15,7 @@ Last updated: 2026-11-11
   - `im-integration` (`ci-im-integration.json`, `498.888s`, exit 0): all 8 CI suites (`default`, `feed-cache`, `feed-cache-load`, `fanout-drain`, `load`, `load --race-load`, `group-load`, `--check-timeout-cleanup`) PASS.
   - `video-recovery-integration` & `browser-workflow`: host PATH lacks system `/usr/bin/ffmpeg` (CI uses `tools/install_ci_ffmpeg.sh`); ran via host FFmpeg binary + repo `tools/ffprobe_shim.py`: `test_media_matrix.py` (7 tests OK, 0 skipped), `video_recovery_restart.py` PASS, `web_action_counts.py`, `web_stored_session.py`, `web_group_sync.py`, and `web_full_flow.py` (`24/24` checkpoints PASS, `25.124s`).
   - Demo Compose dual-API probe (`acceptance_stack.py --probe-only`, `103.462s`, exit 0): fresh image build + `/health` & `/ready` across API A/B + zero cleanup residue (`containers=0, volumes=0, networks=0`).
-- **Remaining remote release gate**: `gh auth status` failed with an invalid token in `/home/lzq/.config/gh/hosts.yml`; push `feat/close-03-final-delivery`, run remote GitHub Actions CI on the final PR head, and merge into `main` (verifying merge tree consistency) before declaring `v1.0.0`.
+- **Remaining remote release gate**: Push `feat/close-03-final-delivery`, open the PR against `main`, confirm all 8 remote GitHub Actions CI jobs pass on the final PR head commit, and merge into `main` (verifying merge tree consistency) before declaring `v1.0.0`.
 
 2026-11-11 CLOSE-01 / G07 Final Feed Version Performance Acceptance (Gate A04 ACCEPTED):
 - Audited `TEST_STANDARD` A04 items against `git diff a6708f0..HEAD` on branch `feat/close-01-feed-performance` (commit `8bef0c56d5714eff480daa4c1bb597b43c3efde5`, clean tree):
