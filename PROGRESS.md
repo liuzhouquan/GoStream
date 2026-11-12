@@ -2,6 +2,13 @@
 
 Last updated: 2026-11-12
 
+2026-11-12 WEB-UI immersive browsing:
+- User-requested presentation maintenance after v1 delivery: dark stage/sidebar, custom SVG navigation, saved theater/grid selection, single muted active video, scroll/keyboard navigation, sound control, comment drawer/mobile sheet and five mobile tabs. Existing APIs/backend are unchanged; no external font request.
+- Kept original count/auth/group assertions. First local regressions caught a new body data-view/delegation collision; separated page state to data-page and restricted navigation matching. Viewport screenshots caught whole-page vertical overflow; the stage now fills the remaining flex height and owns scrolling.
+- New real-MP4 browser fixture PASS18 checks4.263s: autoplay exclusivity, node identity on pagination, keyboard focus, delayed comment-close fence, GET failure/manual retry, persistent layout,390px geometry, navigation/media cleanup and no JS errors.
+- Three existing browser regressions plus actual Go/SQLite/FFmpeg24-checkpoint flow PASS30.329s total (business flow21.218s). This local component uses the ffprobe shim over real FFmpeg and is not cross-instance acceptance. Final remote browser CI uses real system FFmpeg/ffprobe. Source/coverage summary docs/benchmarks/web-ui-2026-11-12.json; new test added to browser workflow. Owned preview/browser resources stopped.
+
+
 2026-11-12 v1.0 delivery handoff audit:
 - Freshly verified PR64 f9c9bf4/run42994024180/mergece0416f and PR65 c2283ad/run43060308009 attempt2/merge1dec28e: successful CI and identical merge trees. No open PRs at the check.
 - Correct active SDD/G12/post-risk/README/test-standard states left pending after actual merges. Align A10 acceptance numbers with the corrected formal JSON: SQL94,368,396B,131objects/5,959,014B,backup5.01s,ready58.47s,business/resume63.16s; replay separately verified.

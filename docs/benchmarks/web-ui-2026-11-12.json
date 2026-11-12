@@ -1,0 +1,61 @@
+{
+  "scope": "WEB-UI post-v1 presentation upgrade",
+  "base": "29a3299f1b1b3898a4bd50f8302f9f433786e6c5",
+  "runtime": "Go1.27.2 / agent-browser0.37.1 / Chromium",
+  "production_backend_changed": false,
+  "new_browser_regression": {
+    "scope": "browser_interaction_fixture_with_real_mp4",
+    "first_muted_autoplay": true,
+    "exclusive_playback": true,
+    "header_in_view": true,
+    "append_preserves_video_node": true,
+    "keyboard_ignores_input": true,
+    "keyboard_next_video": true,
+    "comment_drawer": true,
+    "escape_closes_comments": true,
+    "stale_comments_stay_closed": true,
+    "comment_failure_retry_control": true,
+    "comment_retry_recovers": true,
+    "grid_layout": true,
+    "layout_persisted": true,
+    "mobile_no_overflow": true,
+    "mobile_five_tabs": true,
+    "mobile_comment_sheet": true,
+    "navigation_stops_media": true,
+    "no_javascript_errors": true,
+    "status": "PASS"
+  },
+  "real_business_component": {
+    "mode": "sqlite",
+    "checkpoints": 24,
+    "all_passed": true,
+    "cross_instance_acceptance": false,
+    "elapsed_seconds": 21.218,
+    "probe": "real FFmpeg through repository ffprobe_shim; CI uses system ffprobe"
+  },
+  "existing_browser_regressions": [
+    "action count thresholds and error rollback",
+    "stored authentication validation",
+    "group sync/ACK ordering and recovery"
+  ],
+  "timing": {
+    "new_browse": {
+      "elapsed_seconds": 4.262,
+      "exit_code": 0,
+      "timed_out": false
+    },
+    "existing_and_full_flow": {
+      "elapsed_seconds": 30.328,
+      "exit_code": 0,
+      "timed_out": false
+    }
+  },
+  "source_sha256": {
+    "web/index.html": "35bc8acd5b480fba7cf09b0c80c58d52fe8552cddcc6f512289dd1fd4b1ef0b2",
+    "web/styles.css": "0cbbb08ab8e5ac8dc5986416d05d6ef985c464963077262bbfe9432e14826926",
+    "web/app.js": "c59fab5f28cb80eefb9358e7c841636932b8b6985ba911ac3be84ce1c8cbec4a",
+    "tests/integration/web_browse.py": "e393de98710fa115064884cdb677e4bcebfe68b4c760047c97e8e61f08a27e21"
+  },
+  "final_test_diagnostic_change": "named browser failure messages only; repeated browse checks pass",
+  "final_browse_check_seconds": 4.103
+}
