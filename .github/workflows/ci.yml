@@ -485,4 +485,5 @@ jobs:
           python3 tests/integration/web_action_counts.py
           python3 tests/integration/web_stored_session.py
           python3 tests/integration/web_group_sync.py
+          python3 tests/integration/web_browse.py
           python3 tests/integration/web_full_flow.py

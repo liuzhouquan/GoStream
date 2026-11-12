@@ -277,3 +277,8 @@ The full-size mixed read/write run [#41803621425](https://github.com/liuzhouquan
 正式 A10 不以新增夹具子集或总行数签收：停写后捕获全部表/列/行的确定性指纹，在目标 API 启动前精确核对，并对冻结备份重放迁移后再次比较。全部 SQL 媒体引用与完整源/目标对象清单、摘要必须一致；公共 import-local 非零且与100个有意共享的种子对象吻合。真实复验见 [JSON](benchmarks/pr64-recovery-verified-2026-11-11.json) 与 [审查](PR64_REVIEW_2026-11-11.md)。
 
 失败窗口入口：`python3 tests/integration/recovery_fault_windows.py --go-bin /usr/local/go/bin/go --report data/diagnostics/recovery-faults.json`。先用正式恢复入口或正常 Compose 构建当前生产 API 镜像；该脚本复用镜像，但每个窗口各自创建独占 Compose 项目。它运行实际 fixture 和恢复流程，在转储/SQL导入/对象恢复/API启动/迁移重放的调用接缝注入失败，另实际发送SIGTERM；每项检查无残留容器/卷/网络/host API、无陈旧PASS文件。它不以整体mock run_all代替阶段执行，也不声称模拟所有网络中断精确时序。
+
+
+## 前端浏览交互回归（WEB-UI维护）
+
+在已安装agent-browser及真实FFmpeg的环境执行 `python3 tests/integration/web_browse.py`。覆盖单视频播放、分页保留媒体节点、键盘输入隔离、评论迟到/错误恢复、布局偏好、390px布局和离页暂停。测试使用HTTP夹具和真实MP4，只证明浏览器交互，不替代A09真实业务或双API验收。`web_full_flow.py`、原有计数/会话/群同步脚本继续运行，CI的browser-workflow已加入新入口。实现/实测范围见 [WEB-UI](tasks/WEB-UI.md)。

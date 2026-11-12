@@ -10,6 +10,10 @@ The v1.0 scope has passed signoff: [PR #64](https://github.com/liuzhouquan/GoStr
 
 Historical development handoffs and scope criteria are preserved in [SDD and task checklist](docs/SDD.md), [delivery scope](docs/DELIVERY_SCOPE.md), [test standards](docs/TEST_STANDARD.md), and [PROGRESS.md](PROGRESS.md). The machine-readable contract is documented and dynamically validated in [OpenAPI 3.0.3](docs/openapi.yaml). For operations, migration runbooks, and disaster recovery procedures, consult [OPERATIONS.md](docs/OPERATIONS.md).
 
+## Web experience
+
+The static client defaults to an immersive video stage with scroll snapping, single-video muted autoplay, keyboard navigation (↑/↓ and Space), a sound toggle, and a comment drawer. A saved layout switch returns to the video grid. Mobile uses a five-item bottom navigation bar and a comment bottom sheet. Leaving a page or hiding the browser pauses playback. Existing registration, publishing, profile, search, notifications and chat flows remain available. See [UI scope and verification](docs/tasks/WEB-UI.md).
+
 ## Local requirements
 
 - Go 1.27.2 (the project toolchain declared in `go.mod`)

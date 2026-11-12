@@ -40,20 +40,189 @@ function toast(text) { const el=$('#toast');el.textContent=text;el.classList.add
 function setAuth(token,user) { state.token=token;state.user=user;localStorage.setItem('gostream.token',token);localStorage.setItem('gostream.user',JSON.stringify(user));renderSession();ensureSocket();$('#auth-dialog').close();toast(`欢迎来到 GoStream，${user.nickname}`);loadView(); }
 function clearAuth() { if(state.socketTimer)clearTimeout(state.socketTimer);if(state.heartbeatTimer)clearInterval(state.heartbeatTimer);state.socketTimer=null;state.heartbeatTimer=null;if(state.socket)state.socket.close();state.socket=null;state.groupID='';state.groupLoadID++;state.groupLoading=false;state.groupPendingLive=[];state.groupCursor=0;state.groupHasMore=false;state.groupLastAckID=0;state.groupAckedID=0;state.groupSyncing=false;state.groupSeenMessages.clear();state.chatPeer='';state.chatLoadID++;state.chatLoading=false;state.chatPendingLive=[];state.chatCursor=0;state.chatHasMore=false;state.notificationLoadID++;state.notificationCursor=0;state.notificationTopID=0;state.notificationHasMore=false;state.notificationLoading=false;state.token='';state.user=null;localStorage.removeItem('gostream.token');localStorage.removeItem('gostream.user');renderSession();loadView(); }
 function renderSession() { $('#session-state').textContent=state.user?`你好，${state.user.nickname}`:'游客浏览中';$('#auth-open').textContent=state.user?'退出登录':'登录 / 注册';$('#top-avatar').innerHTML=state.user?.avatar_url?`<img src="${esc(state.user.avatar_url)}" alt="头像" />`:esc(state.user?(state.user.nickname||'G').slice(0,1).toUpperCase():'G'); }
-function activate(view) { state.view=view;state.cursor='';document.querySelectorAll('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===view));$('#page-title').textContent=titles[view]||titles.feed;document.querySelectorAll('.scene').forEach(x=>x.classList.toggle('active',x.dataset.scene===state.scene));loadView(); }
+function activate(view) { stopFeedPlayback();feedRequestID++;state.view=view;syncPresentation();state.cursor='';document.querySelectorAll('.nav-item').forEach(x=>x.classList.toggle('active',x.dataset.view===view));$('#page-title').textContent=titles[view]||titles.feed;document.querySelectorAll('.scene').forEach(x=>x.classList.toggle('active',x.dataset.scene===state.scene));loadView(); }
 function formatCount(n=0) { if(n>=10000)return `${(n/10000).toFixed(1)}万`;if(n>=1000)return `${(n/1000).toFixed(1)}k`;return String(n); }
 function formatDuration(ms=0) { const seconds=Math.round(Number(ms)/1000);if(!Number.isFinite(seconds)||seconds<1)return '';return `${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`; }
 function processingFailureText(code) { return ({duration_limit:'视频超过 10 分钟',resolution_limit:'视频画面尺寸超过限制',invalid_duration:'无法读取视频时长',missing_video:'文件中没有可用视频画面',invalid_media:'视频文件无法解析'})[code]||'处理失败，请重新上传'; }
-function videoCard(v) {
-  const ready=v.status==='published';
-  const media=esc(v.media_url||'');
-  const failure=v.status==='failed'?processingFailureText(v.processing_error):'';
-  const body=ready&&/\.(mp4|webm|mov)(\?|$)/i.test(media)?`<video src="${media}" muted playsinline preload="metadata" controls${v.cover_url?` poster="${esc(v.cover_url)}"`:''}></video>`:`<div class="poster-fallback"><span>✳</span><small>${v.status==='failed'?failure:ready?'GOSTREAM ORIGINAL':'视频处理中'}</small></div>`;
-  const actions=ready?`<div class="card-actions"><button class="icon-action ${v.liked?'on':''}" data-action="like" data-id="${v.id}" data-count="${Number(v.like_count)||0}" title="点赞">${v.liked?'♥':'♡'} ${formatCount(v.like_count)}</button><button class="icon-action ${v.favorited?'on':''}" data-action="favorite" data-id="${v.id}" data-count="${Number(v.favorite_count)||0}" title="收藏">${v.favorited?'★':'☆'} ${formatCount(v.favorite_count)}</button><button class="icon-action" data-action="comment" data-id="${v.id}" data-count="${v.comment_count}" title="评论">◌ ${formatCount(v.comment_count)}</button></div>`:'';
-  return `<article class="video-card" data-video="${v.id}"><div class="poster">${body}${ready?`<button class="play-overlay" data-play="${v.id}">▶</button>`:''}<div class="poster-caption"><span class="category">${esc(v.author?.nickname||'CREATOR')}</span><h3>${esc(v.title)}</h3></div></div><div class="card-footer"><div class="creator"><span class="mini-avatar">${esc((v.author?.nickname||'G').slice(0,1).toUpperCase())}</span><div class="creator-info"><span class="creator-name">${esc(v.author?.nickname||'创作者')}</span><span class="creator-meta">${ready?`▶ ${formatCount(v.play_count)} 次播放${v.duration_ms?` · ${formatDuration(v.duration_ms)}`:''}`:v.status==='failed'?failure:'处理中'}</span></div></div>${actions}</div><div class="comment-slot" id="comments-${v.id}"></div></article>`;
+// Browsing presentation is independent of the persisted business/IM state.
+const isFeedView = () => ['feed', 'following', 'hot'].includes(state.view);
+let feedObserver = null;
+let activeFeedCard = null;
+let feedRequestID = 0;
+let resumeOnVisible = false;
+const countedVideos = new WeakSet();
+let browseLayout = localStorage.getItem('gostream.layout') === 'grid' ? 'grid' : 'theater';
+let mutedPlayback = true;
+const icon = name => `<svg class="icon" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+function actionMarkup(action, active, count) {
+  const symbol = action === 'like' ? (active ? '♥' : '♡') : action === 'favorite' ? (active ? '★' : '☆') : '◌';
+  return `<span class="action-symbol" aria-hidden="true">${symbol}</span> <span class="action-count">${formatCount(count)}</span>`;
 }
-async function loadFeed(scene=state.scene) { const append=Boolean(state.cursor);const previous=append?[...content.children].filter(x=>!x.matches('.load-more')).map(x=>x.outerHTML).join(''):'';state.scene=scene;document.querySelectorAll('.scene').forEach(x=>x.classList.toggle('active',x.dataset.scene===scene));const data=await api(`/api/feed?scene=${encodeURIComponent(scene)}&limit=18${state.cursor?`&cursor=${encodeURIComponent(state.cursor)}`:''}`);state.cursor=data.next_cursor||'';const cards=(data.items||[]).map(videoCard).join('');content.innerHTML=previous+(cards||(!append?'<div class="empty-state"><div class="dialog-kicker">YOUR NEXT FAVORITE</div><h2>这里还没有视频</h2><p>发布一段视频，开始构建你的社区。</p></div>':''));if(data.has_more)content.insertAdjacentHTML('beforeend','<button class="primary-button load-more">加载更多</button>'); }
-async function loadView() { if(state.loading)return;state.loading=true;content.innerHTML='<div class="empty-state">正在加载…</div>';try { if(['feed','following','hot'].includes(state.view)){const scene=state.view==='feed'?state.scene:state.view;await loadFeed(scene);}else if(state.view==='upload')renderUpload();else if(state.view==='notifications')await renderNotifications();else if(state.view==='chat')await renderChat();else if(state.view==='profile')await renderProfile();else if(state.view==='search')renderSearch();}catch(e){content.innerHTML=`<div class="empty-state"><h2>暂时无法加载</h2><p>${esc(e.message)}</p>${!state.token?'<button class="primary-button" data-auth="open">登录 GoStream</button>':''}</div>`;}finally{state.loading=false;} }
+function syncPresentation() {
+  document.body.dataset.page = state.view;
+  document.body.dataset.layout = browseLayout;
+  content.classList.toggle('theater-feed', isFeedView() && browseLayout === 'theater');
+  document.querySelectorAll('[data-layout-choice]').forEach(button => {
+    const selected = button.dataset.layoutChoice === browseLayout;
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+  document.querySelectorAll('.nav-item').forEach(button => button.setAttribute('aria-current', button.dataset.view === state.view ? 'page' : 'false'));
+}
+function stopFeedPlayback() {
+  feedObserver?.disconnect();
+  feedObserver = null;
+  content.querySelectorAll('video').forEach(video => video.pause());
+  activeFeedCard = null;
+  resumeOnVisible = false;
+}
+function updateFeedPosition() {
+  const cards = [...content.querySelectorAll(':scope > .video-card')];
+  const index = Math.max(0, cards.indexOf(activeFeedCard));
+  $('#feed-position').textContent = cards.length ? `${String(index + 1).padStart(2, '0')} / ${String(cards.length).padStart(2, '0')}` : '—';
+  $('[data-video-step="-1"]').disabled = !cards.length || index === 0;
+  $('[data-video-step="1"]').disabled = !cards.length || (index === cards.length - 1 && !$('.load-more', content));
+}
+function playQuietly(video) {
+  if (!video || document.hidden) return;
+  video.muted = mutedPlayback;
+  video.loop = true;
+  video.play().catch(() => { /* Keep the explicit play control when autoplay is blocked. */ });
+}
+function setupFeedPlayback() {
+  feedObserver?.disconnect();
+  if (!isFeedView() || browseLayout !== 'theater') { updateFeedPosition(); return; }
+  feedObserver = new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      const card = entry.target;
+      if (!card.isConnected) continue;
+      if (entry.intersectionRatio >= .65) {
+        activeFeedCard = card;
+        content.querySelectorAll('video').forEach(video => { if (video.closest('.video-card') !== card) video.pause(); });
+        playQuietly($('video', card));
+        updateFeedPosition();
+      } else if (card === activeFeedCard && entry.intersectionRatio < .25) {
+        $('video', card)?.pause();
+      }
+    }
+  }, { root: content, threshold: [.25, .65] });
+  content.querySelectorAll(':scope > .video-card').forEach(card => feedObserver.observe(card));
+  updateFeedPosition();
+}
+async function stepVideo(direction) {
+  if (!isFeedView() || browseLayout !== 'theater') return;
+  let cards = [...content.querySelectorAll(':scope > .video-card')];
+  const index = Math.max(0, cards.indexOf(activeFeedCard));
+  if (direction > 0 && index === cards.length - 1) {
+    const more = $('.load-more', content);
+    if (more && !more.disabled) {
+      more.disabled = true;
+      try { await loadFeed(state.scene); } catch (error) { more.disabled = false; throw error; }
+      cards = [...content.querySelectorAll(':scope > .video-card')];
+    }
+  }
+  const next = cards[Math.max(0, Math.min(cards.length - 1, index + direction))];
+  next?.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
+}
+function closeComments(videoID) {
+  const slot = $(`#comments-${videoID}`);
+  if (!slot) return;
+  slot.dataset.open = 'false';
+  slot.dataset.loadID = String(Number(slot.dataset.loadID || 0) + 1);
+  slot.innerHTML = '';
+  slot.closest('.video-card')?.classList.remove('comments-open');
+  const trigger = $(`[data-action="comment"][data-id="${videoID}"]`);
+  trigger?.setAttribute('aria-expanded', 'false');
+  trigger?.focus({preventScroll:true});
+}
+document.addEventListener('play', event => {
+  const video = event.target;
+  if (!(video instanceof HTMLVideoElement) || !content.contains(video)) return;
+  content.querySelectorAll('video').forEach(other => { if (other !== video) other.pause(); });
+  video.closest('.poster').dataset.playing = 'true';
+  if (!countedVideos.has(video)) {
+    countedVideos.add(video);
+    const id = video.closest('[data-video]')?.dataset.video;
+    if (id) api(`/api/videos/${id}/views`, { method: 'POST' }).catch(() => {});
+  }
+}, true);
+document.addEventListener('pause', event => {
+  if (event.target instanceof HTMLVideoElement && content.contains(event.target)) event.target.closest('.poster').dataset.playing = 'false';
+}, true);
+document.addEventListener('error', event => {
+  if (event.target instanceof HTMLVideoElement && content.contains(event.target)) {
+    const message = $('.playback-message', event.target.closest('.poster'));
+    if (message) { message.textContent = '视频暂时无法播放，可尝试下一条'; message.hidden = false; }
+  }
+}, true);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    resumeOnVisible = Boolean(activeFeedCard && !$('video', activeFeedCard)?.paused);
+    content.querySelectorAll('video').forEach(video => video.pause());
+  } else if (resumeOnVisible && activeFeedCard?.isConnected && isFeedView() && browseLayout === 'theater') {
+    resumeOnVisible = false;
+    playQuietly($('video', activeFeedCard));
+  }
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && !document.querySelector('dialog[open]')) {
+    const open = $('.video-card.comments-open', content);
+    if (open) { const id = open.dataset.video; closeComments(id); $(`[data-action="comment"][data-id="${id}"]`)?.focus(); }
+    return;
+  }
+  if (!isFeedView() || browseLayout !== 'theater' || document.querySelector('dialog[open]') || event.ctrlKey || event.metaKey || event.altKey || event.target.closest?.('input, textarea, select, button, video, [contenteditable="true"]')) return;
+  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault(); stepVideo(event.key === 'ArrowDown' ? 1 : -1).catch(error => toast(error.message));
+  } else if (event.code === 'Space' && activeFeedCard) {
+    event.preventDefault(); const video = $('video', activeFeedCard); if (video) video.paused ? playQuietly(video) : video.pause();
+  }
+});
+$('#sound-toggle').addEventListener('click', () => {
+  mutedPlayback = !mutedPlayback;
+  content.querySelectorAll('video').forEach(video => { video.muted = mutedPlayback; });
+  $('#sound-toggle').setAttribute('aria-label', mutedPlayback ? '开启声音' : '关闭声音');
+  $('#sound-toggle').setAttribute('aria-pressed', String(!mutedPlayback));
+  $('#sound-toggle').innerHTML = icon(mutedPlayback ? 'mute' : 'volume');
+});
+$('#top-upload').addEventListener('click', () => activate('upload'));
+$('#top-notifications').addEventListener('click', () => activate('notifications'));
+
+function videoCard(v) {
+  const ready = v.status === 'published';
+  const media = esc(v.media_url || '');
+  const name = v.author?.nickname || '创作者';
+  const failure = v.status === 'failed' ? processingFailureText(v.processing_error) : '';
+  const body = ready && /\.(mp4|webm|mov)(\?|$)/i.test(media)
+    ? `<video src="${media}" muted playsinline preload="metadata" controls${v.cover_url ? ` poster="${esc(v.cover_url)}"` : ''} aria-label="${esc(v.title)}"></video>`
+    : `<div class="poster-fallback">${icon('play')}<small>${v.status === 'failed' ? failure : ready ? '发现值得分享的瞬间' : '视频处理中'}</small></div>`;
+  const actions = ready ? `<div class="card-actions">${['like', 'favorite', 'comment'].map(action => {
+    const active = action === 'like' ? v.liked : action === 'favorite' ? v.favorited : false;
+    const count = Number(v[`${action}_count`]) || 0;
+    const label = { like: '点赞', favorite: '收藏', comment: '评论' }[action];
+    return `<button class="icon-action ${active ? 'on' : ''}" data-action="${action}" data-id="${v.id}" data-count="${count}" title="${label}" aria-label="${label}"${action === 'comment' ? ` aria-expanded="false" aria-controls="comments-${v.id}"` : ` aria-pressed="${Boolean(active)}"`}>${actionMarkup(action, active, count)}</button>`;
+  }).join('')}</div>` : '';
+  const avatar = v.author?.avatar_url ? `<img src="${esc(v.author.avatar_url)}" alt="" loading="lazy" />` : esc(name.slice(0, 1).toUpperCase());
+  return `<article class="video-card" data-video="${v.id}" aria-label="${esc(v.title)}"><div class="poster">${body}${ready ? `<button class="play-overlay" data-play="${v.id}" aria-label="播放或暂停视频">${icon('play')}</button><p class="playback-message" role="status" hidden></p>` : ''}<div class="poster-caption"><span class="category">@${esc(name)}</span><h3>${esc(v.title)}</h3>${v.description ? `<p class="video-description">${esc(v.description)}</p>` : ''}</div></div><div class="card-footer"><div class="creator"><span class="mini-avatar" title="${esc(name)}">${avatar}</span><div class="creator-info"><span class="creator-name">${esc(name)}</span><span class="creator-meta">${ready ? `${formatCount(v.play_count)} 次播放${v.duration_ms ? ` · ${formatDuration(v.duration_ms)}` : ''}` : v.status === 'failed' ? failure : '处理中'}</span></div></div>${actions}</div><div class="comment-slot" id="comments-${v.id}" role="region" aria-label="视频评论"></div></article>`;
+}
+async function loadFeed(scene = state.scene) {
+  const append = Boolean(state.cursor), requestID = ++feedRequestID, view = state.view;
+  state.scene = scene;
+  document.querySelectorAll('.scene').forEach(button => button.classList.toggle('active', button.dataset.scene === scene));
+  const data = await api(`/api/feed?scene=${encodeURIComponent(scene)}&limit=18${state.cursor ? `&cursor=${encodeURIComponent(state.cursor)}` : ''}`);
+  if (requestID !== feedRequestID || view !== state.view) return;
+  state.cursor = data.next_cursor || '';
+  const cards = (data.items || []).map(videoCard).join('');
+  if (append) {
+    $('.load-more', content)?.remove();
+    content.insertAdjacentHTML('beforeend', cards);
+  } else {
+    content.innerHTML = cards || `<div class="empty-state"><div class="empty-icon">${icon('play')}</div><div class="dialog-kicker">每一种热爱，都值得分享</div><h2>精彩，从你的第一条视频开始</h2><p>这里还没有视频。记录生活中的小确幸，或分享你的拿手好戏，让更多人遇见你。</p><button class="primary-button" data-empty-upload>发布第一条作品</button></div>`;
+    content.scrollTop = 0;
+  }
+  if (data.has_more) content.insertAdjacentHTML('beforeend', '<button class="primary-button load-more">加载更多</button>');
+  setupFeedPlayback();
+}
+async function loadView() { if(state.loading){state.queuedView=true;return;}state.loading=true;stopFeedPlayback();syncPresentation();content.setAttribute('aria-busy','true');content.innerHTML='<div class="empty-state">正在加载…</div>';try { if(['feed','following','hot'].includes(state.view)){const scene=state.view==='feed'?state.scene:state.view;await loadFeed(scene);}else if(state.view==='upload')renderUpload();else if(state.view==='notifications')await renderNotifications();else if(state.view==='chat')await renderChat();else if(state.view==='profile')await renderProfile();else if(state.view==='search')renderSearch();}catch(e){content.innerHTML=`<div class="empty-state"><h2>暂时无法加载</h2><p>${esc(e.message)}</p>${!state.token?'<button class="primary-button" data-auth="open">登录 GoStream</button>':''}</div>`;}finally{state.loading=false;content.setAttribute('aria-busy','false');if(state.queuedView){state.queuedView=false;loadView();}} }
 function renderUpload(){if(!state.token){content.innerHTML='<div class="empty-state"><h2>登录后发布作品</h2><button class="primary-button" data-auth="open">登录 / 注册</button></div>';return;}content.innerHTML=`<section class="panel"><span class="pill">CREATOR STUDIO · 01</span><h2>发布一段好内容</h2><p>选择视频并填写简介。上传支持分片和断点续传；启用视频处理时，视频最长 10 分钟、画面总像素不超过 3840×2160，转码完成后作品会加入公开 Feed。</p><form id="upload-form" class="form-grid"><label>视频文件<input name="file" type="file" accept="video/mp4,video/webm,video/quicktime" required /></label><label>作品标题<input name="title" maxlength="120" placeholder="给这段内容起个标题" required /></label><label>简介<textarea name="description" maxlength="2000" placeholder="说说视频背后的故事"></textarea></label><button class="primary-button">上传并发布 →</button><p id="upload-progress" role="status"></p></form></section>`;}
 async function uploadResumable(file, progress=$('#upload-progress')) {
   if(file.size<1 || file.size>250*1024*1024) throw new Error('视频大小必须在 1 字节至 250 MiB 之间');
@@ -159,7 +328,7 @@ async function renderChat(){
   if(!state.token){content.innerHTML='<div class="empty-state"><h2>登录后开始聊天</h2><button class="primary-button" data-auth="open">登录 / 注册</button></div>';return;}
   const groups=await api('/api/groups');
   state.groups=groups.items||[];
-  content.innerHTML=`<section class="panel"><span class="pill">REALTIME · WEBSOCKET</span><h2>即时消息</h2><p>私信和群消息会先保存，再尝试实时投递。离线消息可从历史记录读取。</p><h3>单聊</h3><div class="form-grid"><label>聊天对象用户 ID<input id="chat-peer" type="number" min="1" placeholder="对方的用户 ID" value="${esc(state.chatPeer)}" /></label><button class="primary-button" data-chat-connect>加载聊天历史</button></div><p id="chat-presence" role="status"></p><button id="chat-more" class="text-button chat-more" data-chat-more hidden>加载更早的私信</button><div id="chat-log" class="message-list"></div><form id="chat-form" class="form-grid"><label>发送私信<textarea name="body" maxlength="4000" required></textarea></label><button class="primary-button">发送 →</button></form><h3 class="chat-section-title">群聊</h3><form id="group-create-form" class="form-grid"><label>新群名称<input name="name" maxlength="80" placeholder="例如 Go 后端学习群" required /></label><button class="primary-button">创建群聊</button></form><div id="group-list" class="group-list">${(groups.items||[]).map(g=>`<button class="text-button group-chip" data-group-open="${g.id}">${esc(g.name)} · #${g.id}</button>`).join('')||'<p>还没有加入群聊。</p>'}</div><div id="group-panel"></div></section>`;
+  content.innerHTML=`<section class="panel"><span class="pill">聊聊此刻</span><h2>即时消息</h2><p>和朋友分享新发现，也可以创建一个小群，聊聊共同的热爱。</p><h3>单聊</h3><div class="form-grid"><label>聊天对象用户 ID<input id="chat-peer" type="number" min="1" placeholder="对方的用户 ID" value="${esc(state.chatPeer)}" /></label><button class="primary-button" data-chat-connect>加载聊天历史</button></div><p id="chat-presence" role="status"></p><button id="chat-more" class="text-button chat-more" data-chat-more hidden>加载更早的私信</button><div id="chat-log" class="message-list"></div><form id="chat-form" class="form-grid"><label>发送私信<textarea name="body" maxlength="4000" required></textarea></label><button class="primary-button">发送 →</button></form><h3 class="chat-section-title">群聊</h3><form id="group-create-form" class="form-grid"><label>新群名称<input name="name" maxlength="80" placeholder="例如 Go 后端学习群" required /></label><button class="primary-button">创建群聊</button></form><div id="group-list" class="group-list">${(groups.items||[]).map(g=>`<button class="text-button group-chip" data-group-open="${g.id}">${esc(g.name)} · #${g.id}</button>`).join('')||'<p>还没有加入群聊。</p>'}</div><div id="group-panel"></div></section>`;
   ensureSocket();
   if(state.chatPeer)connectChat().catch(err=>toast(err.message));
   if(state.groupID)openGroup(state.groupID).catch(err=>toast(err.message));
@@ -415,6 +584,9 @@ function appendGroupMessage(m){
   // completeness from consecutive numbers or best-effort live hints.
   syncGroupMessages(state.groupID).catch(()=>{});
 }
+function commentHeading(videoID) {
+  return `<div class="comment-heading"><h2>评论</h2><button data-close-comments="${videoID}" aria-label="关闭评论">${icon('close')}</button></div>`;
+}
 function commentForm(videoID, parentID='') {
   if (!state.token) return '<button class="text-button" data-auth="open">登录后参与讨论</button>';
   const parent = parentID ? ` data-parent-id="${parentID}"` : '';
@@ -430,8 +602,10 @@ async function loadComments(videoID, append=false) {
   const slot=$(`#comments-${videoID}`);
   if (!slot) return;
   const cursor=append?slot.dataset.nextCursor||'':'';
+  const loadID=String(Number(slot.dataset.loadID||0)+1);slot.dataset.loadID=loadID;
   const data=await api(`/api/videos/${videoID}/comments?limit=20${cursor?`&cursor=${encodeURIComponent(cursor)}`:''}`);
-  if (!append) slot.innerHTML=`<div class="comment-list"></div>${commentForm(videoID)}<button class="text-button comment-more" data-comment-more="${videoID}" hidden>加载更多评论</button>`;
+  if(!slot.isConnected||slot.dataset.loadID!==loadID||slot.dataset.open==='false')return;
+  if (!append) slot.innerHTML=`${commentHeading(videoID)}<div class="comment-list"></div>${commentForm(videoID)}<button class="text-button comment-more" data-comment-more="${videoID}" hidden>加载更多评论</button>`;
   slot.querySelector('.comment-list').insertAdjacentHTML('beforeend',(data.items||[]).map(c=>commentRow(c,videoID)).join('')||(!append?'<p class="comment-empty">还没有评论，来写第一条吧。</p>':''));
   slot.dataset.nextCursor=data.next_cursor||'';
   slot.querySelector('.comment-more').hidden=!data.has_more;
@@ -454,17 +628,18 @@ function incrementCommentCounter(videoID) {
   if (!button) return;
   const count=Number(button.dataset.count||0)+1;
   button.dataset.count=String(count);
-  button.textContent=`◌ ${formatCount(count)}`;
+  button.innerHTML=actionMarkup('comment', false, count);
 }
-document.addEventListener('click',async e=>{const nav=e.target.closest('[data-view]');if(nav){activate(nav.dataset.view);return;}const scene=e.target.closest('[data-scene]');if(scene){state.view='feed';state.cursor='';$('#page-title').textContent=titles.feed;await loadFeed(scene.dataset.scene);return;}if(e.target.closest('[data-auth="open"]')||e.target.id==='auth-open'&&!state.user){$('#auth-dialog').showModal();return;}if(e.target.id==='auth-open'&&state.user){clearAuth();toast('已退出登录');return;}const edit=e.target.closest('[data-edit-video]');if(edit){try{const v=await api(`/api/videos/${edit.dataset.editVideo}`);const slot=$(`#edit-video-${v.id}`);slot.innerHTML=`<form class="form-grid video-edit-form" data-video-id="${v.id}"><label>标题<input name="title" maxlength="120" value="${esc(v.title)}" required /></label><label>简介<textarea name="description" maxlength="2000">${esc(v.description||'')}</textarea></label><button class="primary-button">保存视频</button></form>`;}catch(err){toast(err.message);}return;}
+document.addEventListener('click',async e=>{const layout=e.target.closest('[data-layout-choice]');if(layout){stopFeedPlayback();browseLayout=layout.dataset.layoutChoice;localStorage.setItem('gostream.layout',browseLayout);syncPresentation();content.scrollTop=0;setupFeedPlayback();return;}const step=e.target.closest('[data-video-step]');if(step){stepVideo(Number(step.dataset.videoStep)).catch(err=>toast(err.message));return;}const close=e.target.closest('[data-close-comments]');if(close){closeComments(close.dataset.closeComments);return;}if(e.target.closest('.brand')){e.preventDefault();activate('feed');return;}if(e.target.closest('[data-empty-upload]')){activate('upload');return;}const nav=e.target.closest('.nav-item[data-view]');if(nav){activate(nav.dataset.view);return;}const scene=e.target.closest('[data-scene]');if(scene){state.scene=scene.dataset.scene;activate('feed');return;}if(e.target.closest('[data-auth="open"]')||e.target.id==='auth-open'&&!state.user){$('#auth-dialog').showModal();return;}if(e.target.id==='auth-open'&&state.user){clearAuth();toast('已退出登录');return;}const edit=e.target.closest('[data-edit-video]');if(edit){try{const v=await api(`/api/videos/${edit.dataset.editVideo}`);const slot=$(`#edit-video-${v.id}`);slot.innerHTML=`<form class="form-grid video-edit-form" data-video-id="${v.id}"><label>标题<input name="title" maxlength="120" value="${esc(v.title)}" required /></label><label>简介<textarea name="description" maxlength="2000">${esc(v.description||'')}</textarea></label><button class="primary-button">保存视频</button></form>`;}catch(err){toast(err.message);}return;}
 if(e.target.closest('[data-refresh-profile]')){renderProfile().catch(err=>toast(err.message));return;}
 const retrySource=e.target.closest('[data-retry-source]');if(retrySource){retrySource.disabled=true;try{const video=await api(`/api/videos/${retrySource.dataset.retrySource}`);if(video.status!=='failed')throw new Error('视频状态已更新，请刷新页面');const result=await api(`/api/videos/${video.id}`,{method:'PATCH',body:JSON.stringify({media_url:video.media_url})});if(result.status!=='processing')throw new Error('视频处理服务未启用');toast('已重新提交处理');await renderProfile();}catch(err){toast(err.message);}finally{retrySource.disabled=false;}return;}
 const remove=e.target.closest('[data-delete-video]');if(remove){if(!confirm('确定删除这个视频吗？'))return;try{await api(`/api/videos/${remove.dataset.deleteVideo}`,{method:'DELETE'});toast('视频已删除');renderProfile();}catch(err){toast(err.message);}return;}
+const commentRetry=e.target.closest('[data-comment-retry]');if(commentRetry){commentRetry.disabled=true;try{await loadComments(commentRetry.dataset.commentRetry);}catch(err){toast(err.message);}finally{commentRetry.disabled=false;}return;}
 const commentMore=e.target.closest('[data-comment-more]');if(commentMore){commentMore.disabled=true;try{await loadComments(commentMore.dataset.commentMore,true);}catch(err){toast(err.message);}finally{commentMore.disabled=false;}return;}
 const replyMore=e.target.closest('[data-reply-more]');if(replyMore){const videoID=replyMore.dataset.videoId,parentID=replyMore.dataset.replyMore;replyMore.disabled=true;replyMore.remove();try{await loadReplies(videoID,parentID,true);}catch(err){const list=$(`#comments-${videoID} [data-comment-id="${parentID}"] .reply-list`);if(list)list.append(replyMore);replyMore.disabled=false;toast(err.message);}return;}
 const replies=e.target.closest('[data-replies]');if(replies){const thread=replies.closest('.comment-thread'),list=thread.querySelector('.reply-list');if(thread.dataset.repliesLoaded){list.hidden=!list.hidden;}else{try{await loadReplies(replies.dataset.videoId,replies.dataset.replies);}catch(err){toast(err.message);}}return;}
 const replyTo=e.target.closest('[data-reply-to]');if(replyTo){const slot=replyTo.closest('.comment-thread').querySelector('.reply-form-slot');slot.hidden=!slot.hidden;if(!slot.hidden)slot.querySelector('input')?.focus();return;}
-const act=e.target.closest('[data-action]');if(act){try{if(act.dataset.action==='like'||act.dataset.action==='favorite'){if(!state.token){$('#auth-dialog').showModal();return;}if(act.disabled)return;act.disabled=true;try{const active=!act.classList.contains('on');await api(`/api/videos/${act.dataset.id}/${act.dataset.action}`,{method:active?'PUT':'DELETE'});act.classList.toggle('on',active);const count=Math.max(0,Number(act.dataset.count||0)+(active?1:-1));act.dataset.count=String(count);const icon=act.dataset.action==='like'?(active?'♥':'♡'):(active?'★':'☆');act.textContent=`${icon} ${formatCount(count)}`;}finally{act.disabled=false;}}else{const slot=$(`#comments-${act.dataset.id}`);if(slot.innerHTML){slot.innerHTML='';return;}slot.innerHTML='正在加载评论…';await loadComments(act.dataset.id);}}catch(err){toast(err.message);}return;}if(e.target.closest('.load-more')){state.cursor=state.cursor||'';loadFeed(state.scene);return;}const follow=e.target.closest('[data-follow]');if(follow){if(!state.token){$('#auth-dialog').showModal();return;}try{await api(`/api/users/me/following/${follow.dataset.follow}`,{method:'PUT'});follow.textContent='已关注';follow.disabled=true;}catch(err){toast(err.message);}return;}if(e.target.closest('[data-notification-more]')){loadMoreNotifications().catch(err=>toast(err.message));return;}if(e.target.closest('[data-read-all]')){try{const upTo=state.notificationTopID;if(!upTo)return;await api(`/api/notifications/read?up_to_id=${upTo}`,{method:'PATCH'});toast('当前通知已标记为已读');await renderNotifications();}catch(err){toast(err.message);}return;}if(e.target.closest('[data-chat-connect]')){state.chatPeer=$('#chat-peer').value;connectChat().catch(err=>toast(err.message));return;}if(e.target.closest('[data-chat-more]')){loadOlderMessages().catch(err=>toast(err.message));return;}if(e.target.closest('[data-group-more]')){loadOlderGroupMessages().catch(err=>toast(err.message));return;}const open=e.target.closest('[data-group-open]');if(open){openGroup(open.dataset.groupOpen).catch(err=>toast(err.message));return;}const leave=e.target.closest('[data-group-leave]');if(leave){try{await api(`/api/groups/${leave.dataset.groupLeave}/members/${state.user.id}`,{method:'DELETE'});state.groupID='';state.groupLoadID++;state.groupLoading=false;state.groupPendingLive=[];state.groupSeenMessages.clear();state.groupCursor=0;state.groupHasMore=false;state.groupLastAckID=0;state.groupAckedID=0;await renderChat();toast('已退出群聊');}catch(err){toast(err.message);}return;}if(e.target.closest('[data-play]')){const v=e.target.closest('.poster').querySelector('video');if(v){v.paused?v.play():v.pause();api(`/api/videos/${e.target.closest('[data-play]').dataset.play}/views`,{method:'POST'}).catch(()=>{});}return;}});
+const act=e.target.closest('[data-action]');if(act){try{if(act.dataset.action==='like'||act.dataset.action==='favorite'){if(!state.token){$('#auth-dialog').showModal();return;}if(act.disabled)return;act.disabled=true;try{const active=!act.classList.contains('on');await api(`/api/videos/${act.dataset.id}/${act.dataset.action}`,{method:active?'PUT':'DELETE'});act.classList.toggle('on',active);const count=Math.max(0,Number(act.dataset.count||0)+(active?1:-1));act.dataset.count=String(count);act.innerHTML=actionMarkup(act.dataset.action, active, count);act.setAttribute('aria-pressed',String(active));}finally{act.disabled=false;}}else{const slot=$(`#comments-${act.dataset.id}`);if(slot.closest('.video-card').classList.contains('comments-open')){closeComments(act.dataset.id);return;}slot.dataset.open='true';slot.closest('.video-card').classList.add('comments-open');act.setAttribute('aria-expanded','true');slot.innerHTML=`${commentHeading(act.dataset.id)}<p class="comment-empty" role="status">正在加载评论…</p>`;try{await loadComments(act.dataset.id);}catch(err){if(slot.isConnected&&slot.dataset.open==='true')slot.innerHTML=`${commentHeading(act.dataset.id)}<p class="comment-empty">评论暂时无法加载</p><button class="text-button" data-comment-retry="${act.dataset.id}">重新加载评论</button>`;throw err;}}}catch(err){toast(err.message);}return;}if(e.target.closest('.load-more')){const button=e.target.closest('.load-more');if(button.disabled)return;button.disabled=true;try{await loadFeed(state.scene);}catch(err){toast(err.message);}finally{button.disabled=false;}return;}const follow=e.target.closest('[data-follow]');if(follow){if(!state.token){$('#auth-dialog').showModal();return;}try{await api(`/api/users/me/following/${follow.dataset.follow}`,{method:'PUT'});follow.textContent='已关注';follow.disabled=true;}catch(err){toast(err.message);}return;}if(e.target.closest('[data-notification-more]')){loadMoreNotifications().catch(err=>toast(err.message));return;}if(e.target.closest('[data-read-all]')){try{const upTo=state.notificationTopID;if(!upTo)return;await api(`/api/notifications/read?up_to_id=${upTo}`,{method:'PATCH'});toast('当前通知已标记为已读');await renderNotifications();}catch(err){toast(err.message);}return;}if(e.target.closest('[data-chat-connect]')){state.chatPeer=$('#chat-peer').value;connectChat().catch(err=>toast(err.message));return;}if(e.target.closest('[data-chat-more]')){loadOlderMessages().catch(err=>toast(err.message));return;}if(e.target.closest('[data-group-more]')){loadOlderGroupMessages().catch(err=>toast(err.message));return;}const open=e.target.closest('[data-group-open]');if(open){openGroup(open.dataset.groupOpen).catch(err=>toast(err.message));return;}const leave=e.target.closest('[data-group-leave]');if(leave){try{await api(`/api/groups/${leave.dataset.groupLeave}/members/${state.user.id}`,{method:'DELETE'});state.groupID='';state.groupLoadID++;state.groupLoading=false;state.groupPendingLive=[];state.groupSeenMessages.clear();state.groupCursor=0;state.groupHasMore=false;state.groupLastAckID=0;state.groupAckedID=0;await renderChat();toast('已退出群聊');}catch(err){toast(err.message);}return;}if(e.target.closest('[data-play]')){const v=e.target.closest('.poster').querySelector('video');if(v){v.paused?playQuietly(v):v.pause();}return;}});
 document.addEventListener('submit',async e=>{e.preventDefault();const form=e.target;try{if(form.id==='auth-form'){const fd=new FormData(form),register=$('#auth-submit').dataset.mode==='register';const data=await api(register?'/api/users':'/api/sessions',{method:'POST',body:JSON.stringify({username:fd.get('username'),password:fd.get('password'),nickname:fd.get('nickname')})});setAuth(data.access_token,data.user);}else if(form.id==='upload-form'){const fd=new FormData(form),file=fd.get('file');const url=await uploadResumable(file);const published=await api('/api/videos',{method:'POST',body:JSON.stringify({title:fd.get('title'),description:fd.get('description'),media_url:url})});localStorage.removeItem(`gostream.upload.${state.user.id}.${file.name}.${file.size}.${file.lastModified}`);toast(published.status==='processing'?'视频处理中，请在个人主页查看进度':'作品已发布');activate(published.status==='processing'?'profile':'feed');}else if(form.id==='profile-form'){const fd=new FormData(form);const fields={nickname:fd.get('nickname'),bio:fd.get('bio')};const avatar=fd.get('avatar');if(avatar?.size)fields.avatar_url=await uploadAvatar(avatar);state.user=await api('/api/users/me',{method:'PATCH',body:JSON.stringify(fields)});localStorage.setItem('gostream.user',JSON.stringify(state.user));toast('个人资料已保存');renderProfile();}else if(form.classList.contains('video-edit-form')){const fd=new FormData(form);await api(`/api/videos/${form.dataset.videoId}`,{method:'PATCH',body:JSON.stringify({title:fd.get('title'),description:fd.get('description')})});toast('视频资料已更新');renderProfile();}else if(form.classList.contains('video-retry-form')){const file=form.elements.file.files[0];if(!file)throw new Error('请选择新的视频文件');const button=form.querySelector('button');button.disabled=true;try{const url=await uploadResumable(file,form.querySelector('.retry-progress'));const result=await api(`/api/videos/${form.dataset.videoId}`,{method:'PATCH',body:JSON.stringify({media_url:url})});if(result.status!=='processing'&&result.status!=='published')throw new Error('视频处理服务未启用');localStorage.removeItem(`gostream.upload.${state.user.id}.${file.name}.${file.size}.${file.lastModified}`);toast(result.status==='processing'?'已重新提交处理':'视频已发布');await renderProfile();}finally{button.disabled=false;}}else if(form.classList.contains('comment-form')){const videoID=form.dataset.commentVideo,parentID=form.dataset.parentId;await api(`/api/videos/${videoID}/comments`,{method:'POST',body:JSON.stringify({body:new FormData(form).get('body'),...(parentID?{parent_id:Number(parentID)}:{})})});form.reset();incrementCommentCounter(videoID);if(parentID){await loadReplies(videoID,parentID);const button=$(`#comments-${videoID} [data-comment-id="${parentID}"] [data-replies]`);if(button){const count=Number(button.dataset.replyCount||0)+1;button.dataset.replyCount=String(count);button.textContent=`查看回复 (${count})`;}form.closest('.reply-form-slot').hidden=true;toast('回复已发布');}else{await loadComments(videoID);toast('评论已发布');}}else if(form.id==='group-create-form'){const group=await api('/api/groups',{method:'POST',body:JSON.stringify({name:new FormData(form).get('name')})});state.groupID=String(group.id);await renderChat();toast('群聊已创建');}else if(form.id==='group-add-form'){await api(`/api/groups/${state.groupID}/members`,{method:'POST',body:JSON.stringify({user_id:Number(new FormData(form).get('user_id'))})});form.reset();toast('成员已添加');}else if(form.id==='group-remove-form'){const userID=Number(new FormData(form).get('user_id'));await api(`/api/groups/${state.groupID}/members/${userID}`,{method:'DELETE'});form.reset();toast('成员已移除');}else if(form.id==='group-send-form'){const body=new FormData(form).get('body');if(!state.socket||state.socket.readyState!==1)throw new Error('群聊连接中，请稍后重试');state.socket.send(JSON.stringify({type:'group_message',client_id:crypto.randomUUID(),group_id:Number(state.groupID),body}));appendGroupMessage({sender_id:state.user.id,body,created_at:new Date().toISOString()});form.reset();}else if(form.id==='chat-form'){const body=new FormData(form).get('body');if(!state.socket||state.socket.readyState!==1)throw new Error('请先连接聊天');const client_id=crypto.randomUUID();state.socket.send(JSON.stringify({type:'message',client_id,recipient_id:Number(state.chatPeer),body}));appendMessage({sender_id:state.user.id,recipient_id:Number(state.chatPeer),client_id,body,created_at:new Date().toISOString()});form.reset();}}catch(err){toast(err.message);}});
 $('#auth-form').addEventListener('submit',()=>{});
 document.addEventListener('submit',async e=>{
