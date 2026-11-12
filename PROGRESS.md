@@ -2,6 +2,13 @@
 
 Last updated: 2026-11-12
 
+2026-11-12 v1.0 delivery handoff audit:
+- Freshly verified PR64 f9c9bf4/run42994024180/mergece0416f and PR65 c2283ad/run43060308009 attempt2/merge1dec28e: successful CI and identical merge trees. No open PRs at the check.
+- Correct active SDD/G12/post-risk/README/test-standard states left pending after actual merges. Align A10 acceptance numbers with the corrected formal JSON: SQL94,368,396B,131objects/5,959,014B,backup5.01s,ready58.47s,business/resume63.16s; replay separately verified.
+- Preserve old delivery scope and failed performance history in docs/history/DELIVERY_SCOPE_2026-11-06.md; current scope and DELIVERY_STATUS identify completed work versus historical unresolved attribution. Demo normal teardown retains volumes.
+- Refresh the ignored local study guide with final code paths, four short learning exercises and interview measurement limits. Guide remains untracked; no production source or benchmark JSON changed. Documentation validation PASS:262 relative links, both exact merge trees, canonical A10 numbers and ignored study guide; all four documented short Go exercises pass. Long A04/A10 suites are not rerun for prose edits.
+
+
 2026-11-12 PR65 CI mirror reachability:
 - Second run43058017410 confirmed source rewrite, but archive HTTPS still timed out. Add bounded complete InRelease probes over IPv4 to three official origins (8s each), select a reachable origin, align apt network path, preserve signing and90s/240s apt bounds; no reachable origin => explicit failure. Actual shell fixture tests cover fallback/all-unreachable without touching host apt. Final135 diagnostics PASS; do not infer a specific historical IPv6 cause.
 

@@ -1,6 +1,6 @@
 # POST-RISKS：发布后待确认风险完善
 
-Owner：集成 agent。基线 `ce0416ff0d964a5d0264ce79e0b6c0a6404d9fd6`（PR #64 合并）。分支 `fix/post-release-diagnostics`。状态：实现、本地验证完成；远端验收以本 PR 最终提交的 CI 为准。
+Owner：集成 agent。基线 `ce0416ff0d964a5d0264ce79e0b6c0a6404d9fd6`（PR #64 合并）。分支 `fix/post-release-diagnostics`。状态：已合并并验收。PR65最终head `c2283ad` 在 run43060308009 attempt2 八项CI全部success，合并为 `1dec28e`，合并树一致。历史EOF精确归因仍待复现，见 [当前签收](../DELIVERY_STATUS.md)。
 
 本轮不重新打开 v1.0 的业务清单。证据摘要：[JSON](../benchmarks/post-release-risk-checks-2026-11-12.json)，原始日志留在忽略的 `data/diagnostics/`；本地学习指南继续忽略。
 
